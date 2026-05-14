@@ -1,0 +1,49 @@
+# Python cache and local tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local virtual environments
+.venv/
+venv/
+env/
+engines/*/.venv/
+
+# Build, obfuscation, and release outputs
+build/
+dist/
+dist_portable/
+release/
+releases/
+*.zip
+*.7z
+*.tar.gz
+
+# Runtime caches and downloaded model assets
+.hf_cache/
+models/
+
+# App runtime data
+outputs/
+logs/
+voices/
+config/ui_tkinter.json
+
+# Local license secrets and generated customer licenses
+secrets/
+config/license_private_key.pem
+*.license-private.pem
+license.json
+*license*.json
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/

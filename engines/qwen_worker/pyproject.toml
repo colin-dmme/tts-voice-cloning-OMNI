@@ -1,0 +1,25 @@
+[project]
+name = "qwen-worker"
+version = "0.1.0"
+description = "Isolated Qwen3-TTS worker for Omni TTS Local."
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "qwen-tts>=0.1.0",
+    "soundfile>=0.12.1",
+    "torch>=2.7.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true

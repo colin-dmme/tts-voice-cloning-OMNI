@@ -1,0 +1,128 @@
+models_root: "models"
+
+tts_models:
+  omnivoice_vietnamese:
+    display_name: "OmniVoice Vietnamese"
+    provider: "omnivoice"
+    model_type: "tts"
+    local_path: "models/omnivoice/vietnamese/splendor1811__omnivoice-vietnamese"
+    hf_repo: "splendor1811/omnivoice-vietnamese"
+    language_priority: "vi"
+    required: true
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    notes: "Model chính cho tiếng Việt, dùng cá nhân/học tập."
+
+  omnivoice_base:
+    display_name: "OmniVoice Base"
+    provider: "omnivoice"
+    model_type: "tts"
+    local_path: "models/omnivoice/base/k2-fsa__OmniVoice"
+    hf_repo: "k2-fsa/OmniVoice"
+    language_priority: "multilingual"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    notes: "Model nền đa ngôn ngữ, dùng tốt cho tiếng Anh và thử nghiệm."
+
+  vieneu_v2_standard:
+    display_name: "VieNeu TTS v2 Standard"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-v2"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    notes: "Engine VieNeu chất lượng cao qua worker riêng; cài bằng install_vieneu_worker.bat."
+
+  vieneu_v2_turbo:
+    display_name: "VieNeu TTS v2 Turbo"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-v2-Turbo"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    notes: "Engine VieNeu nhanh, hỗ trợ code-switching và clone giọng không cần transcript trong worker riêng."
+
+  qwen3_tts_06b_base:
+    display_name: "Qwen3 TTS 0.6B Base"
+    provider: "qwen"
+    model_type: "tts"
+    local_path: "models/qwen/qwen3-tts-12hz-0.6b-base"
+    hf_repo: "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+    language_priority: "multilingual"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"]
+      supports_voice_profile: true
+      requires_voice_profile: true
+      supports_reference_text: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    notes: "Engine Qwen3-TTS thử nghiệm, ưu tiên clone voice bằng Profile giọng; phù hợp tiếng Anh và các ngôn ngữ Qwen hỗ trợ chính thức."
+
+  qwen3_tts_17b_base:
+    display_name: "Qwen3 TTS 1.7B Base"
+    provider: "qwen"
+    model_type: "tts"
+    local_path: "models/qwen/qwen3-tts-12hz-1.7b-base"
+    hf_repo: "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+    language_priority: "multilingual"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"]
+      supports_voice_profile: true
+      requires_voice_profile: true
+      supports_reference_text: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    notes: "Engine Qwen3-TTS clone voice chất lượng cao hơn nhưng nặng hơn; nên thử 0.6B trước."
+
+support_models:
+  higgs_audio_v2_tokenizer:
+    display_name: "Higgs Audio V2 Tokenizer"
+    provider: "huggingface"
+    model_type: "tokenizer"
+    local_path: "models/tokenizer/higgs-audio-v2-tokenizer"
+    hf_repo: "eustlb/higgs-audio-v2-tokenizer"
+    language_priority: "multilingual"
+    required: true
+    notes: "Tokenizer âm thanh bắt buộc cho OmniVoice nếu model không chứa thư mục audio_tokenizer."
+
+  chunkformer_vie:
+    display_name: "ChunkFormer Vietnamese ASR"
+    provider: "chunkformer"
+    model_type: "asr"
+    local_path: "models/asr/chunkformer-ctc-large-vie"
+    hf_repo: "khanhld/chunkformer-ctc-large-vie"
+    language_priority: "vi"
+    required: false
+    notes: "Dành cho căn timestamp SRT chính xác hơn ở giai đoạn sau."

@@ -1,0 +1,21 @@
+app:
+  name: "Colin TTS Local"
+  version: "0.1.0"
+  host: "127.0.0.1"
+  port: 7860
+  contact:
+    title: "Colin TTS Local"
+    subtitle: "Liên hệ hỗ trợ cài đặt, license và xử lý lỗi."
+    telegram: "t.me/colin2104"
+    facebook: "https://www.facebook.com/colin.214"
+
+paths:
+  models_root: "models"
+  voices_root: "voices"
+  outputs_root: "outputs/jobs"
+
+generation:
+  default_language: "vi"
+  default_model_id: "omnivoice_vietnamese"
+  sentence_pause_ms: 450
+  max_chunk_chars: 220

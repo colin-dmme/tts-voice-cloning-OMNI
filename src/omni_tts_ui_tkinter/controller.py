@@ -69,6 +69,39 @@ class TkinterController:
     def model_capabilities(self, model_id: str) -> ModelCapabilities:
         return self.service.model_capabilities(model_id)
 
+    def model_supports_codec(self, model_id: str) -> bool:
+        return self.service.supports_vieneu_codec(model_id)
+
+    def model_supports_sampling(self, model_id: str) -> bool:
+        return self.service.supports_vieneu_sampling(model_id)
+
+    def default_vieneu_temperature(self, model_id: str) -> float:
+        return self.service.default_vieneu_temperature(model_id)
+
+    def default_vieneu_top_k(self, model_id: str) -> int:
+        return self.service.default_vieneu_top_k(model_id)
+
+    def vieneu_codec_choices(self, model_id: str) -> list[tuple[str, str]]:
+        return self.service.list_vieneu_codecs(model_id)
+
+    def default_vieneu_codec_repo(self, model_id: str) -> str | None:
+        return self.service.default_vieneu_codec_repo(model_id)
+
+    def valid_vieneu_codec_repo(self, model_id: str, codec_repo: str | None) -> str | None:
+        return self.service.valid_vieneu_codec_repo(model_id, codec_repo)
+
+    def voice_preset_choices(self, model_id: str, include_none: bool = True) -> list[tuple[str, str]]:
+        return self.service.list_voice_presets(model_id, include_none=include_none)
+
+    def default_voice_preset_id(self, model_id: str) -> str | None:
+        return self.service.default_voice_preset_id(model_id)
+
+    def has_voice_presets(self, model_id: str) -> bool:
+        return self.service.has_voice_presets(model_id)
+
+    def valid_voice_preset_id(self, model_id: str, preset_id: str | None) -> str | None:
+        return self.service.valid_voice_preset_id(model_id, preset_id)
+
     def runtime_status_text(self, model_id: str) -> str:
         status = self.service.runtime_status_for(model_id)
         installed = "đã cài" if status.installed else "chưa cài"

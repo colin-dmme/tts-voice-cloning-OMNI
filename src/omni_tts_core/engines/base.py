@@ -13,9 +13,13 @@ class TtsEngineRequest:
     language: str
     reference_audio_path: Path | None
     reference_text: str | None
+    speaker_id: str | None
     speed: float
     pitch_shift: float
     emotion: str = "natural"
+    codec_repo: str | None = None
+    temperature: float | None = None
+    top_k: int | None = None
     cancel_event: Event | None = None
 
 

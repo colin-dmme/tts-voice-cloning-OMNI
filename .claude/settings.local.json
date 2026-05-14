@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem \"C:\\\\Coder\\\\tts-voice-cloning-OMNI\" -Depth 4 | Where-Object { !$_.PSIsContainer -and $_.FullName -notmatch '\\(\\\\.hf_cache|\\\\.venv|__pycache__|\\\\.git\\)' } | Select-Object -ExpandProperty FullName | Sort-Object)"
+    ]
+  }
+}

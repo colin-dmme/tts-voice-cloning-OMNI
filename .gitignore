@@ -13,6 +13,8 @@ htmlcov/
 venv/
 env/
 engines/*/.venv/
+engines/*/vendor/
+engines/*/pretrained/
 
 # Build, obfuscation, and release outputs
 build/

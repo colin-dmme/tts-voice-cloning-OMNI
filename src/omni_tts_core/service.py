@@ -8,6 +8,7 @@ from omni_tts_core.config import AppSettings
 from omni_tts_core.engines.base import TtsEngineRequest
 from omni_tts_core.engines.omnivoice_engine import OmniVoiceEngine
 from omni_tts_core.engines.qwen_engine import QwenSubprocessEngine
+from omni_tts_core.engines.valtec_engine import ValtecSubprocessEngine
 from omni_tts_core.engines.vieneu_engine import VieneuSubprocessEngine
 from omni_tts_core.jobs.store import JobStore
 from omni_tts_core.model_registry import ModelRegistry, ModelSpec
@@ -29,6 +30,8 @@ from omni_tts_shared.schemas import (
     SegmentTiming,
     VoiceProfile,
 )
+from omni_tts_shared.voice_presets import NO_VOICE_PRESET_ID, NO_VOICE_PRESET_LABEL
+from omni_tts_shared.vieneu_codecs import ONNX_CODEC_REPO, codec_choices, valid_codec_repo
 
 
 class TtsService:
@@ -45,7 +48,10 @@ class TtsService:
         self.runtime_status = RuntimeStatusService(self.registry, self.storage)
         self.voice_profiles = voice_profiles or VoiceProfileManager()
         self.job_store = JobStore(self.settings.outputs_root)
-        self._engines: dict[str, OmniVoiceEngine | VieneuSubprocessEngine | QwenSubprocessEngine] = {}
+        self._engines: dict[
+            str,
+            OmniVoiceEngine | VieneuSubprocessEngine | QwenSubprocessEngine | ValtecSubprocessEngine,
+        ] = {}
 
     def list_voice_profiles(self) -> list[VoiceProfile]:
         return self.voice_profiles.list_profiles()
@@ -86,6 +92,63 @@ class TtsService:
     def model_capabilities(self, model_id: str):
         return self.registry.get(model_id).capabilities
 
+    def model_provider(self, model_id: str) -> str:
+        return self.registry.get(model_id).provider
+
+    def supports_vieneu_codec(self, model_id: str) -> bool:
+        spec = self.registry.get(model_id)
+        return spec.provider == "vieneu" and bool(spec.runtime.get("codec_repo"))
+
+    def supports_vieneu_sampling(self, model_id: str) -> bool:
+        return self.registry.get(model_id).provider == "vieneu"
+
+    def default_vieneu_temperature(self, model_id: str) -> float:
+        spec = self.registry.get(model_id)
+        return float(spec.runtime.get("temperature") or 1.0) if spec.provider == "vieneu" else 1.0
+
+    def default_vieneu_top_k(self, model_id: str) -> int:
+        spec = self.registry.get(model_id)
+        return int(spec.runtime.get("top_k") or 50) if spec.provider == "vieneu" else 50
+
+    def list_vieneu_codecs(self, model_id: str) -> list[tuple[str, str]]:
+        if not self.supports_vieneu_codec(model_id):
+            return []
+        return codec_choices()
+
+    def default_vieneu_codec_repo(self, model_id: str) -> str | None:
+        spec = self.registry.get(model_id)
+        if not self.supports_vieneu_codec(model_id):
+            return None
+        return valid_codec_repo(str(spec.runtime.get("codec_repo") or "")) or codec_choices()[0][1]
+
+    def valid_vieneu_codec_repo(self, model_id: str, codec_repo: str | None) -> str | None:
+        if not self.supports_vieneu_codec(model_id):
+            return None
+        return valid_codec_repo(codec_repo)
+
+    def list_voice_presets(self, model_id: str, include_none: bool = True) -> list[tuple[str, str]]:
+        spec = self.registry.get(model_id)
+        choices = [(label, preset_id) for preset_id, label in spec.voice_presets.items()]
+        if include_none:
+            return [(NO_VOICE_PRESET_LABEL, NO_VOICE_PRESET_ID), *choices]
+        return choices
+
+    def default_voice_preset_id(self, model_id: str) -> str | None:
+        spec = self.registry.get(model_id)
+        if spec.default_voice_preset in spec.voice_presets:
+            return spec.default_voice_preset
+        return next(iter(spec.voice_presets), None)
+
+    def has_voice_presets(self, model_id: str) -> bool:
+        spec = self.registry.get(model_id)
+        return spec.capabilities.supports_voice_presets and bool(spec.voice_presets)
+
+    def valid_voice_preset_id(self, model_id: str, preset_id: str | None) -> str | None:
+        if not preset_id:
+            return None
+        spec = self.registry.get(model_id)
+        return preset_id if preset_id in spec.voice_presets else None
+
     def runtime_status_for(self, model_id: str) -> RuntimeStatus:
         return self.runtime_status.status_for(model_id)
 
@@ -122,6 +185,10 @@ class TtsService:
             if spec.provider == "vieneu":
                 raise ModelMissingError(
                     f"{spec.display_name} chưa được cài. Hãy chạy install_vieneu_worker.bat."
+                )
+            if spec.provider == "valtec":
+                raise ModelMissingError(
+                    f"{spec.display_name} chưa được cài. Hãy chạy install_valtec_worker.bat."
                 )
             raise ModelMissingError(
                 f"Model chưa có trong dự án: {spec.display_name}. Hãy tải model trước."
@@ -186,9 +253,13 @@ class TtsService:
                     language=request.language,
                     reference_audio_path=_clean_path(request.reference_audio_path),
                     reference_text=request.reference_text,
+                    speaker_id=request.speaker_id,
                     speed=request.speed,
                     pitch_shift=request.pitch_shift,
                     emotion=request.emotion,
+                    codec_repo=_codec_repo_for_request(request, spec),
+                    temperature=request.temperature if spec.provider == "vieneu" else None,
+                    top_k=request.top_k if spec.provider == "vieneu" else None,
                     cancel_event=cancel_event,
                 )
             )
@@ -277,7 +348,10 @@ class TtsService:
         )
         return self._generate_split_units(request, units, progress_callback, cancel_event)
 
-    def _engine_for(self, spec: ModelSpec) -> OmniVoiceEngine | VieneuSubprocessEngine | QwenSubprocessEngine:
+    def _engine_for(
+        self,
+        spec: ModelSpec,
+    ) -> OmniVoiceEngine | VieneuSubprocessEngine | QwenSubprocessEngine | ValtecSubprocessEngine:
         if spec.model_id not in self._engines:
             if spec.provider == "omnivoice":
                 self._engines[spec.model_id] = OmniVoiceEngine(spec)
@@ -285,6 +359,8 @@ class TtsService:
                 self._engines[spec.model_id] = VieneuSubprocessEngine(spec)
             elif spec.provider == "qwen":
                 self._engines[spec.model_id] = QwenSubprocessEngine(spec)
+            elif spec.provider == "valtec":
+                self._engines[spec.model_id] = ValtecSubprocessEngine(spec)
             else:
                 raise ConfigError(f"Provider chưa được hỗ trợ: {spec.provider}")
         return self._engines[spec.model_id]
@@ -296,6 +372,7 @@ class TtsService:
         update = {
             "reference_audio_path": profile.audio_path,
             "reference_text": profile.transcript or request.reference_text,
+            "speaker_id": None,
         }
         return request.model_copy(update=update)
 
@@ -440,6 +517,35 @@ def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec)
     if caps.supports_emotion and caps.emotions and request.emotion not in caps.emotions:
         options = ", ".join(caps.emotions)
         raise ConfigError(f"Cảm xúc không hợp lệ cho {spec.display_name}: {options}.")
+    if caps.supports_voice_presets and not request.speaker_id and not _clean_path(request.reference_audio_path):
+        if caps.supports_voice_profile:
+            raise ConfigError(f"Hãy chọn Preset giọng hoặc Profile giọng cho {spec.display_name}.")
+        raise ConfigError(f"{spec.display_name} cần chọn Preset giọng.")
+    if request.speaker_id and request.speaker_id not in spec.voice_presets:
+        raise ConfigError(f"Preset giọng không hợp lệ cho {spec.display_name}.")
+    _validate_vieneu_codec(request, spec)
+
+
+def _validate_vieneu_codec(request: GenerateSpeechRequest, spec: ModelSpec) -> None:
+    if spec.provider != "vieneu":
+        return
+    if not request.codec_repo:
+        return
+    if not spec.runtime.get("codec_repo"):
+        raise ConfigError(f"{spec.display_name} dùng codec riêng, không hỗ trợ chọn NeuCodec.")
+    if not valid_codec_repo(request.codec_repo):
+        raise ConfigError("Codec VieNeu không hợp lệ.")
+    if _clean_path(request.reference_audio_path) and request.codec_repo == ONNX_CODEC_REPO:
+        raise ConfigError(
+            "NeuCodec ONNX Fast CPU không encode được audio mẫu để clone giọng. "
+            "Hãy chọn NeuCodec Standard hoặc NeuCodec Distill khi dùng Profile giọng."
+        )
+
+
+def _codec_repo_for_request(request: GenerateSpeechRequest, spec: ModelSpec) -> str | None:
+    if spec.provider != "vieneu" or not spec.runtime.get("codec_repo"):
+        return None
+    return valid_codec_repo(request.codec_repo) or None
 
 
 def _scale_progress(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from omni_tts_core.config import load_yaml_config
 from omni_tts_core.paths import project_path
@@ -20,6 +21,9 @@ class ModelSpec:
     language_priority: str
     required: bool = False
     notes: str = ""
+    runtime: dict[str, Any] = field(default_factory=dict)
+    voice_presets: dict[str, str] = field(default_factory=dict)
+    default_voice_preset: str | None = None
     capabilities: ModelCapabilities = field(default_factory=ModelCapabilities)
 
 
@@ -67,5 +71,15 @@ class ModelRegistry:
             language_priority=str(raw.get("language_priority", "multilingual")),
             required=bool(raw.get("required", False)),
             notes=str(raw.get("notes", "")),
+            runtime=dict(raw.get("runtime", {}) or {}),
+            voice_presets={
+                str(key): str(value)
+                for key, value in (raw.get("voice_presets", {}) or {}).items()
+            },
+            default_voice_preset=(
+                None
+                if raw.get("default_voice_preset") is None
+                else str(raw.get("default_voice_preset"))
+            ),
             capabilities=ModelCapabilities(**(raw.get("capabilities", {}) or {})),
         )

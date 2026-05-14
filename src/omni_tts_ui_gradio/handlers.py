@@ -9,6 +9,10 @@ from omni_tts_core.service import TtsService
 from omni_tts_shared.errors import OmniTtsError
 from omni_tts_shared.languages import LANGUAGE_LABELS
 from omni_tts_shared.schemas import GenerateSpeechRequest, ModelStatus
+from omni_tts_shared.voice_presets import (
+    NO_VOICE_PRESET_ID,
+)
+from omni_tts_shared.vieneu_codecs import NO_CODEC_ID, NO_CODEC_LABEL
 
 
 service = TtsService()
@@ -28,6 +32,45 @@ def voice_profile_choices() -> list[tuple[str, str]]:
     return choices
 
 
+def speaker_choices_for_model(model_id: str) -> list[tuple[str, str]]:
+    caps = service.model_capabilities(model_id)
+    return service.list_voice_presets(model_id, include_none=caps.supports_voice_profile)
+
+
+def default_voice_preset_id(model_id: str) -> str | None:
+    return service.default_voice_preset_id(model_id)
+
+
+def has_voice_presets(model_id: str) -> bool:
+    return service.has_voice_presets(model_id)
+
+
+def model_supports_codec(model_id: str) -> bool:
+    return service.supports_vieneu_codec(model_id)
+
+
+def model_supports_sampling(model_id: str) -> bool:
+    return service.supports_vieneu_sampling(model_id)
+
+
+def codec_choices_for_model(model_id: str) -> list[tuple[str, str]]:
+    if not service.supports_vieneu_codec(model_id):
+        return [(NO_CODEC_LABEL, NO_CODEC_ID)]
+    return service.list_vieneu_codecs(model_id)
+
+
+def default_codec_repo(model_id: str) -> str:
+    return service.default_vieneu_codec_repo(model_id) or NO_CODEC_ID
+
+
+def default_temperature(model_id: str) -> float:
+    return service.default_vieneu_temperature(model_id)
+
+
+def default_top_k(model_id: str) -> int:
+    return service.default_vieneu_top_k(model_id)
+
+
 def language_choices_for_model(model_id: str) -> list[tuple[str, str]]:
     caps = service.model_capabilities(model_id)
     return [(LANGUAGE_LABELS.get(item, item), item) for item in caps.supported_languages]
@@ -44,6 +87,8 @@ def generation_control_updates(model_id: str, current_language: str):
     caps = service.model_capabilities(model_id)
     choices = [(LANGUAGE_LABELS.get(item, item), item) for item in caps.supported_languages]
     language = current_language if current_language in caps.supported_languages else caps.supported_languages[0]
+    preset_value = service.default_voice_preset_id(model_id) or NO_VOICE_PRESET_ID
+    preset_active = service.has_voice_presets(model_id)
     return (
         gr.update(choices=choices, value=language),
         gr.update(value=1.0, interactive=caps.supports_speed),
@@ -52,8 +97,38 @@ def generation_control_updates(model_id: str, current_language: str):
             value=(caps.emotions or ["natural"])[0],
             interactive=caps.supports_emotion,
         ),
-        gr.update(interactive=caps.supports_voice_profile),
+        gr.update(value="", interactive=caps.supports_voice_profile and not preset_active),
+        gr.update(
+            choices=speaker_choices_for_model(model_id),
+            value=preset_value,
+            interactive=preset_active,
+        ),
+        gr.update(
+            choices=codec_choices_for_model(model_id),
+            value=default_codec_repo(model_id),
+            interactive=service.supports_vieneu_codec(model_id),
+        ),
+        gr.update(value=default_temperature(model_id), interactive=service.supports_vieneu_sampling(model_id)),
+        gr.update(value=default_top_k(model_id), interactive=service.supports_vieneu_sampling(model_id)),
     )
+
+
+def profile_changed_updates(voice_profile_id: str, model_id: str):
+    if voice_profile_id:
+        return gr.update(value=NO_VOICE_PRESET_ID, interactive=False)
+    default_preset = service.default_voice_preset_id(model_id) or NO_VOICE_PRESET_ID
+    return gr.update(
+        choices=speaker_choices_for_model(model_id),
+        value=default_preset,
+        interactive=service.has_voice_presets(model_id),
+    )
+
+
+def speaker_changed_updates(speaker_id: str, model_id: str):
+    caps = service.model_capabilities(model_id)
+    if service.valid_voice_preset_id(model_id, speaker_id):
+        return gr.update(value="", interactive=False)
+    return gr.update(interactive=caps.supports_voice_profile)
 
 
 def refresh_model_table() -> list[list[Any]]:
@@ -109,11 +184,15 @@ def generate_speech(
     text: str,
     language: str,
     model_id: str,
+    codec_repo: str,
     voice_profile_id: str,
     reference_audio: str | None,
     reference_text: str,
+    speaker_id: str,
     speed: float,
     emotion: str,
+    temperature: float,
+    top_k: int,
     sentence_pause_ms: int,
     max_chunk_chars: int,
     split_output: bool,
@@ -126,11 +205,15 @@ def generate_speech(
             text=text,
             language=language,
             model_id=model_id,
+            codec_repo=service.valid_vieneu_codec_repo(model_id, codec_repo),
             voice_profile_id=voice_profile_id or None,
             reference_audio_path=_audio_path(reference_audio),
             reference_text=reference_text.strip() or None,
+            speaker_id=_speaker_id(model_id, speaker_id, voice_profile_id),
             speed=float(speed),
             emotion=emotion,
+            temperature=float(temperature) if service.supports_vieneu_sampling(model_id) else None,
+            top_k=int(top_k) if service.supports_vieneu_sampling(model_id) else None,
             sentence_pause_ms=int(sentence_pause_ms),
             max_chunk_chars=int(max_chunk_chars),
             output_mode="split" if split_output else "merged",
@@ -165,3 +248,9 @@ def _audio_path(value: str | None) -> Path | None:
     if not value:
         return None
     return Path(value)
+
+
+def _speaker_id(model_id: str, value: str | None, voice_profile_id: str | None) -> str | None:
+    if voice_profile_id:
+        return None
+    return service.valid_voice_preset_id(model_id, value)

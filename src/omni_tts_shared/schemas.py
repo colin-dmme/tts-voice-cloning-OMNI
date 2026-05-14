@@ -27,6 +27,7 @@ class ModelCapabilities(BaseModel):
     supported_languages: list[LanguageCode] = Field(default_factory=lambda: ["vi", "en"])
     supports_voice_profile: bool = True
     requires_voice_profile: bool = False
+    supports_voice_presets: bool = False
     supports_reference_text: bool = True
     supports_speed: bool = False
     supports_pitch_shift: bool = False
@@ -52,9 +53,13 @@ class GenerateSpeechRequest(BaseModel):
     voice_profile_id: str | None = None
     reference_audio_path: Path | None = None
     reference_text: str | None = None
+    speaker_id: str | None = None
     speed: float = Field(default=1.0, ge=0.5, le=1.8)
     pitch_shift: float = Field(default=0.0, ge=-12.0, le=12.0)
     emotion: str = "natural"
+    codec_repo: str | None = None
+    temperature: float | None = Field(default=None, ge=0.1, le=2.0)
+    top_k: int | None = Field(default=None, ge=1, le=200)
     sentence_pause_ms: int = Field(default=450, ge=0, le=3000)
     max_chunk_chars: int = Field(default=220, ge=60, le=800)
     output_dir: Path | None = None

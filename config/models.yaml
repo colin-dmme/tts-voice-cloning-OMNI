@@ -47,10 +47,27 @@ tts_models:
       supported_languages: ["auto", "vi", "en"]
       supports_voice_profile: true
       supports_reference_text: true
+      supports_voice_presets: true
       supports_speed: false
       supports_pitch_shift: false
       supports_emotion: true
       emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-v2"
+      gguf_filename: "VieNeu-TTS-v2-Q4-K-M.gguf"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    default_voice_preset: "Ly"
+    voice_presets:
+      Binh: "Thanh Bình - Nam miền Bắc"
+      Tuyen: "Phạm Tuyên - Nam miền Bắc"
+      Vinh: "Xuân Vĩnh - Nam miền Nam"
+      Doan: "Thục Đoan - Nữ miền Nam"
+      Ly: "Trúc Ly - Nữ miền Bắc"
+      Sơn: "Thái Sơn - Nam miền Nam"
+      Ngoc: "Bích Ngọc - Nữ miền Bắc"
     notes: "Engine VieNeu chất lượng cao qua worker riêng; cài bằng install_vieneu_worker.bat."
 
   vieneu_v2_turbo:
@@ -65,10 +82,200 @@ tts_models:
       supported_languages: ["auto", "vi", "en"]
       supports_voice_profile: true
       supports_reference_text: true
+      supports_voice_presets: true
       supports_speed: false
       supports_pitch_shift: false
       supports_emotion: false
+    runtime:
+      vieneu_mode: "turbo"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-v2-Turbo-GGUF"
+      backbone_filename: "vieneu-tts-v2-turbo.gguf"
+      decoder_repo: "pnnbao-ump/VieNeu-Codec"
+      decoder_filename: "vieneu_decoder.onnx"
+      encoder_repo: "pnnbao-ump/VieNeu-Codec"
+      encoder_filename: "vieneu_encoder.onnx"
+      device: "cpu"
+    default_voice_preset: "Xuân Vĩnh (Nam - Miền Nam)"
+    voice_presets:
+      "Bích Ngọc (Nữ - Miền Bắc)": "Bích Ngọc - Nữ miền Bắc"
+      "Phạm Tuyên (Nam - Miền Bắc)": "Phạm Tuyên - Nam miền Bắc"
+      "Thục Đoan (Nữ - Miền Nam)": "Thục Đoan - Nữ miền Nam"
+      "Xuân Vĩnh (Nam - Miền Nam)": "Xuân Vĩnh - Nam miền Nam"
     notes: "Engine VieNeu nhanh, hỗ trợ code-switching và clone giọng không cần transcript trong worker riêng."
+
+  vieneu_v2_turbo_gguf:
+    display_name: "VieNeu TTS v2 Turbo GGUF"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-v2-Turbo-GGUF"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: false
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      vieneu_mode: "turbo"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-v2-Turbo-GGUF"
+      backbone_filename: "vieneu-tts-v2-turbo.gguf"
+      decoder_repo: "pnnbao-ump/VieNeu-Codec"
+      decoder_filename: "vieneu_decoder.onnx"
+      encoder_repo: "pnnbao-ump/VieNeu-Codec"
+      encoder_filename: "vieneu_encoder.onnx"
+      device: "cpu"
+    default_voice_preset: "Xuân Vĩnh (Nam - Miền Nam)"
+    voice_presets:
+      "Bích Ngọc (Nữ - Miền Bắc)": "Bích Ngọc - Nữ miền Bắc"
+      "Phạm Tuyên (Nam - Miền Bắc)": "Phạm Tuyên - Nam miền Bắc"
+      "Thục Đoan (Nữ - Miền Nam)": "Thục Đoan - Nữ miền Nam"
+      "Xuân Vĩnh (Nam - Miền Nam)": "Xuân Vĩnh - Nam miền Nam"
+    notes: "Bản VieNeu Turbo GGUF/ONNX CPU, nhẹ và rõ ràng cho máy yếu."
+
+  vieneu_legacy_q8_gguf:
+    display_name: "VieNeu TTS Q8 GGUF Legacy"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-q8-gguf"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-q8-gguf"
+      gguf_filename: "VieNeu-TTS-q8_0.gguf"
+      codec_repo: "neuphonic/distill-neucodec"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+      legacy_chat_format: true
+      disable_emotion_tag: true
+      temperature: 1.0
+      top_k: 40
+    default_voice_preset: "Binh"
+    voice_presets:
+      Binh: "Thanh Bình - Nam miền Bắc"
+      Tuyen: "Phạm Tuyên - Nam miền Bắc"
+      Vinh: "Xuân Vĩnh - Nam miền Nam"
+      Doan: "Thục Đoan - Nữ miền Nam"
+      Ly: "Trúc Ly - Nữ miền Bắc"
+      Sơn: "Thái Sơn - Nam miền Nam"
+      Ngoc: "Bích Ngọc - Nữ miền Bắc"
+    notes: "Cấu hình bám sát app VieNeu cũ: repo Q8 legacy, prompt chat format cũ, Distill codec và Top-K 40."
+
+  vieneu_03b_q4_gguf:
+    display_name: "VieNeu TTS 0.3B Q4 GGUF"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-0.3B-q4-gguf"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-0.3B-q4-gguf"
+      gguf_filename: "VieNeu-TTS-0_3B-Q4_0.gguf"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    default_voice_preset: "Vinh"
+    voice_presets:
+      Vinh: "Vĩnh - Nam miền Nam"
+      Binh: "Bình - Nam miền Bắc"
+      Tuyen: "Tuyên - Nam miền Bắc"
+      Doan: "Đoan - Nữ miền Nam"
+      Ly: "Ly - Nữ miền Bắc"
+      Ngoc: "Ngọc - Nữ miền Bắc"
+    notes: "VieNeu 0.3B Q4 GGUF nhẹ nhất, ưu tiên CPU và GTX 970."
+
+  vieneu_03b_q8_gguf:
+    display_name: "VieNeu TTS 0.3B Q8 GGUF"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-0.3B-q8-gguf"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-0.3B-q8-gguf"
+      gguf_filename: "VieNeu-TTS-0_3B-Q8_0.gguf"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    default_voice_preset: "Vinh"
+    voice_presets:
+      Vinh: "Vĩnh - Nam miền Nam"
+      Binh: "Bình - Nam miền Bắc"
+      Tuyen: "Tuyên - Nam miền Bắc"
+      Doan: "Đoan - Nữ miền Nam"
+      Ly: "Ly - Nữ miền Bắc"
+      Ngoc: "Ngọc - Nữ miền Bắc"
+    notes: "VieNeu 0.3B Q8 GGUF, chất lượng cao hơn Q4 nhưng nặng hơn."
+
+  vieneu_audiobook_nguyen_brat_q4:
+    display_name: "VieNeu Audiobook Nguyen Brat Q4"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "nguyen-brat/nguyen-ngoc-ngan-vieneu-tts-fine-tune"
+    language_priority: "vi"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi"]
+      supports_voice_profile: false
+      supports_reference_text: false
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "nguyen-brat/nguyen-ngoc-ngan-vieneu-tts-fine-tune"
+      gguf_filename: "vieneu_q4_k_m.gguf"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+      prompt_format: "speech_token_gguf"
+    default_voice_preset: "Vinh"
+    voice_presets:
+      Vinh: "Vĩnh - Nam miền Nam"
+      Binh: "Bình - Nam miền Bắc"
+      Tuyen: "Tuyên - Nam miền Bắc"
+      Doan: "Đoan - Nữ miền Nam"
+      Ly: "Ly - Nữ miền Bắc"
+      Ngoc: "Ngọc - Nữ miền Bắc"
+    notes: "Fine-tune audiobook tiếng Việt; ưu tiên giọng kể chuyện, bản GGUF Q4 nhẹ."
 
   qwen3_tts_06b_base:
     display_name: "Qwen3 TTS 0.6B Base"
@@ -105,6 +312,31 @@ tts_models:
       supports_pitch_shift: false
       supports_emotion: false
     notes: "Engine Qwen3-TTS clone voice chất lượng cao hơn nhưng nặng hơn; nên thử 0.6B trước."
+
+  valtec_vietnamese_zeroshot:
+    display_name: "Valtec Vietnamese TTS"
+    provider: "valtec"
+    model_type: "tts"
+    local_path: "engines/valtec_worker/.venv"
+    hf_repo: "tronghieuit/valtec-tts"
+    language_priority: "vi"
+    required: false
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: true
+      supports_reference_text: false
+      supports_voice_presets: true
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    default_voice_preset: "NF"
+    voice_presets:
+      NF: "NF - Nữ miền Bắc"
+      SF: "SF - Nữ miền Nam"
+      NM1: "NM1 - Nam miền Bắc 1"
+      SM: "SM - Nam miền Nam"
+      NM2: "NM2 - Nam miền Bắc 2"
+    notes: "Engine tiếng Việt nhẹ, chạy CPU qua worker riêng; phù hợp máy yếu và hỗ trợ clone giọng từ audio mẫu ngắn."
 
 support_models:
   higgs_audio_v2_tokenizer:

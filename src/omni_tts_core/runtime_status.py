@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from omni_tts_core.model_registry import ModelRegistry, ModelSpec
 from omni_tts_core.model_storage import ModelStorage
-from omni_tts_core.paths import project_path
+from omni_tts_core.worker_installation import is_worker_installed
 from omni_tts_shared.schemas import RuntimeStatus
 
 
@@ -27,6 +27,8 @@ class RuntimeStatusService:
             return _vieneu_status(spec, installed)
         if spec.provider == "qwen":
             return _qwen_status(spec, installed)
+        if spec.provider == "valtec":
+            return _valtec_status(spec, installed)
         return RuntimeStatus(
             model_id=spec.model_id,
             display_name=spec.display_name,
@@ -53,8 +55,7 @@ def _omnivoice_status(spec: ModelSpec, installed: bool) -> RuntimeStatus:
 
 
 def _vieneu_status(spec: ModelSpec, installed: bool) -> RuntimeStatus:
-    python_path = project_path("engines/vieneu_worker/.venv/Scripts/python.exe")
-    if not python_path.exists():
+    if not is_worker_installed("vieneu_worker"):
         return RuntimeStatus(
             model_id=spec.model_id,
             display_name=spec.display_name,
@@ -75,8 +76,7 @@ def _vieneu_status(spec: ModelSpec, installed: bool) -> RuntimeStatus:
 
 
 def _qwen_status(spec: ModelSpec, installed: bool) -> RuntimeStatus:
-    python_path = project_path("engines/qwen_worker/.venv/Scripts/python.exe")
-    if not python_path.exists():
+    if not is_worker_installed("qwen_worker"):
         return RuntimeStatus(
             model_id=spec.model_id,
             display_name=spec.display_name,
@@ -93,4 +93,25 @@ def _qwen_status(spec: ModelSpec, installed: bool) -> RuntimeStatus:
         actual_device="worker",
         device_name="Qwen worker",
         message="Worker đã cài; GPU/CPU sẽ kiểm tra khi tạo audio.",
+    )
+
+
+def _valtec_status(spec: ModelSpec, installed: bool) -> RuntimeStatus:
+    if not is_worker_installed("valtec_worker"):
+        return RuntimeStatus(
+            model_id=spec.model_id,
+            display_name=spec.display_name,
+            provider=spec.provider,
+            installed=False,
+            actual_device="not-installed",
+            message="Valtec worker chưa cài. Chạy install_valtec_worker.bat.",
+        )
+    return RuntimeStatus(
+        model_id=spec.model_id,
+        display_name=spec.display_name,
+        provider=spec.provider,
+        installed=installed,
+        actual_device="worker",
+        device_name="Valtec CPU worker",
+        message="Worker đã cài; ưu tiên CPU và phù hợp máy yếu.",
     )

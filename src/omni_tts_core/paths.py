@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+def _project_root() -> Path:
+    override = os.environ.get("COLIN_TTS_ROOT") or os.environ.get("OMNI_TTS_ROOT")
+    if override:
+        return Path(override).expanduser().resolve()
+    return Path(__file__).resolve().parents[2]
+
+
+PROJECT_ROOT = _project_root()
 
 
 def project_path(value: str | Path) -> Path:

@@ -11,15 +11,13 @@ from tkinter import filedialog, messagebox, ttk
 from omni_tts_core.progress import ProgressEvent
 from omni_tts_shared.errors import GenerationCancelled, OmniTtsError
 from omni_tts_shared.languages import LANGUAGE_CODES, LANGUAGE_LABELS, language_choices
+from omni_tts_shared.voice_presets import NO_VOICE_PRESET_LABEL
+from omni_tts_shared.vieneu_codecs import NO_CODEC_LABEL
 from omni_tts_ui_tkinter.controller import TkinterController, format_result
-from omni_tts_ui_tkinter.dnd import enable_file_drop
-from omni_tts_ui_tkinter.panels.contact_panel import ContactPanel
-from omni_tts_ui_tkinter.panels.license_panel import LicensePanel
+from omni_tts_ui_tkinter.panels.generation_tabs import GenerationTabsMixin
 from omni_tts_ui_tkinter.preferences import TkinterPreferences
 from omni_tts_ui_tkinter.state import UiSettings
-from omni_tts_ui_tkinter.voice_panel import VoiceProfilePanel
 from omni_tts_ui_tkinter.widgets import (
-    ScrollableFrame,
     append_log,
     browse_directory,
     browse_file,
@@ -28,17 +26,19 @@ from omni_tts_ui_tkinter.widgets import (
 )
 
 
-class TkinterApp:
+class TkinterApp(GenerationTabsMixin):
     def __init__(self, root) -> None:
         self.root = root
         self.controller = TkinterController()
         self.preferences = TkinterPreferences()
         self.preference_data = self.preferences.load()
         self.model_map = dict(self.controller.model_choices())
+        self.speaker_map: dict[str, str | None] = {NO_VOICE_PRESET_LABEL: None}
+        self.codec_map: dict[str, str | None] = {NO_CODEC_LABEL: None}
         self.voice_profile_map: dict[str, str | None] = {}
         self.voice_profile_combos: list[ttk.Combobox] = []
         self.notebook: ttk.Notebook | None = None
-        self.license_panel: LicensePanel | None = None
+        self.license_panel = None
         self.active_cancel_event: Event | None = None
         self.active_log_widget: tk.Text | None = None
         self.action_buttons: list[ttk.Button] = []
@@ -48,6 +48,9 @@ class TkinterApp:
         self.file_open_folder_button: ttk.Button | None = None
         self.language_combos: list[ttk.Combobox] = []
         self.profile_combos: list[ttk.Combobox] = []
+        self.speaker_combos: list[ttk.Combobox] = []
+        self.codec_combos: list[ttk.Combobox] = []
+        self.sampling_spins: list[ttk.Spinbox] = []
         self.speed_spins: list[ttk.Spinbox] = []
         self.pitch_spins: list[ttk.Spinbox] = []
         self.emotion_combos: list[ttk.Combobox] = []
@@ -64,10 +67,13 @@ class TkinterApp:
 
     def _init_vars(self) -> None:
         model_label = self._model_label_for_id(self.preference_data.get("model_id"))
+        model_id = self.model_map.get(model_label, "omnivoice_vietnamese")
         language = str(self.preference_data.get("language") or "vi")
         self.language_var = tk.StringVar(value=LANGUAGE_LABELS.get(language, "Tiếng Việt"))
         self.model_var = tk.StringVar(value=model_label)
         self.voice_profile_var = tk.StringVar(value="Không dùng profile")
+        self.speaker_var = tk.StringVar(value=self._speaker_label_for_id(model_id, self.preference_data.get("speaker_id")))
+        self.codec_var = tk.StringVar(value=self._codec_label_for_repo(model_id, self.preference_data.get("codec_repo")))
         self.ref_audio_var = tk.StringVar()
         self.ref_text_var = tk.StringVar()
         self.output_dir_var = tk.StringVar(value=str(self.preference_data.get("output_dir") or ""))
@@ -75,7 +81,14 @@ class TkinterApp:
         self.speed_var = tk.DoubleVar(value=float(self.preference_data.get("speed", 1.0)))
         self.pitch_var = tk.DoubleVar(value=float(self.preference_data.get("pitch_shift", 0.0)))
         self.emotion_var = tk.StringVar(value=str(self.preference_data.get("emotion") or "natural"))
+        self.temperature_var = tk.DoubleVar(
+            value=float(self.preference_data.get("temperature") or self.controller.default_vieneu_temperature(model_id))
+        )
+        self.top_k_var = tk.IntVar(
+            value=int(self.preference_data.get("top_k") or self.controller.default_vieneu_top_k(model_id))
+        )
         self.runtime_var = tk.StringVar(value="")
+        self.voice_source_var = tk.StringVar(value="")
         self.pause_var = tk.IntVar(value=int(self.preference_data.get("sentence_pause_ms", 450)))
         self.chunk_var = tk.IntVar(value=int(self.preference_data.get("max_chunk_chars", 220)))
         self.overwrite_var = tk.BooleanVar(value=bool(self.preference_data.get("overwrite", False)))
@@ -91,6 +104,83 @@ class TkinterApp:
             if item_id == model_id:
                 return label
         return "OmniVoice Vietnamese"
+
+    def _speaker_label_for_id(self, model_id: str, speaker_id: str | None) -> str:
+        if not speaker_id:
+            return NO_VOICE_PRESET_LABEL
+        for label, preset_id in self.controller.voice_preset_choices(model_id):
+            if preset_id == speaker_id:
+                return label
+        return NO_VOICE_PRESET_LABEL
+
+    def _current_model_id(self) -> str:
+        return self.model_map.get(self.model_var.get(), "omnivoice_vietnamese")
+
+    def _codec_label_for_repo(self, model_id: str, codec_repo: str | None) -> str:
+        valid_repo = self.controller.valid_vieneu_codec_repo(model_id, codec_repo)
+        if not valid_repo:
+            valid_repo = self.controller.default_vieneu_codec_repo(model_id)
+        for label, repo in self.controller.vieneu_codec_choices(model_id):
+            if repo == valid_repo:
+                return label
+        return NO_CODEC_LABEL
+
+    def _selected_profile_id(self) -> str | None:
+        return self.voice_profile_map.get(self.voice_profile_var.get())
+
+    def _selected_speaker_id(self) -> str | None:
+        return self.speaker_map.get(self.speaker_var.get())
+
+    def _selected_codec_repo(self) -> str | None:
+        return self.codec_map.get(self.codec_var.get())
+
+    def _refresh_codec_choices(self, model_id: str) -> None:
+        if self.controller.model_supports_codec(model_id):
+            current_repo = self._selected_codec_repo()
+            self.codec_map = {
+                label: repo
+                for label, repo in self.controller.vieneu_codec_choices(model_id)
+            }
+            values = list(self.codec_map.keys())
+            for combo in self.codec_combos:
+                combo.configure(values=values, state="readonly")
+            valid_current = self.controller.valid_vieneu_codec_repo(model_id, current_repo)
+            target_repo = valid_current or self.controller.default_vieneu_codec_repo(model_id)
+            self.codec_var.set(self._codec_label_for_repo(model_id, target_repo))
+            return
+        self.codec_map = {NO_CODEC_LABEL: None}
+        for combo in self.codec_combos:
+            combo.configure(values=[NO_CODEC_LABEL], state="disabled")
+        self.codec_var.set(NO_CODEC_LABEL)
+
+    def _refresh_speaker_choices(
+        self,
+        model_id: str,
+        *,
+        include_none: bool,
+        prefer_default: bool = False,
+        allow_empty: bool = False,
+    ) -> None:
+        current_id = self._selected_speaker_id()
+        self.speaker_map = {
+            label: preset_id or None
+            for label, preset_id in self.controller.voice_preset_choices(model_id, include_none=include_none)
+        }
+        values = list(self.speaker_map.keys())
+        for combo in self.speaker_combos:
+            combo.configure(values=values)
+
+        if self._selected_profile_id() or not self.controller.has_voice_presets(model_id):
+            self.speaker_var.set(NO_VOICE_PRESET_LABEL)
+            return
+        valid_current = self.controller.valid_voice_preset_id(model_id, current_id)
+        if valid_current and not prefer_default:
+            self.speaker_var.set(self._speaker_label_for_id(model_id, valid_current))
+            return
+        if allow_empty and self.speaker_var.get() == NO_VOICE_PRESET_LABEL and include_none:
+            return
+        default_id = self.controller.default_voice_preset_id(model_id)
+        self.speaker_var.set(self._speaker_label_for_id(model_id, default_id))
 
     def _configure_root(self) -> None:
         self.root.title(self.controller.service.settings.app_display_name)
@@ -144,275 +234,6 @@ class TkinterApp:
         )
         self.cancel_button.grid(row=1, column=1, sticky="e", padx=(8, 0))
 
-    def _build_text_tab(self, notebook: ttk.Notebook) -> None:
-        tab = ttk.Frame(notebook, padding=10)
-        tab.columnconfigure(0, weight=3)
-        tab.columnconfigure(1, weight=1)
-        tab.rowconfigure(0, weight=1)
-        notebook.add(tab, text="Tạo từ văn bản")
-
-        self.text_input = tk.Text(tab, wrap="word", height=18, undo=True)
-        self.text_input.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-
-        side = ttk.Frame(tab)
-        side.grid(row=0, column=1, sticky="nsew")
-        side.columnconfigure(0, weight=1)
-        side.rowconfigure(1, weight=1)
-
-        self.text_generate_button = ttk.Button(
-            side,
-            text="Tạo audio",
-            style="Accent.TButton",
-            command=self.generate_from_text,
-        )
-        self.text_generate_button.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        self.action_buttons.append(self.text_generate_button)
-
-        controls_scroll = ScrollableFrame(side)
-        controls_scroll.grid(row=1, column=0, sticky="nsew")
-        self._build_common_controls(controls_scroll.content)
-
-        self._build_output_controls(
-            tab,
-            include_output_stem=True,
-            open_command=self.open_text_output_folder,
-            button_attr="text_open_folder_button",
-        ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        self._build_log_header(tab, self.clear_text_log).grid(
-            row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0)
-        )
-        self.text_log = tk.Text(tab, height=7, state="disabled", wrap="word")
-        self.text_log.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(4, 0))
-
-    def _build_file_tab(self, notebook: ttk.Notebook) -> None:
-        tab = ttk.Frame(notebook, padding=10)
-        tab.columnconfigure(0, weight=1)
-        tab.columnconfigure(1, weight=1)
-        tab.rowconfigure(1, weight=1)
-        notebook.add(tab, text="Xử lý file")
-
-        top = ttk.Frame(tab)
-        top.grid(row=0, column=0, columnspan=2, sticky="ew")
-        ttk.Button(top, text="Thêm file", command=self.add_source_files).pack(side="left")
-        ttk.Button(top, text="Xóa danh sách", command=self.clear_source_files).pack(
-            side="left", padx=(8, 0)
-        )
-        ttk.Label(top, text="Hỗ trợ: .txt, .md, .srt").pack(side="left", padx=(14, 0))
-
-        self.file_list = tk.Listbox(tab, selectmode="extended", height=14)
-        self.file_list.grid(row=1, column=0, sticky="nsew", pady=(8, 0), padx=(0, 10))
-        enabled = enable_file_drop(self.file_list, self.add_dropped_files)
-        if enabled:
-            hint = "Kéo thả một hoặc nhiều file vào danh sách."
-        else:
-            hint = "Bấm Thêm file để chọn một hoặc nhiều file nguồn."
-        ttk.Label(tab, text=hint).grid(row=2, column=0, sticky="w", pady=(6, 0))
-
-        right = ttk.Frame(tab)
-        right.grid(row=1, column=1, sticky="nsew", pady=(8, 0))
-        right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
-        self.file_generate_button = ttk.Button(
-            right,
-            text="Tạo audio cho các file",
-            style="Accent.TButton",
-            command=self.generate_from_files,
-        )
-        self.file_generate_button.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        self.action_buttons.append(self.file_generate_button)
-        controls_scroll = ScrollableFrame(right)
-        controls_scroll.grid(row=1, column=0, sticky="nsew")
-        self._build_common_controls(controls_scroll.content, include_output_stem=False)
-
-        self._build_output_controls(
-            tab,
-            include_output_stem=False,
-            open_command=self.open_file_output_folder,
-            button_attr="file_open_folder_button",
-        ).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        self._build_log_header(tab, self.clear_file_log).grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0)
-        )
-        self.file_log = tk.Text(tab, height=8, state="disabled", wrap="word")
-        self.file_log.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(4, 0))
-
-    def _build_log_header(self, parent: ttk.Frame, clear_command) -> ttk.Frame:
-        header = ttk.Frame(parent)
-        header.columnconfigure(0, weight=1)
-        ttk.Label(header, text="Nhật ký").grid(row=0, column=0, sticky="w")
-        ttk.Button(header, text="Xóa nhật ký", command=clear_command).grid(row=0, column=1, sticky="e")
-        return header
-
-    def _build_model_tab(self, notebook: ttk.Notebook) -> None:
-        tab = ttk.Frame(notebook, padding=10)
-        tab.columnconfigure(0, weight=1)
-        tab.rowconfigure(0, weight=1)
-        notebook.add(tab, text="Quản lý model")
-
-        columns = ("name", "type", "required", "status", "device", "size", "path")
-        self.model_table = ttk.Treeview(tab, columns=columns, show="headings", height=12)
-        headings = {
-            "name": "Tên",
-            "type": "Loại",
-            "required": "Bắt buộc",
-            "status": "Trạng thái",
-            "device": "Thiết bị",
-            "size": "MB",
-            "path": "Đường dẫn",
-        }
-        for column, label in headings.items():
-            self.model_table.heading(column, text=label)
-            self.model_table.column(column, width=140 if column != "path" else 430)
-        self.model_table.grid(row=0, column=0, sticky="nsew")
-
-        controls = ttk.Frame(tab)
-        controls.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        ttk.Button(controls, text="Tải model đang chọn", command=self.download_selected_model).pack(
-            side="left"
-        )
-        ttk.Button(
-            controls,
-            text="Tải model bắt buộc còn thiếu",
-            command=self.download_required_models,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Button(controls, text="Làm mới", command=self.refresh_models).pack(
-            side="left", padx=(8, 0)
-        )
-
-    def _build_voice_profile_tab(self, notebook: ttk.Notebook) -> None:
-        panel = VoiceProfilePanel(notebook, self.controller, self.refresh_voice_profiles)
-        notebook.add(panel, text="Profile giọng")
-
-    def _build_license_tab(self, notebook: ttk.Notebook) -> None:
-        self.license_panel = LicensePanel(notebook, self.controller, self.status_var.set)
-        notebook.add(self.license_panel, text="Bản quyền")
-
-    def _build_contact_tab(self, notebook: ttk.Notebook) -> None:
-        tab = ContactPanel(notebook, self.controller.service.settings, self.status_var)
-        notebook.add(tab, text="Liên hệ")
-
-    def _build_common_controls(self, parent: ttk.Frame, include_output_stem: bool = True) -> None:
-        ttk.Label(parent, text="Model TTS").pack(anchor="w")
-        model_combo = ttk.Combobox(
-            parent,
-            textvariable=self.model_var,
-            values=list(self.model_map.keys()),
-            state="readonly",
-        )
-        model_combo.pack(fill="x", pady=(4, 8))
-        model_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_model_changed())
-
-        ttk.Label(parent, textvariable=self.runtime_var, foreground="#555555", wraplength=360).pack(
-            anchor="w", pady=(0, 8)
-        )
-
-        ttk.Label(parent, text="Ngôn ngữ").pack(anchor="w")
-        language_combo = ttk.Combobox(
-            parent,
-            textvariable=self.language_var,
-            values=language_choices(["vi", "en"]),
-            state="readonly",
-        )
-        language_combo.pack(fill="x", pady=(4, 8))
-        self.language_combos.append(language_combo)
-
-        ttk.Label(parent, text="Profile giọng").pack(anchor="w")
-        profile_combo = ttk.Combobox(
-            parent,
-            textvariable=self.voice_profile_var,
-            values=list(self.voice_profile_map.keys()),
-            state="readonly",
-        )
-        profile_combo.pack(fill="x", pady=(4, 8))
-        self.voice_profile_combos.append(profile_combo)
-        self.profile_combos.append(profile_combo)
-
-        self.speed_spins.append(self._spin(parent, "Tốc độ đọc", self.speed_var, 0.5, 1.8, 0.05))
-        self.pitch_spins.append(self._spin(parent, "Pitch shift", self.pitch_var, -12.0, 12.0, 0.5))
-        ttk.Label(parent, text="Cảm xúc VieNeu").pack(anchor="w")
-        emotion_combo = ttk.Combobox(
-            parent,
-            textvariable=self.emotion_var,
-            values=["natural", "storytelling"],
-            state="readonly",
-        )
-        emotion_combo.pack(fill="x", pady=(4, 8))
-        self.emotion_combos.append(emotion_combo)
-        self._spin(parent, "Nghỉ giữa câu, ms", self.pause_var, 0, 3000, 50)
-        self._spin(parent, "Độ dài mỗi đoạn", self.chunk_var, 60, 800, 20)
-
-    def _build_output_controls(
-        self,
-        parent: ttk.Frame,
-        *,
-        include_output_stem: bool,
-        open_command,
-        button_attr: str,
-    ) -> ttk.Frame:
-        frame = ttk.LabelFrame(parent, text="Tùy chọn xuất", padding=8)
-        frame.columnconfigure(1, weight=1)
-
-        ttk.Label(frame, text="Thư mục xuất riêng").grid(row=0, column=0, sticky="w", pady=2)
-        output_row = ttk.Frame(frame)
-        output_row.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=2)
-        output_row.columnconfigure(0, weight=1)
-        ttk.Entry(output_row, textvariable=self.output_dir_var).grid(row=0, column=0, sticky="ew")
-        ttk.Button(output_row, text="Chọn", command=self.choose_output_dir).grid(
-            row=0, column=1, padx=(6, 0)
-        )
-
-        row = 1
-        if include_output_stem:
-            ttk.Label(frame, text="Tên file xuất").grid(row=row, column=0, sticky="w", pady=2)
-            ttk.Entry(frame, textvariable=self.output_stem_var).grid(
-                row=row, column=1, sticky="ew", padx=(8, 0), pady=2
-            )
-            row += 1
-
-        checks = ttk.Frame(frame)
-        checks.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        ttk.Checkbutton(
-            checks,
-            text="Ghi đè file nếu đã tồn tại",
-            variable=self.overwrite_var,
-            command=self.save_preferences,
-        ).pack(side="left")
-        ttk.Checkbutton(
-            checks,
-            text="Tách mỗi dòng SRT/đoạn văn thành một file audio",
-            variable=self.split_output_var,
-            command=self.save_preferences,
-        ).pack(side="left", padx=(14, 0))
-        ttk.Checkbutton(
-            checks,
-            text="Xuất kèm SRT",
-            variable=self.output_srt_var,
-            command=self.save_preferences,
-        ).pack(side="left", padx=(14, 0))
-
-        open_button = ttk.Button(
-            checks,
-            text="Mở thư mục audio",
-            command=open_command,
-            state="disabled",
-        )
-        open_button.pack(side="right")
-        setattr(self, button_attr, open_button)
-        return frame
-
-    def _path_row(self, parent, label: str, variable: tk.StringVar, command) -> None:
-        ttk.Label(parent, text=label).pack(anchor="w")
-        row = ttk.Frame(parent)
-        row.pack(fill="x", pady=(4, 8))
-        ttk.Entry(row, textvariable=variable).pack(side="left", fill="x", expand=True)
-        ttk.Button(row, text="Chọn", command=command).pack(side="left", padx=(6, 0))
-
-    def _spin(self, parent, label: str, variable: tk.Variable, from_: float, to: float, step: float):
-        ttk.Label(parent, text=label).pack(anchor="w")
-        spin = ttk.Spinbox(parent, textvariable=variable, from_=from_, to=to, increment=step)
-        spin.pack(fill="x", pady=(4, 8))
-        return spin
-
     def choose_reference_audio(self) -> None:
         browse_file(
             self.ref_audio_var,
@@ -453,13 +274,17 @@ class TkinterApp:
         output_stem = None if for_files else self.output_stem_var.get().strip() or None
         return UiSettings(
             language=LANGUAGE_CODES.get(self.language_var.get(), "vi"),
-            model_id=self.model_map.get(self.model_var.get(), "omnivoice_vietnamese"),
-            voice_profile_id=self.voice_profile_map.get(self.voice_profile_var.get()),
+            model_id=self._current_model_id(),
+            voice_profile_id=self._selected_profile_id(),
             reference_audio_path=Path(ref_audio_text) if ref_audio_text else None,
             reference_text=self.ref_text_var.get().strip(),
+            speaker_id=None if self._selected_profile_id() else self._selected_speaker_id(),
             speed=float(self.speed_var.get()),
             pitch_shift=float(self.pitch_var.get()),
             emotion=self.emotion_var.get(),
+            codec_repo=self._selected_codec_repo() if self.controller.model_supports_codec(self._current_model_id()) else None,
+            temperature=float(self.temperature_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
+            top_k=int(self.top_k_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
             sentence_pause_ms=int(self.pause_var.get()),
             max_chunk_chars=int(self.chunk_var.get()),
             output_dir=Path(output_dir_text) if output_dir_text else None,
@@ -474,13 +299,17 @@ class TkinterApp:
             return
         self.preference_data.update({
             "language": LANGUAGE_CODES.get(self.language_var.get(), "vi"),
-            "model_id": self.model_map.get(self.model_var.get(), "omnivoice_vietnamese"),
-            "voice_profile_id": self.voice_profile_map.get(self.voice_profile_var.get()),
+            "model_id": self._current_model_id(),
+            "voice_profile_id": self._selected_profile_id(),
+            "speaker_id": None if self._selected_profile_id() else self._selected_speaker_id(),
             "output_dir": self.output_dir_var.get().strip(),
             "output_stem": self.output_stem_var.get().strip(),
             "speed": float(self.speed_var.get()),
             "pitch_shift": float(self.pitch_var.get()),
             "emotion": self.emotion_var.get(),
+            "codec_repo": self._selected_codec_repo(),
+            "temperature": float(self.temperature_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
+            "top_k": int(self.top_k_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
             "sentence_pause_ms": int(self.pause_var.get()),
             "max_chunk_chars": int(self.chunk_var.get()),
             "overwrite": bool(self.overwrite_var.get()),
@@ -494,11 +323,15 @@ class TkinterApp:
             self.language_var,
             self.model_var,
             self.voice_profile_var,
+            self.speaker_var,
+            self.codec_var,
             self.output_dir_var,
             self.output_stem_var,
             self.speed_var,
             self.pitch_var,
             self.emotion_var,
+            self.temperature_var,
+            self.top_k_var,
             self.pause_var,
             self.chunk_var,
             self.overwrite_var,
@@ -574,7 +407,10 @@ class TkinterApp:
         return (
             f"{source}\n"
             f"Model: {self.model_var.get()}; Ngôn ngữ: {self.language_var.get()}; "
-            f"Profile: {self.voice_profile_var.get()}\n"
+            f"Profile: {self.voice_profile_var.get()}; Preset giọng: {self.speaker_var.get()}; "
+            f"Codec: {self.codec_var.get()}\n"
+            f"Temperature: {settings.temperature or 'mặc định'}; Top-K: {settings.top_k or 'mặc định'}; "
+            f"Độ dài đoạn: {settings.max_chunk_chars}; Nghỉ: {settings.sentence_pause_ms} ms\n"
             f"Tách file: {'Có' if settings.split_output else 'Không'}; "
             f"Xuất SRT: {'Có' if settings.output_srt else 'Không'}; "
             f"Ghi đè: {'Có' if settings.overwrite else 'Không'}\n"
@@ -606,16 +442,30 @@ class TkinterApp:
         self.apply_model_capabilities()
 
     def update_runtime_label(self) -> None:
-        model_id = self.model_map.get(self.model_var.get(), "omnivoice_vietnamese")
-        self.runtime_var.set(self.controller.runtime_status_text(model_id))
+        self.runtime_var.set(self.controller.runtime_status_text(self._current_model_id()))
 
     def on_model_changed(self) -> None:
         self.update_runtime_label()
+        self.apply_model_capabilities(prefer_default_preset=True)
+
+    def on_voice_profile_changed(self) -> None:
+        if self._selected_profile_id():
+            self.speaker_var.set(NO_VOICE_PRESET_LABEL)
         self.apply_model_capabilities()
 
-    def apply_model_capabilities(self) -> None:
-        model_id = self.model_map.get(self.model_var.get(), "omnivoice_vietnamese")
+    def on_voice_preset_changed(self) -> None:
+        if self._selected_speaker_id():
+            self.voice_profile_var.set("Không dùng profile")
+        self.apply_model_capabilities(allow_empty_preset=True)
+
+    def apply_model_capabilities(
+        self,
+        prefer_default_preset: bool = False,
+        allow_empty_preset: bool = False,
+    ) -> None:
+        model_id = self._current_model_id()
         caps = self.controller.model_capabilities(model_id)
+        self._refresh_codec_choices(model_id)
         language_values = language_choices(caps.supported_languages)
         current_code = LANGUAGE_CODES.get(self.language_var.get(), "vi")
         if current_code not in caps.supported_languages:
@@ -630,6 +480,15 @@ class TkinterApp:
         if not caps.supports_pitch_shift:
             self.pitch_var.set(0.0)
 
+        supports_sampling = self.controller.model_supports_sampling(model_id)
+        _set_widgets_state(self.sampling_spins, supports_sampling)
+        if supports_sampling and prefer_default_preset:
+            self.temperature_var.set(self.controller.default_vieneu_temperature(model_id))
+            self.top_k_var.set(self.controller.default_vieneu_top_k(model_id))
+        elif not supports_sampling:
+            self.temperature_var.set(1.0)
+            self.top_k_var.set(50)
+
         if caps.supports_emotion:
             values = caps.emotions or ["natural"]
             if self.emotion_var.get() not in values:
@@ -641,14 +500,49 @@ class TkinterApp:
             for combo in self.emotion_combos:
                 combo.configure(values=["natural"], state="disabled")
 
-        profile_state = "readonly" if caps.supports_voice_profile else "disabled"
+        self._refresh_speaker_choices(
+            model_id,
+            include_none=caps.supports_voice_profile,
+            prefer_default=prefer_default_preset,
+            allow_empty=allow_empty_preset,
+        )
+        speaker_selected = self._selected_speaker_id() is not None
+
+        profile_state = "readonly" if caps.supports_voice_profile and not speaker_selected else "disabled"
         for combo in self.profile_combos:
             combo.configure(state=profile_state)
         if not caps.supports_voice_profile:
             self.voice_profile_var.set("Không dùng profile")
+
+        profile_selected = self._selected_profile_id() is not None
+        speaker_state = "readonly" if self.controller.has_voice_presets(model_id) and not profile_selected else "disabled"
+        for combo in self.speaker_combos:
+            combo.configure(state=speaker_state)
+        if self.speaker_var.get() not in self.speaker_map:
+            self.speaker_var.set(NO_VOICE_PRESET_LABEL)
+
+        self._update_voice_source_label(caps)
         if caps.requires_voice_profile and self.voice_profile_var.get() == "Không dùng profile":
             self.status_var.set(f"{self.model_var.get()} cần chọn Profile giọng.")
         self.save_preferences()
+
+    def _update_voice_source_label(self, caps) -> None:
+        profile = self.voice_profile_var.get()
+        preset = self.speaker_var.get()
+        if self._selected_profile_id():
+            self.voice_source_var.set(f"Nguồn giọng đang dùng: Profile - {profile}")
+        elif self._selected_speaker_id():
+            self.voice_source_var.set(f"Nguồn giọng đang dùng: Preset - {preset}")
+        elif caps.requires_voice_profile:
+            self.voice_source_var.set("Nguồn giọng: cần chọn Profile giọng")
+        elif caps.supports_voice_presets and caps.supports_voice_profile:
+            self.voice_source_var.set("Nguồn giọng: chọn Preset hoặc Profile giọng")
+        elif caps.supports_voice_presets:
+            self.voice_source_var.set("Nguồn giọng: cần chọn Preset giọng")
+        elif caps.supports_voice_profile:
+            self.voice_source_var.set("Nguồn giọng: mặc định của model hoặc Profile giọng")
+        else:
+            self.voice_source_var.set("Nguồn giọng: mặc định của model")
 
     def refresh_voice_profiles(self) -> None:
         current = self.voice_profile_var.get()

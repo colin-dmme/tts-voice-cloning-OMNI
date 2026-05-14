@@ -44,10 +44,22 @@ def build_app() -> gr.Blocks:
                         choices=choices,
                         value=default_model,
                     )
+                    codec_repo = gr.Dropdown(
+                        label="Codec VieNeu",
+                        choices=handlers.codec_choices_for_model(default_model),
+                        value=handlers.default_codec_repo(default_model),
+                        interactive=handlers.model_supports_codec(default_model),
+                    )
                     voice_profile_id = gr.Dropdown(
                         label="Profile giọng",
                         choices=handlers.voice_profile_choices(),
                         value="",
+                    )
+                    voice_preset = gr.Dropdown(
+                        label="Preset giọng (khi không clone)",
+                        choices=handlers.speaker_choices_for_model(default_model),
+                        value=handlers.default_voice_preset_id(default_model) or "",
+                        interactive=handlers.has_voice_presets(default_model),
                     )
                     speed = gr.Slider(
                         label="Tốc độ đọc",
@@ -61,15 +73,31 @@ def build_app() -> gr.Blocks:
                         choices=[("Tự nhiên", "natural"), ("Kể chuyện", "storytelling")],
                         value="natural",
                     )
+                    temperature = gr.Slider(
+                        label="Temperature VieNeu",
+                        minimum=0.1,
+                        maximum=2.0,
+                        value=handlers.default_temperature(default_model),
+                        step=0.1,
+                        interactive=handlers.model_supports_sampling(default_model),
+                    )
+                    top_k = gr.Slider(
+                        label="Top-K VieNeu",
+                        minimum=1,
+                        maximum=200,
+                        value=handlers.default_top_k(default_model),
+                        step=1,
+                        interactive=handlers.model_supports_sampling(default_model),
+                    )
                     sentence_pause_ms = gr.Slider(
-                        label="Nghỉ giữa câu, ms",
+                        label="Silence Pad, ms",
                         minimum=0,
                         maximum=2000,
                         value=settings.generation_defaults.get("sentence_pause_ms", 450),
                         step=50,
                     )
                     max_chunk_chars = gr.Slider(
-                        label="Độ dài mỗi đoạn",
+                        label="Max Chars mỗi đoạn",
                         minimum=80,
                         maximum=700,
                         value=settings.generation_defaults.get("max_chunk_chars", 220),
@@ -97,11 +125,15 @@ def build_app() -> gr.Blocks:
                     text,
                     language,
                     model_id,
+                    codec_repo,
                     voice_profile_id,
                     reference_audio,
                     reference_text,
+                    voice_preset,
                     speed,
                     emotion,
+                    temperature,
+                    top_k,
                     sentence_pause_ms,
                     max_chunk_chars,
                     split_output,
@@ -112,7 +144,17 @@ def build_app() -> gr.Blocks:
             model_id.change(
                 handlers.generation_control_updates,
                 inputs=[model_id, language],
-                outputs=[language, speed, emotion, voice_profile_id],
+                outputs=[language, speed, emotion, voice_profile_id, voice_preset, codec_repo, temperature, top_k],
+            )
+            voice_profile_id.change(
+                handlers.profile_changed_updates,
+                inputs=[voice_profile_id, model_id],
+                outputs=[voice_preset],
+            )
+            voice_preset.change(
+                handlers.speaker_changed_updates,
+                inputs=[voice_preset, model_id],
+                outputs=[voice_profile_id],
             )
 
         with gr.Tab("Quản lý model"):

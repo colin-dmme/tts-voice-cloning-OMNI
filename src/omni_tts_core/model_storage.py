@@ -40,12 +40,14 @@ class ModelStorage:
     def is_installed(self, spec: ModelSpec) -> bool:
         return spec.local_path.exists() and any(spec.local_path.iterdir())
 
-    def download(self, model_id: str) -> ModelStatus:
+    def download(self, model_id: str, log_callback=None) -> ModelStatus:
         spec = self.registry.get(model_id)
         if spec.provider == "vieneu":
             raise ConfigError("VieNeu cần cài bằng install_vieneu_worker.bat, không tải bằng nút model.")
         spec.local_path.mkdir(parents=True, exist_ok=True)
         try:
+            if log_callback:
+                log_callback(f"Đang tải model weights: {spec.hf_repo}...")
             snapshot_download(
                 repo_id=spec.hf_repo,
                 local_dir=str(spec.local_path),
@@ -54,6 +56,12 @@ class ModelStorage:
             )
         except Exception as exc:
             raise ModelDownloadError(f"Tải model thất bại: {spec.hf_repo}") from exc
+
+        # Auto-install worker dependencies for subprocess-based engines
+        if spec.provider == "qwen":
+            from omni_tts_core.engines.qwen_engine import QwenSubprocessEngine
+            QwenSubprocessEngine.ensure_worker_ready(log_callback=log_callback)
+
         return self.status_for(spec)
 
     def remove(self, model_id: str) -> ModelStatus:

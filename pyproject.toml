@@ -9,6 +9,7 @@ dependencies = [
     "gradio>=4.44.0",
     "huggingface-hub>=0.24.0",
     "numpy>=1.26.0",
+    "pydub>=0.25.0",
     "pydantic>=2.7.0",
     "pyyaml>=6.0.1",
     "soundfile>=0.12.1",

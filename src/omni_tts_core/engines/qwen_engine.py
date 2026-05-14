@@ -70,6 +70,92 @@ class QwenSubprocessEngine(BaseTtsEngine):
             "Qwen worker chưa được cài. Hãy chạy install_qwen_worker.bat trước."
         )
 
+    @staticmethod
+    def is_worker_ready() -> bool:
+        """Check if the Qwen worker has all required dependencies."""
+        worker_dir = project_path("engines/qwen_worker")
+        python_candidates = [
+            worker_dir / ".venv" / "Scripts" / "python.exe",
+            worker_dir / ".venv" / "bin" / "python",
+        ]
+        python_path = None
+        for c in python_candidates:
+            if c.exists():
+                python_path = c
+                break
+        if python_path is None:
+            return False
+
+        try:
+            result = subprocess.run(
+                [str(python_path), "-c", "import torch; import qwen_tts"],
+                capture_output=True, timeout=30,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    @staticmethod
+    def ensure_worker_ready(log_callback=None) -> bool:
+        """
+        Ensure the Qwen worker environment is set up with torch and qwen-tts.
+        Returns True if worker is ready, raises on failure.
+        """
+        if QwenSubprocessEngine.is_worker_ready():
+            return True
+
+        worker_dir = project_path("engines/qwen_worker")
+        if not worker_dir.exists():
+            raise EngineDependencyError(
+                f"Thư mục worker không tồn tại: {worker_dir}"
+            )
+
+        if log_callback:
+            log_callback("Đang cài đặt Qwen worker (torch + qwen-tts)...")
+
+        env = dict(os.environ)
+        env.update({
+            "HF_HOME": str(project_path(".hf_cache")),
+            "HF_HUB_CACHE": str(project_path(".hf_cache/hub")),
+            "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
+        })
+
+        steps = [
+            (["uv", "sync", "--inexact"], "Syncing worker dependencies..."),
+            (["uv", "pip", "install", "qwen-tts"], "Installing qwen-tts..."),
+            (["uv", "pip", "install", "torch", "--index-url",
+              "https://download.pytorch.org/whl/cu126"], "Installing torch (CUDA 12.6)..."),
+        ]
+
+        for cmd, msg in steps:
+            if log_callback:
+                log_callback(msg)
+            try:
+                result = subprocess.run(
+                    cmd,
+                    cwd=str(worker_dir),
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=1800,
+                )
+                if result.returncode != 0:
+                    error_msg = result.stderr.strip() or result.stdout.strip()
+                    raise EngineDependencyError(
+                        f"Lỗi cài Qwen worker khi chạy '{' '.join(cmd)}': {error_msg}"
+                    )
+            except subprocess.TimeoutExpired:
+                raise EngineDependencyError("Cài Qwen worker quá lâu, đã dừng.")
+
+        if not QwenSubprocessEngine.is_worker_ready():
+            raise EngineDependencyError(
+                "Cài xong nhưng worker vẫn chưa sẵn sàng. Thử chạy install_qwen_worker.bat."
+            )
+
+        if log_callback:
+            log_callback("✅ Qwen worker đã sẵn sàng!")
+        return True
+
     def _payload(self, request: TtsEngineRequest, output_path: Path) -> dict:
         payload = {
             "text": request.text,

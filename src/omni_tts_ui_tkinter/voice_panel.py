@@ -5,7 +5,6 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from omni_tts_shared.schemas import VoiceProfile
-from omni_tts_ui_tkinter.controller import TkinterController
 
 
 LANGUAGE_CHOICES = {
@@ -25,7 +24,7 @@ LANGUAGE_LABELS = {value: label for label, value in LANGUAGE_CHOICES.items()}
 
 
 class VoiceProfilePanel(ttk.Frame):
-    def __init__(self, parent, controller: TkinterController, on_change) -> None:
+    def __init__(self, parent, controller, on_change) -> None:
         super().__init__(parent, padding=10)
         self.controller = controller
         self.on_change = on_change

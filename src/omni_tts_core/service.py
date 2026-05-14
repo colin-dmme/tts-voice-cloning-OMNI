@@ -89,13 +89,13 @@ class TtsService:
     def runtime_status_for(self, model_id: str) -> RuntimeStatus:
         return self.runtime_status.status_for(model_id)
 
-    def download_model(self, model_id: str) -> ModelStatus:
-        return self.storage.download(model_id)
+    def download_model(self, model_id: str, log_callback=None) -> ModelStatus:
+        return self.storage.download(model_id, log_callback=log_callback)
 
-    def download_missing_required_models(self) -> list[ModelStatus]:
+    def download_missing_required_models(self, log_callback=None) -> list[ModelStatus]:
         downloaded: list[ModelStatus] = []
         for spec in self.missing_required_models():
-            downloaded.append(self.storage.download(spec.model_id))
+            downloaded.append(self.storage.download(spec.model_id, log_callback=log_callback))
         return downloaded
 
     def missing_required_models(self) -> list[ModelSpec]:

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from threading import Event
 from typing import Mapping, Sequence
 
 from omni_tts_core.progress import check_cancel
+
+# Windows: hide subprocess console windows
+_POPEN_EXTRA: dict = {}
+if sys.platform == "win32":
+    _POPEN_EXTRA["creationflags"] = subprocess.CREATE_NO_WINDOW
 
 
 def run_worker_process(
@@ -22,6 +28,7 @@ def run_worker_process(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        **_POPEN_EXTRA,
     )
     started_at = time.monotonic()
     while True:

@@ -50,7 +50,8 @@ class VieneuSubprocessEngine(BaseTtsEngine):
             except subprocess.TimeoutExpired as exc:
                 raise GenerationError("VieNeu xử lý quá lâu và đã bị dừng.") from exc
             if completed.returncode != 0:
-                message = _clean_worker_error(completed.stderr.strip() or completed.stdout.strip())
+                combined = (completed.stderr.strip() + "\n" + completed.stdout.strip()).strip()
+                message = _clean_worker_error(combined, returncode=completed.returncode)
                 raise GenerationError(f"VieNeu không sinh được audio: {message}")
             check_cancel(request.cancel_event)
             if not output_path.exists():
@@ -87,6 +88,8 @@ class VieneuSubprocessEngine(BaseTtsEngine):
 
 
 def _mode_from_model_id(model_id: str) -> str:
+    if "gpu" in model_id:
+        return "gpu"
     if "turbo" in model_id:
         return "turbo"
     if "remote" in model_id:
@@ -94,17 +97,58 @@ def _mode_from_model_id(model_id: str) -> str:
     return "standard"
 
 
-def _clean_worker_error(message: str) -> str:
+_NOISY_WARNING_MARKERS = (
+    "UserWarning:",
+    "FutureWarning:",
+    "DeprecationWarning:",
+    "register_constant()",
+    "torch.utils._pytree",
+    "torch.compile",
+    "warnings.warn(",
+    "llama_context:",
+    "llama_model_load",
+    "llama_new_context",
+    "n_ctx_per_seq",
+    "ggml_",
+    "llm_load_",
+    "Warning: You are sending unauthenticated",
+    "HF_TOKEN",
+    "huggingface_hub",
+    "Please set a HF_TOKEN",
+    "Error during VieNeuTTS closure",
+    "local_dir_use_symlinks",
+    "resume_download",
+    "Loading weights:",
+)
+
+
+def _is_noisy_warning(line: str) -> bool:
+    """Return True if *line* is a harmless runtime warning, not a real error."""
+    stripped = line.lstrip()
+    # Torch C++ style warnings: W0514 23:46:01.081000 ...
+    if len(stripped) > 1 and stripped[0] == "W" and stripped[1:5].isdigit():
+        return True
+    # Generic "Warning:" prefix (not part of a real error like "VieNeu worker lỗi:")
+    if stripped.startswith("Warning:"):
+        return True
+    return any(marker in stripped for marker in _NOISY_WARNING_MARKERS)
+
+
+def _clean_worker_error(message: str, returncode: int = 1) -> str:
     if "No module named 'neucodec'" in message:
         return "VieNeu Standard cần neucodec để clone giọng. Chạy install_vieneu_worker.bat."
     if "No module named 'torch'" in message or "Torch is required" in message:
         return "VieNeu cần torch trong worker để clone giọng. Chạy install_vieneu_worker.bat."
-    lines = [line.strip() for line in message.splitlines() if line.strip()]
+    all_lines = [line.strip() for line in message.splitlines() if line.strip()]
+    # Filter out harmless runtime warnings
+    lines = [line for line in all_lines if not _is_noisy_warning(line)]
     if not lines:
-        return "Không rõ lỗi từ worker."
+        # All output was just warnings — worker crashed silently
+        return f"Worker thoát với mã lỗi {returncode} mà không có thông báo lỗi cụ thể."
     for line in reversed(lines):
         if line.startswith(("VieNeu worker lỗi:", "ImportError:", "ModuleNotFoundError:", "RuntimeError:")):
             return line
         if "Standard CPU hiện không hỗ trợ clone" in line:
             return line
     return lines[-1]
+

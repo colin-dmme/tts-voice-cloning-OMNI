@@ -21,12 +21,29 @@ def main() -> None:
         tts = create_tts(Vieneu, payload)
         audio = synthesize(tts, payload)
         tts.save(audio, str(output_path))
+        # Explicitly clean up to avoid "Error during VieNeuTTS closure" at shutdown
+        try:
+            del tts
+        except Exception:
+            pass
     except Exception as exc:
         raise SystemExit(f"VieNeu worker lỗi: {exc}") from exc
 
 
 def create_tts(vieneu_factory, payload: dict):
     mode = payload.get("mode", "standard")
+
+    # GPU mode: use full VieNeu-TTS-v2 on GPU via LMDeploy
+    if mode == "gpu":
+        kwargs = {"emotion": payload.get("emotion", "natural")}
+        if payload.get("ref_audio"):
+            kwargs.update({
+                "codec_repo": payload.get("codec_repo") or STANDARD_CLONE_CODEC_REPO,
+                "codec_device": payload.get("codec_device") or "cuda",
+                "backbone_device": payload.get("backbone_device") or "cuda",
+            })
+        return vieneu_factory(**kwargs)
+
     if mode != "standard":
         return vieneu_factory(mode=mode)
 
@@ -48,7 +65,7 @@ def synthesize(tts, payload: dict):
     if ref_audio and mode == "turbo":
         voice = tts.encode_reference(ref_audio)
         return tts.infer(text=text, voice=voice)
-    if ref_audio and mode == "standard":
+    if ref_audio and mode in ("standard", "gpu"):
         try:
             return tts.infer(text=text, ref_audio=ref_audio, ref_text=ref_text)
         except AttributeError as exc:

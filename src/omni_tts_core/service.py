@@ -7,7 +7,7 @@ from omni_tts_core.audio.wav_tools import concatenate_segments, duration_seconds
 from omni_tts_core.config import AppSettings
 from omni_tts_core.engines.base import TtsEngineRequest
 from omni_tts_core.engines.omnivoice_engine import OmniVoiceEngine
-from omni_tts_core.engines.qwen_engine import QwenSubprocessEngine
+from omni_tts_core.engines.qwen_engine import QwenPersistentEngine, QwenSubprocessEngine
 from omni_tts_core.engines.vieneu_engine import VieneuSubprocessEngine
 from omni_tts_core.jobs.store import JobStore
 from omni_tts_core.model_registry import ModelRegistry, ModelSpec
@@ -45,7 +45,7 @@ class TtsService:
         self.runtime_status = RuntimeStatusService(self.registry, self.storage)
         self.voice_profiles = voice_profiles or VoiceProfileManager()
         self.job_store = JobStore(self.settings.outputs_root)
-        self._engines: dict[str, OmniVoiceEngine | VieneuSubprocessEngine | QwenSubprocessEngine] = {}
+        self._engines: dict[str, OmniVoiceEngine | VieneuSubprocessEngine | QwenPersistentEngine | QwenSubprocessEngine] = {}
 
     def list_voice_profiles(self) -> list[VoiceProfile]:
         return self.voice_profiles.list_profiles()
@@ -277,14 +277,14 @@ class TtsService:
         )
         return self._generate_split_units(request, units, progress_callback, cancel_event)
 
-    def _engine_for(self, spec: ModelSpec) -> OmniVoiceEngine | VieneuSubprocessEngine | QwenSubprocessEngine:
+    def _engine_for(self, spec: ModelSpec) -> OmniVoiceEngine | VieneuSubprocessEngine | QwenPersistentEngine | QwenSubprocessEngine:
         if spec.model_id not in self._engines:
             if spec.provider == "omnivoice":
                 self._engines[spec.model_id] = OmniVoiceEngine(spec)
             elif spec.provider == "vieneu":
                 self._engines[spec.model_id] = VieneuSubprocessEngine(spec)
             elif spec.provider == "qwen":
-                self._engines[spec.model_id] = QwenSubprocessEngine(spec)
+                self._engines[spec.model_id] = QwenPersistentEngine(spec)
             else:
                 raise ConfigError(f"Provider chưa được hỗ trợ: {spec.provider}")
         return self._engines[spec.model_id]

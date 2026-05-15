@@ -8,6 +8,7 @@ dependencies = [
     "soundfile>=0.12.1",
     "torch>=2.7.1",
     "torchaudio>=2.7.1",
+    "pyarrow>=19.0,<20.0",
 ]
 
 [build-system]
@@ -18,10 +19,10 @@ build-backend = "hatchling.build"
 package = false
 
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-torchaudio = { index = "pytorch-cpu" }
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
 
 [[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true

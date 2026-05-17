@@ -19,6 +19,7 @@ Start-ColinTTS.bat
 ```
 
 File này tự chuẩn bị môi trường `uv`, pull source mới nhất nếu có Git, restore `user_state/` vào profile/setting runtime rồi mở giao diện Tkinter.
+Sau lần chạy đầu, script cũng tạo shortcut `Colin TTS Local` ngoài Desktop để mở lại nhanh.
 
 Nếu máy thuê chưa có source, chạy bootstrap từ GitHub bằng PowerShell:
 

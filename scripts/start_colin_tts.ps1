@@ -42,8 +42,34 @@ function Pull-Latest {
     git pull --ff-only
 }
 
+function Ensure-DesktopShortcut {
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    if (-not $desktop) {
+        return
+    }
+    $shortcutPath = Join-Path $desktop "Colin TTS Local.lnk"
+    $targetPath = Join-Path $ProjectRoot "Start-ColinTTS.bat"
+    if (-not (Test-Path $targetPath)) {
+        return
+    }
+
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $targetPath
+        $shortcut.WorkingDirectory = $ProjectRoot
+        $shortcut.Description = "Open Colin TTS Local"
+        $shortcut.IconLocation = "$env:SystemRoot\System32\SHELL32.dll,220"
+        $shortcut.Save()
+        Write-Host "Desktop shortcut ready: $shortcutPath"
+    } catch {
+        Write-Host "Could not create desktop shortcut: $($_.Exception.Message)"
+    }
+}
+
 Ensure-Uv
 Pull-Latest
+Ensure-DesktopShortcut
 
 $env:HF_HOME = Join-Path $ProjectRoot ".hf_cache"
 $env:HF_HUB_CACHE = Join-Path $ProjectRoot ".hf_cache\hub"

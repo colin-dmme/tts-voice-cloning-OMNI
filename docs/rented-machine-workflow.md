@@ -56,9 +56,10 @@ Script sẽ:
 
 1. Cài `uv` nếu máy chưa có.
 2. Pull source mới nhất nếu repo có Git.
-3. Chuẩn bị môi trường Python bằng `uv sync --inexact`.
-4. Restore `user_state/` vào `voices/` và `config/ui_tkinter.json` nếu máy chưa có.
-5. Mở giao diện Tkinter.
+3. Tạo shortcut `Colin TTS Local` ngoài Desktop để mở lại nhanh.
+4. Chuẩn bị môi trường Python bằng `uv sync --inexact`.
+5. Restore `user_state/` vào `voices/` và `config/ui_tkinter.json` nếu máy chưa có.
+6. Mở giao diện Tkinter.
 
 Muốn mở Gradio web UI:
 

@@ -5,7 +5,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import soundfile as sf
 
@@ -14,34 +14,39 @@ from omni_tts_core.engines.subprocess_tools import run_worker_process
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
 from omni_tts_core.progress import check_cancel
+from omni_tts_core.runtime_devices import RuntimeDevicePolicy
 from omni_tts_shared.errors import EngineDependencyError, GenerationError
+
+if TYPE_CHECKING:
+    from omni_tts_core.engine_profile_cache import EngineProfileCache
 
 
 class VieneuSubprocessEngine(BaseTtsEngine):
-    def __init__(self, spec: ModelSpec) -> None:
+    def __init__(self, spec: ModelSpec, cache: "EngineProfileCache | None" = None) -> None:
         self.spec = spec
+        self._cache = cache
+        self._device_policy = RuntimeDevicePolicy()
         self.worker_dir = project_path("engines/vieneu_worker")
         self.worker_script = self.worker_dir / "synthesize.py"
+        self.encoder_script = self.worker_dir / "encode_reference.py"
 
     def generate(self, request: TtsEngineRequest) -> TtsEngineResult:
         runtime = self._worker_runtime()
         (PROJECT_ROOT / "outputs").mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="vieneu_", dir=PROJECT_ROOT / "outputs") as temp_dir:
-            output_path = Path(temp_dir) / "output.wav"
-            payload_path = Path(temp_dir) / "request.json"
+            temp_path = Path(temp_dir)
+            output_path = temp_path / "output.wav"
+            payload_path = temp_path / "request.json"
             payload_path.write_text(
-                json.dumps(self._payload(request, output_path), ensure_ascii=False, indent=2),
+                json.dumps(
+                    self._payload(request, output_path, scratch_dir=temp_path),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
             command = [str(runtime.python_path), str(self.worker_script), "--request", str(payload_path)]
-            env = dict(os.environ)
-            env.update({
-                "HF_HOME": str(project_path(".hf_cache")),
-                "HF_HUB_CACHE": str(project_path(".hf_cache/hub")),
-                "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
-            })
-            if runtime.python_paths:
-                env["PYTHONPATH"] = os.pathsep.join(str(path) for path in runtime.python_paths)
+            env = _worker_env(project_path(".hf_cache"), runtime.python_paths)
             try:
                 completed = run_worker_process(
                     command,
@@ -53,13 +58,77 @@ class VieneuSubprocessEngine(BaseTtsEngine):
             except subprocess.TimeoutExpired as exc:
                 raise GenerationError("VieNeu xử lý quá lâu và đã bị dừng.") from exc
             if completed.returncode != 0:
+                if completed.returncode == -1073741819:
+                    raise GenerationError(_native_crash_message(completed.stderr.strip() or completed.stdout.strip()))
                 message = _clean_worker_error(completed.stderr.strip() or completed.stdout.strip())
                 raise GenerationError(f"VieNeu không sinh được audio: {message}")
             check_cancel(request.cancel_event)
             if not output_path.exists():
                 raise GenerationError("VieNeu không tạo file WAV đầu ra.")
+            self._try_write_cache_meta(request)
             audio, sample_rate = sf.read(str(output_path), dtype="float32")
             return TtsEngineResult(audio=audio, sample_rate=int(sample_rate))
+
+    def generate_batch(self, requests: list[TtsEngineRequest]) -> list[TtsEngineResult]:
+        if not requests:
+            return []
+        if len(requests) == 1:
+            return [self.generate(requests[0])]
+
+        runtime = self._worker_runtime()
+        (PROJECT_ROOT / "outputs").mkdir(parents=True, exist_ok=True)
+
+        first = requests[0]
+        cancel_event = first.cancel_event
+
+        with tempfile.TemporaryDirectory(prefix="vieneu_batch_", dir=PROJECT_ROOT / "outputs") as temp_dir:
+            temp_path = Path(temp_dir)
+
+            chunks = []
+            for index, req in enumerate(requests):
+                out = temp_path / f"chunk_{index:03d}.wav"
+                chunks.append({"text": req.text, "output_path": str(out)})
+
+            base_payload = self._base_payload(first, scratch_dir=temp_path)
+            batch_payload = {**base_payload, "batch": True, "chunks": chunks}
+
+            payload_path = temp_path / "request.json"
+            payload_path.write_text(
+                json.dumps(batch_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            command = [str(runtime.python_path), str(self.worker_script), "--request", str(payload_path)]
+            env = _worker_env(project_path(".hf_cache"), runtime.python_paths)
+
+            try:
+                completed = run_worker_process(
+                    command,
+                    cwd=str(self.worker_dir),
+                    env=env,
+                    timeout=900 + 300 * len(requests),
+                    cancel_event=cancel_event,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise GenerationError("VieNeu batch xử lý quá lâu và đã bị dừng.") from exc
+
+            if completed.returncode != 0:
+                if completed.returncode == -1073741819:
+                    raise GenerationError(_native_crash_message(completed.stderr.strip() or completed.stdout.strip()))
+                message = _clean_worker_error(completed.stderr.strip() or completed.stdout.strip())
+                raise GenerationError(f"VieNeu không sinh được audio (batch): {message}")
+
+            check_cancel(cancel_event)
+            self._try_write_cache_meta(first)
+
+            results = []
+            for chunk in chunks:
+                out = Path(chunk["output_path"])
+                if not out.exists():
+                    raise GenerationError(f"VieNeu không tạo file WAV đầu ra cho chunk: {out.name}")
+                audio, sample_rate = sf.read(str(out), dtype="float32")
+                results.append(TtsEngineResult(audio=audio, sample_rate=int(sample_rate)))
+            return results
 
     def _worker_runtime(self) -> "WorkerRuntime":
         portable_python = PROJECT_ROOT / "runtime" / "python" / "python.exe"
@@ -77,30 +146,131 @@ class VieneuSubprocessEngine(BaseTtsEngine):
             "VieNeu worker chưa được cài. Hãy chạy install_vieneu_worker.bat trước."
         )
 
-    def _payload(self, request: TtsEngineRequest, output_path: Path) -> dict:
+    def _base_payload(self, request: TtsEngineRequest, scratch_dir: Path | None = None) -> dict:
         mode = str(self.spec.runtime.get("vieneu_mode") or _mode_from_model_id(self.spec.model_id))
-        payload = {
-            "text": request.text,
-            "output_path": str(output_path),
+        payload: dict = {
             "mode": mode,
             "emotion": request.emotion or "natural",
             "speed": request.speed,
         }
         payload.update(_runtime_payload(self.spec.runtime))
-        if request.codec_repo:
+        payload.update(self._device_policy.payload_for(self.spec, request.runtime_target, mode=mode))
+        use_request_codec_for_generation = True
+        if (
+            mode == "standard"
+            and self.spec.runtime.get("gguf_filename")
+            and request.reference_audio_path is not None
+        ):
+            use_request_codec_for_generation = False
+        if request.codec_repo and use_request_codec_for_generation:
             payload["codec_repo"] = request.codec_repo
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.top_k is not None:
             payload["top_k"] = request.top_k
         if request.reference_audio_path:
-            payload["ref_audio"] = str(request.reference_audio_path)
+            ref_codes_path = self._standard_gguf_ref_codes_path(request, mode, scratch_dir)
+            if ref_codes_path is not None:
+                payload["ref_codes_path"] = str(ref_codes_path)
+                payload["codec_repo"] = str(
+                    self.spec.runtime.get("codec_repo")
+                    or "neuphonic/neucodec-onnx-decoder-int8"
+                )
+                payload["codec_device"] = "cpu"
+            else:
+                payload["ref_audio"] = str(request.reference_audio_path)
         else:
             voice_name = request.speaker_id if request.speaker_id in self.spec.voice_presets else None
             if voice_name:
                 payload["voice_name"] = voice_name
         if request.reference_text:
             payload["ref_text"] = request.reference_text
+        if mode == "turbo" and request.cached_prompt_path is not None:
+            payload["cached_prompt_path"] = str(request.cached_prompt_path)
+        return payload
+
+    def _standard_gguf_ref_codes_path(
+        self,
+        request: TtsEngineRequest,
+        mode: str,
+        scratch_dir: Path | None = None,
+    ) -> Path | None:
+        if (
+            mode != "standard"
+            or not self.spec.runtime.get("gguf_filename")
+            or request.reference_audio_path is None
+        ):
+            return None
+        cache_dir = request.cached_prompt_path
+        if cache_dir is None:
+            if scratch_dir is None:
+                return None
+            cache_dir = scratch_dir / "reference_codes"
+        ref_codes_path = cache_dir / "ref_codes.npy"
+        if ref_codes_path.exists():
+            return ref_codes_path
+
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        payload_path = cache_dir / "encode_request.json"
+        encode_codec_repo = request.codec_repo
+        if encode_codec_repo == "neuphonic/neucodec-onnx-decoder-int8":
+            encode_codec_repo = None
+        payload = {
+            "ref_audio": str(request.reference_audio_path),
+            "output_path": str(ref_codes_path),
+            "codec_repo": encode_codec_repo or "neuphonic/distill-neucodec",
+            "codec_device": "cpu",
+        }
+        payload_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        runtime = self._worker_runtime()
+        env = _worker_env(project_path(".hf_cache"), runtime.python_paths)
+        try:
+            completed = run_worker_process(
+                [str(runtime.python_path), str(self.encoder_script), "--request", str(payload_path)],
+                cwd=str(self.worker_dir),
+                env=env,
+                timeout=600,
+                cancel_event=request.cancel_event,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GenerationError("VieNeu encode profile quá lâu và đã bị dừng.") from exc
+        if completed.returncode != 0:
+            message = _clean_worker_error(completed.stderr.strip() or completed.stdout.strip())
+            raise GenerationError(f"VieNeu không encode được Profile giọng: {message}")
+        if not ref_codes_path.exists():
+            raise GenerationError("VieNeu không tạo được ref_codes cho Profile giọng.")
+        return ref_codes_path
+
+    def _try_write_cache_meta(self, request: TtsEngineRequest) -> None:
+        if (
+            self._cache is None
+            or request.cached_prompt_path is None
+            or not request.reference_audio_path
+        ):
+            return
+        cache_dir = request.cached_prompt_path
+        if (cache_dir / "ref_codes.npy").exists() or (cache_dir / "ref_codes.pkl").exists():
+            try:
+                self._cache.write_meta(
+                    cache_dir,
+                    request.reference_audio_path,
+                    request.reference_text or "",
+                )
+            except Exception:
+                pass
+
+    def _payload(
+        self,
+        request: TtsEngineRequest,
+        output_path: Path,
+        scratch_dir: Path | None = None,
+    ) -> dict:
+        payload = self._base_payload(request, scratch_dir=scratch_dir)
+        payload["text"] = request.text
+        payload["output_path"] = str(output_path)
         return payload
 
 
@@ -109,6 +279,10 @@ def _mode_from_model_id(model_id: str) -> str:
         return "turbo"
     if "remote" in model_id:
         return "remote"
+    if "pytorch" in model_id:
+        return "pytorch"
+    if "lora" in model_id:
+        return "lora"
     return "standard"
 
 
@@ -130,11 +304,37 @@ def _runtime_payload(runtime: dict) -> dict:
         "disable_emotion_tag",
         "temperature",
         "top_k",
+        # pytorch mode
+        "pytorch_device",
+        # lora mode
+        "lora_repo",
+        "lora_filename",
+        "base_repo",
     }
     return {key: value for key, value in runtime.items() if key in allowed and value not in ("", None)}
 
 
+def _worker_env(hf_cache: Path, python_paths: list[Path]) -> dict:
+    env = dict(os.environ)
+    env.update({
+        "HF_HOME": str(hf_cache),
+        "HF_HUB_CACHE": str(hf_cache / "hub"),
+        "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
+    })
+    if python_paths:
+        env["PYTHONPATH"] = os.pathsep.join(str(p) for p in python_paths)
+    return env
+
+
 def _clean_worker_error(message: str) -> str:
+    if (
+        "Skipping import of cpp extensions due to incompatible torch version" in message
+        and "Redirects are currently not supported" in message
+    ):
+        return (
+            "Backend VieNeu bị crash native trên Windows. "
+            "Nếu đang dùng Profile với Standard/GGUF, hãy thử xóa cache profile hoặc encode lại bằng NeuCodec Distill."
+        )
     if "No module named 'neucodec'" in message:
         return "VieNeu Standard cần neucodec để clone giọng. Chạy install_vieneu_worker.bat."
     if "No module named 'torch'" in message or "Torch is required" in message:
@@ -148,6 +348,11 @@ def _clean_worker_error(message: str) -> str:
         if "Standard CPU hiện không hỗ trợ clone" in line:
             return line
     return lines[-1]
+
+
+def _native_crash_message(message: str) -> str:
+    detail = _clean_worker_error(message)
+    return f"VieNeu worker bị crash native trên Windows: {detail}"
 
 
 class WorkerRuntime(NamedTuple):

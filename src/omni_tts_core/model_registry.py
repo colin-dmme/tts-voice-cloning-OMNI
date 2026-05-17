@@ -7,7 +7,7 @@ from typing import Any
 from omni_tts_core.config import load_yaml_config
 from omni_tts_core.paths import project_path
 from omni_tts_shared.errors import ConfigError
-from omni_tts_shared.schemas import ModelCapabilities
+from omni_tts_shared.schemas import ModelCapabilities, RefAudioHints
 
 
 @dataclass(frozen=True)
@@ -22,9 +22,11 @@ class ModelSpec:
     required: bool = False
     notes: str = ""
     runtime: dict[str, Any] = field(default_factory=dict)
+    catalog_info: dict[str, Any] = field(default_factory=dict)
     voice_presets: dict[str, str] = field(default_factory=dict)
     default_voice_preset: str | None = None
     capabilities: ModelCapabilities = field(default_factory=ModelCapabilities)
+    ref_audio_hints: RefAudioHints = field(default_factory=RefAudioHints)
 
 
 class ModelRegistry:
@@ -72,6 +74,7 @@ class ModelRegistry:
             required=bool(raw.get("required", False)),
             notes=str(raw.get("notes", "")),
             runtime=dict(raw.get("runtime", {}) or {}),
+            catalog_info=dict(raw.get("catalog_info", {}) or {}),
             voice_presets={
                 str(key): str(value)
                 for key, value in (raw.get("voice_presets", {}) or {}).items()
@@ -82,4 +85,5 @@ class ModelRegistry:
                 else str(raw.get("default_voice_preset"))
             ),
             capabilities=ModelCapabilities(**(raw.get("capabilities", {}) or {})),
+            ref_audio_hints=RefAudioHints(**(raw.get("ref_audio_hints", {}) or {})),
         )

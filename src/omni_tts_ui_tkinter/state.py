@@ -17,6 +17,7 @@ class UiSettings:
     speed: float = 1.0
     pitch_shift: float = 0.0
     emotion: str = "natural"
+    runtime_target: str = "auto"
     codec_repo: str | None = None
     temperature: float | None = None
     top_k: int | None = None
@@ -40,6 +41,7 @@ class UiSettings:
             speed=self.speed,
             pitch_shift=self.pitch_shift,
             emotion=self.emotion,
+            runtime_target=self.runtime_target,
             codec_repo=self.codec_repo,
             temperature=self.temperature,
             top_k=self.top_k,

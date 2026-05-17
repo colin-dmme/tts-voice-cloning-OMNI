@@ -14,6 +14,7 @@ from omni_tts_core.engines.subprocess_tools import run_worker_process
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
 from omni_tts_core.progress import check_cancel
+from omni_tts_core.runtime_devices import RuntimeDevicePolicy
 from omni_tts_shared.errors import EngineDependencyError, GenerationError
 from omni_tts_shared.valtec_voices import VALTEC_DEFAULT_SPEAKER, VALTEC_SPEAKERS
 
@@ -21,6 +22,7 @@ from omni_tts_shared.valtec_voices import VALTEC_DEFAULT_SPEAKER, VALTEC_SPEAKER
 class ValtecSubprocessEngine(BaseTtsEngine):
     def __init__(self, spec: ModelSpec) -> None:
         self.spec = spec
+        self._device_policy = RuntimeDevicePolicy()
         self.worker_dir = project_path("engines/valtec_worker")
         self.worker_script = self.worker_dir / "synthesize.py"
 
@@ -89,6 +91,7 @@ class ValtecSubprocessEngine(BaseTtsEngine):
             "speaker": _speaker_id(request.speaker_id),
             "speed": request.speed,
         }
+        payload.update(self._device_policy.payload_for(self.spec, request.runtime_target))
         if request.reference_audio_path:
             payload["ref_audio"] = str(request.reference_audio_path.resolve())
         return payload

@@ -9,7 +9,12 @@ set HF_HUB_DISABLE_SYMLINKS_WARNING=1
 echo Installing isolated Qwen3-TTS worker...
 cd engines\qwen_worker
 uv sync --inexact
-uv pip install qwen-tts
-uv pip install torch --index-url https://download.pytorch.org/whl/cu126
+set PY=.venv\Scripts\python.exe
+if not exist "%PY%" (
+    echo Qwen worker Python not found: %PY%
+    exit /b 1
+)
+uv pip install --python "%PY%" qwen-tts
+uv pip install --python "%PY%" torch --index-url https://download.pytorch.org/whl/cu126
 
-pause
+if "%OMNI_TTS_KEEP_WINDOW%"=="1" pause

@@ -6,6 +6,7 @@ from typing import Any
 import gradio as gr
 
 from omni_tts_core.service import TtsService
+from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES
 from omni_tts_shared.errors import OmniTtsError
 from omni_tts_shared.languages import LANGUAGE_LABELS
 from omni_tts_shared.schemas import GenerateSpeechRequest, ModelStatus
@@ -19,11 +20,51 @@ service = TtsService()
 
 
 def model_choices() -> list[tuple[str, str]]:
-    return [(item.display_name, item.model_id) for item in service.list_tts_models()]
+    return [
+        (_model_label(service.registry.get(item.model_id)), item.model_id)
+        for item in service.list_tts_models()
+    ]
 
 
 def all_model_choices() -> list[tuple[str, str]]:
-    return [(item.display_name, item.model_id) for item in service.list_models()]
+    return [
+        (_model_label(service.registry.get(item.model_id)), item.model_id)
+        for item in service.list_models()
+    ]
+
+
+def _model_label(spec) -> str:
+    info = spec.catalog_info
+    badges: list[str] = []
+    origin = {
+        "official": "Official",
+        "community": "Community",
+        "custom": "Custom",
+    }.get(str(info.get("origin") or ""), "")
+    category = {
+        "official-cpu": "Official",
+        "official-gpu": "Official",
+        "community": "Community",
+        "experimental": "Debug/Legacy",
+        "multilingual": "Multilingual",
+        "support": "Support",
+    }.get(str(info.get("category") or ""), "")
+    variant = str(info.get("variant_badge") or "").strip()
+    risk = {
+        "test": "Test",
+        "checkpoint": "Checkpoint",
+        "debug": "Debug",
+    }.get(str(info.get("risk") or ""), "")
+    if origin:
+        badges.append(origin)
+    elif category:
+        badges.append(category)
+    if variant:
+        badges.append(variant)
+    if risk and risk not in badges:
+        badges.append(risk)
+    suffix = " ".join(f"[{item}]" for item in badges)
+    return f"{spec.display_name} {suffix}" if suffix else spec.display_name
 
 
 def voice_profile_choices() -> list[tuple[str, str]]:
@@ -71,6 +112,10 @@ def default_top_k(model_id: str) -> int:
     return service.default_vieneu_top_k(model_id)
 
 
+def runtime_target_choices() -> list[tuple[str, str]]:
+    return [(label, value) for label, value in RUNTIME_TARGET_CHOICES]
+
+
 def language_choices_for_model(model_id: str) -> list[tuple[str, str]]:
     caps = service.model_capabilities(model_id)
     return [(LANGUAGE_LABELS.get(item, item), item) for item in caps.supported_languages]
@@ -113,6 +158,31 @@ def generation_control_updates(model_id: str, current_language: str):
     )
 
 
+def profile_compat_update(voice_profile_id: str, model_id: str) -> str:
+    if not voice_profile_id or not model_id:
+        return ""
+    try:
+        compat = service.profile_quality_for_model(voice_profile_id, model_id)
+        return compat.message
+    except Exception:
+        return ""
+
+
+def profile_duration_info(voice_profile_id: str) -> str:
+    if not voice_profile_id:
+        return ""
+    try:
+        profile = service.voice_profiles.get_profile(voice_profile_id)
+        dur = profile.duration_seconds
+        sr = profile.sample_rate
+        if dur == 0.0:
+            return "(chưa có metadata — lưu lại profile để cập nhật)"
+        sr_text = f"{sr // 1000}kHz" if sr > 0 else ""
+        return f"{dur:.1f}s" + (f"  |  {sr_text}" if sr_text else "")
+    except Exception:
+        return ""
+
+
 def profile_changed_updates(voice_profile_id: str, model_id: str):
     if voice_profile_id:
         return gr.update(value=NO_VOICE_PRESET_ID, interactive=False)
@@ -142,7 +212,7 @@ def refresh_runtime_table() -> list[list[Any]]:
             item.provider,
             "Đã cài" if item.installed else "Chưa cài",
             "Có" if item.gpu_available else "Không",
-            item.actual_device,
+            _runtime_device_label(item.actual_device),
             item.device_name,
             item.message,
         ]
@@ -180,6 +250,20 @@ def download_required_models() -> tuple[str, list[list[Any]]]:
     return message, refresh_model_table()
 
 
+def install_gpu_for_model(model_id: str) -> tuple[str, list[list[Any]]]:
+    try:
+        message = service.install_gpu_acceleration(model_id)
+    except Exception as exc:
+        message = f"Chưa cài được GPU: {exc}"
+    return message, refresh_runtime_table()
+
+
+def get_model_catalog_html() -> dict:
+    from omni_tts_core.model_catalog import generate_catalog_html
+    html = generate_catalog_html(service.settings.app_name)
+    return gr.update(value=html, visible=True)
+
+
 def generate_speech(
     text: str,
     language: str,
@@ -191,6 +275,7 @@ def generate_speech(
     speaker_id: str,
     speed: float,
     emotion: str,
+    runtime_target: str,
     temperature: float,
     top_k: int,
     sentence_pause_ms: int,
@@ -212,6 +297,7 @@ def generate_speech(
             speaker_id=_speaker_id(model_id, speaker_id, voice_profile_id),
             speed=float(speed),
             emotion=emotion,
+            runtime_target=runtime_target or "auto",
             temperature=float(temperature) if service.supports_vieneu_sampling(model_id) else None,
             top_k=int(top_k) if service.supports_vieneu_sampling(model_id) else None,
             sentence_pause_ms=int(sentence_pause_ms),
@@ -233,11 +319,19 @@ def generate_speech(
 
 
 def _status_row(item: ModelStatus) -> list[Any]:
+    if item.worker_installed is None:
+        status = "Đã tải" if item.installed else "Chưa tải"
+    elif not item.worker_installed:
+        status = "Chưa cài worker"
+    elif not item.hf_cached:
+        status = "Worker OK"
+    else:
+        status = "Sẵn sàng"
     return [
         item.display_name,
         item.model_type,
         "Có" if item.required else "Không",
-        "Đã tải" if item.installed else "Chưa tải",
+        status,
         item.size_mb,
         str(item.local_path),
         item.hf_repo,
@@ -254,3 +348,18 @@ def _speaker_id(model_id: str, value: str | None, voice_profile_id: str | None) 
     if voice_profile_id:
         return None
     return service.valid_voice_preset_id(model_id, value)
+
+
+def _runtime_device_label(value: str | None) -> str:
+    return {
+        "auto-cuda": "Auto → CUDA",
+        "auto-cpu": "Auto → CPU",
+        "cuda-unavailable": "CUDA chưa sẵn sàng",
+        "cuda-partial": "CUDA chưa đủ backend",
+        "not-installed": "Chưa cài",
+        "missing": "Thiếu model",
+        "worker": "Worker",
+        "cuda": "CUDA",
+        "cpu": "CPU",
+        "auto": "Auto",
+    }.get(str(value or ""), str(value or "Không rõ"))

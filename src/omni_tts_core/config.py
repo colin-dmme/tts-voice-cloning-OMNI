@@ -68,5 +68,9 @@ class AppSettings:
         return project_path(str(value))
 
     @property
+    def crossfade_ms(self) -> int:
+        return int(self._data.get("generation", {}).get("crossfade_ms", 0))
+
+    @property
     def generation_defaults(self) -> dict[str, Any]:
         return dict(self._data.get("generation", {}))

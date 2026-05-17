@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 LanguageCode = Literal["auto", "vi", "en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"]
 OutputMode = Literal["merged", "split"]
+RuntimeTarget = Literal["auto", "cpu", "cuda"]
 
 
 class ModelStatus(BaseModel):
@@ -21,6 +22,8 @@ class ModelStatus(BaseModel):
     required: bool = False
     size_mb: float = 0.0
     notes: str = ""
+    worker_installed: bool | None = None  # None = không áp dụng (non-worker model)
+    hf_cached: bool | None = None         # None = không áp dụng (non-worker model)
 
 
 class ModelCapabilities(BaseModel):
@@ -57,6 +60,7 @@ class GenerateSpeechRequest(BaseModel):
     speed: float = Field(default=1.0, ge=0.5, le=1.8)
     pitch_shift: float = Field(default=0.0, ge=-12.0, le=12.0)
     emotion: str = "natural"
+    runtime_target: RuntimeTarget = "auto"
     codec_repo: str | None = None
     temperature: float | None = Field(default=None, ge=0.1, le=2.0)
     top_k: int | None = Field(default=None, ge=1, le=200)
@@ -89,6 +93,28 @@ class SegmentTiming(BaseModel):
     end_seconds: float
 
 
+class AudioSampleMeta(BaseModel):
+    sample_id: str = ""
+    role: str = "neutral"
+    audio_path: Path
+    transcript: str = ""
+    duration_seconds: float = 0.0
+    sample_rate: int = 0
+
+
+class ProfileSaveWarning(BaseModel):
+    code: str
+    message: str
+
+
+class RefAudioHints(BaseModel):
+    min_seconds: float = 0.0
+    max_seconds: float = 30.0
+    optimal_min_seconds: float = 3.0
+    optimal_max_seconds: float = 15.0
+    needs_transcript: bool = False
+
+
 class VoiceProfile(BaseModel):
     profile_id: str
     name: str
@@ -99,3 +125,8 @@ class VoiceProfile(BaseModel):
     notes: str = ""
     created_at: str = ""
     updated_at: str = ""
+    schema_version: int = 1
+    duration_seconds: float = 0.0
+    sample_rate: int = 0
+    default_sample_id: str = ""
+    extra_samples: list[AudioSampleMeta] = Field(default_factory=list)

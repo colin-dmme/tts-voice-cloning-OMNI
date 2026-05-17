@@ -50,12 +50,16 @@ class TkinterApp(GenerationTabsMixin):
         self.profile_combos: list[ttk.Combobox] = []
         self.speaker_combos: list[ttk.Combobox] = []
         self.codec_combos: list[ttk.Combobox] = []
+        self.runtime_target_map = dict(self.controller.runtime_target_choices())
         self.sampling_spins: list[ttk.Spinbox] = []
         self.speed_spins: list[ttk.Spinbox] = []
         self.pitch_spins: list[ttk.Spinbox] = []
         self.emotion_combos: list[ttk.Combobox] = []
+        self.profile_compat_labels: list[ttk.Label] = []
         self._preference_trace_ready = False
         self._busy_tick_id: str | None = None
+        self._geometry_save_id: str | None = None
+        self._remembered_panes: list[tuple[ttk.Panedwindow, str]] = []
         self._last_progress_update = 0.0
         self._pending_progress_after = False
         self._pending_progress_event: ProgressEvent | None = None
@@ -81,12 +85,16 @@ class TkinterApp(GenerationTabsMixin):
         self.speed_var = tk.DoubleVar(value=float(self.preference_data.get("speed", 1.0)))
         self.pitch_var = tk.DoubleVar(value=float(self.preference_data.get("pitch_shift", 0.0)))
         self.emotion_var = tk.StringVar(value=str(self.preference_data.get("emotion") or "natural"))
+        self.runtime_target_var = tk.StringVar(
+            value=self._runtime_target_label_for_value(self.preference_data.get("runtime_target"))
+        )
         self.temperature_var = tk.DoubleVar(
             value=float(self.preference_data.get("temperature") or self.controller.default_vieneu_temperature(model_id))
         )
         self.top_k_var = tk.IntVar(
             value=int(self.preference_data.get("top_k") or self.controller.default_vieneu_top_k(model_id))
         )
+        self.model_info_var = tk.StringVar(value="")
         self.runtime_var = tk.StringVar(value="")
         self.voice_source_var = tk.StringVar(value="")
         self.pause_var = tk.IntVar(value=int(self.preference_data.get("sentence_pause_ms", 450)))
@@ -98,6 +106,7 @@ class TkinterApp(GenerationTabsMixin):
         self.output_srt_var = tk.BooleanVar(value=bool(self.preference_data.get("output_srt", False)))
         self.status_var = tk.StringVar(value=self.controller.startup_notice())
         self.progress_var = tk.DoubleVar(value=0.0)
+        self.profile_compat_var = tk.StringVar(value="")
 
     def _model_label_for_id(self, model_id: str | None) -> str:
         for label, item_id in self.model_map.items():
@@ -134,9 +143,23 @@ class TkinterApp(GenerationTabsMixin):
     def _selected_codec_repo(self) -> str | None:
         return self.codec_map.get(self.codec_var.get())
 
+    def _selected_runtime_target(self) -> str:
+        return self.runtime_target_map.get(self.runtime_target_var.get(), "auto")
+
+    def _runtime_target_label_for_value(self, value: str | None) -> str:
+        target = value or "auto"
+        for label, item_value in self.controller.runtime_target_choices():
+            if item_value == target:
+                return label
+        return "Auto (khuyến nghị)"
+
     def _refresh_codec_choices(self, model_id: str) -> None:
         if self.controller.model_supports_codec(model_id):
             current_repo = self._selected_codec_repo()
+            # Fallback: codec_map not yet populated (startup) or was cleared by a non-codec
+            # model → restore from the last saved preference so the user's choice is honoured.
+            if current_repo is None:
+                current_repo = self.preference_data.get("codec_repo")
             self.codec_map = {
                 label: repo
                 for label, repo in self.controller.vieneu_codec_choices(model_id)
@@ -184,12 +207,18 @@ class TkinterApp(GenerationTabsMixin):
 
     def _configure_root(self) -> None:
         self.root.title(self.controller.service.settings.app_display_name)
-        self.root.geometry("1180x760")
+        geometry = str(self.preference_data.get("window_geometry") or "").strip()
+        self.root.geometry(geometry or "1180x760")
+        if self.preference_data.get("window_state") == "zoomed":
+            self.root.state("zoomed")
         self.root.minsize(960, 640)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         style = ttk.Style()
         style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"))
+        self.root.bind("<Configure>", self._schedule_geometry_save)
+        self.root.bind_all("<ButtonRelease-1>", self._save_all_pane_sashes, add="+")
+        self.root.protocol("WM_DELETE_WINDOW", self.close_app)
 
     def _build_layout(self) -> None:
         main = ttk.Frame(self.root, padding=12)
@@ -233,6 +262,90 @@ class TkinterApp(GenerationTabsMixin):
             state="disabled",
         )
         self.cancel_button.grid(row=1, column=1, sticky="e", padx=(8, 0))
+
+    def _schedule_geometry_save(self, event=None) -> None:
+        if event is not None and event.widget is not self.root:
+            return
+        if self._geometry_save_id is not None:
+            self.root.after_cancel(self._geometry_save_id)
+        self._geometry_save_id = self.root.after(500, self._save_window_geometry)
+
+    def _save_window_geometry(self) -> None:
+        self._geometry_save_id = None
+        state = self.root.state()
+        if state != "iconic":
+            self._save_ui_preference("window_state", state)
+        geometry = self.root.geometry()
+        if geometry and state != "iconic":
+            self._save_ui_preference("window_geometry", geometry)
+
+    def close_app(self) -> None:
+        if self._geometry_save_id is not None:
+            self.root.after_cancel(self._geometry_save_id)
+            self._geometry_save_id = None
+        self._save_window_geometry()
+        self.root.destroy()
+
+    def _remember_pane(self, paned: ttk.Panedwindow, preference_key: str) -> None:
+        self._remembered_panes.append((paned, preference_key))
+        paned.bind("<Map>", lambda _event, pane=paned, key=preference_key: self._restore_pane_sash(pane, key), add="+")
+        paned.bind("<ButtonRelease-1>", lambda _event, pane=paned, key=preference_key: self._save_pane_sash(pane, key), add="+")
+        self.root.after_idle(lambda pane=paned, key=preference_key: self._restore_pane_sash(pane, key))
+
+    def _restore_pane_sash(self, paned: ttk.Panedwindow, preference_key: str, attempts: int = 8) -> None:
+        width = paned.winfo_width()
+        if width < 100:
+            if attempts > 0:
+                self.root.after(
+                    100,
+                    lambda pane=paned, key=preference_key, left=attempts - 1: self._restore_pane_sash(
+                        pane,
+                        key,
+                        left,
+                    ),
+                )
+            return
+
+        ratio_key = preference_key.replace("_sash", "_ratio")
+        ratio = self.preference_data.get(ratio_key)
+        saved = self.preference_data.get(preference_key)
+        position = None
+        try:
+            if ratio is not None:
+                position = int(width * float(ratio))
+            elif saved is not None:
+                position = int(saved)
+        except (TypeError, ValueError):
+            position = None
+        if position is None:
+            return
+        position = max(180, min(position, max(180, width - 260)))
+        try:
+            paned.sashpos(0, position)
+        except tk.TclError:
+            return
+
+    def _save_pane_sash(self, paned: ttk.Panedwindow, preference_key: str) -> None:
+        try:
+            position = int(paned.sashpos(0))
+        except (tk.TclError, TypeError, ValueError):
+            return
+        width = paned.winfo_width()
+        if width > 0:
+            ratio_key = preference_key.replace("_sash", "_ratio")
+            self._save_ui_preference(ratio_key, round(position / width, 4))
+        self._save_ui_preference(preference_key, position)
+
+    def _save_all_pane_sashes(self, _event=None) -> None:
+        for paned, preference_key in self._remembered_panes:
+            if paned.winfo_exists() and paned.winfo_ismapped():
+                self._save_pane_sash(paned, preference_key)
+
+    def _save_ui_preference(self, key: str, value) -> None:
+        if self.preference_data.get(key) == value:
+            return
+        self.preference_data[key] = value
+        self.preferences.save(self.preference_data)
 
     def choose_reference_audio(self) -> None:
         browse_file(
@@ -282,6 +395,7 @@ class TkinterApp(GenerationTabsMixin):
             speed=float(self.speed_var.get()),
             pitch_shift=float(self.pitch_var.get()),
             emotion=self.emotion_var.get(),
+            runtime_target=self._selected_runtime_target(),
             codec_repo=self._selected_codec_repo() if self.controller.model_supports_codec(self._current_model_id()) else None,
             temperature=float(self.temperature_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
             top_k=int(self.top_k_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
@@ -307,7 +421,14 @@ class TkinterApp(GenerationTabsMixin):
             "speed": float(self.speed_var.get()),
             "pitch_shift": float(self.pitch_var.get()),
             "emotion": self.emotion_var.get(),
-            "codec_repo": self._selected_codec_repo(),
+            "runtime_target": self._selected_runtime_target(),
+            # Preserve the last codec the user explicitly chose; don't overwrite it with
+            # None just because the currently-selected model doesn't support a codec picker.
+            "codec_repo": (
+                self._selected_codec_repo()
+                if self.controller.model_supports_codec(self._current_model_id())
+                else self.preference_data.get("codec_repo")
+            ),
             "temperature": float(self.temperature_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
             "top_k": int(self.top_k_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
             "sentence_pause_ms": int(self.pause_var.get()),
@@ -330,6 +451,7 @@ class TkinterApp(GenerationTabsMixin):
             self.speed_var,
             self.pitch_var,
             self.emotion_var,
+            self.runtime_target_var,
             self.temperature_var,
             self.top_k_var,
             self.pause_var,
@@ -408,7 +530,7 @@ class TkinterApp(GenerationTabsMixin):
             f"{source}\n"
             f"Model: {self.model_var.get()}; Ngôn ngữ: {self.language_var.get()}; "
             f"Profile: {self.voice_profile_var.get()}; Preset giọng: {self.speaker_var.get()}; "
-            f"Codec: {self.codec_var.get()}\n"
+            f"Codec: {self.codec_var.get()}; Thiết bị xử lý: {self.controller.runtime_target_label(settings.runtime_target)}\n"
             f"Temperature: {settings.temperature or 'mặc định'}; Top-K: {settings.top_k or 'mặc định'}; "
             f"Độ dài đoạn: {settings.max_chunk_chars}; Nghỉ: {settings.sentence_pause_ms} ms\n"
             f"Tách file: {'Có' if settings.split_output else 'Không'}; "
@@ -430,8 +552,8 @@ class TkinterApp(GenerationTabsMixin):
                     item.display_name,
                     item.model_type,
                     "Có" if item.required else "Không",
-                    "Đã tải" if item.installed else "Chưa tải",
-                    runtime.actual_device,
+                    _model_status_label(item),
+                    self.controller.runtime_device_label(runtime.actual_device),
                     item.size_mb,
                     str(item.local_path),
                 ),
@@ -442,16 +564,38 @@ class TkinterApp(GenerationTabsMixin):
         self.apply_model_capabilities()
 
     def update_runtime_label(self) -> None:
-        self.runtime_var.set(self.controller.runtime_status_text(self._current_model_id()))
+        model_id = self._current_model_id()
+        self.model_info_var.set(self.controller.model_choice_info(model_id))
+        self.runtime_var.set(self.controller.runtime_status_text(model_id))
+
+    def _update_profile_compat(self) -> None:
+        profile_id = self._selected_profile_id()
+        model_id = self._current_model_id()
+        if not profile_id:
+            self.profile_compat_var.set("")
+            for label in self.profile_compat_labels:
+                label.configure(foreground="#555555")
+            return
+        try:
+            compat = self.controller.profile_quality_for_model(profile_id, model_id)
+        except Exception:
+            self.profile_compat_var.set("")
+            return
+        self.profile_compat_var.set(compat.message)
+        color = {"ok": "#2e7d32", "warn": "#e65100", "error": "#c62828"}.get(compat.status, "#555555")
+        for label in self.profile_compat_labels:
+            label.configure(foreground=color)
 
     def on_model_changed(self) -> None:
         self.update_runtime_label()
         self.apply_model_capabilities(prefer_default_preset=True)
+        self._update_profile_compat()
 
     def on_voice_profile_changed(self) -> None:
         if self._selected_profile_id():
             self.speaker_var.set(NO_VOICE_PRESET_LABEL)
         self.apply_model_capabilities()
+        self._update_profile_compat()
 
     def on_voice_preset_changed(self) -> None:
         if self._selected_speaker_id():
@@ -564,6 +708,7 @@ class TkinterApp(GenerationTabsMixin):
         else:
             self.voice_profile_var.set("Không dùng profile")
         self.apply_model_capabilities()
+        self._update_profile_compat()
 
     def download_selected_model(self) -> None:
         selected = self.model_table.selection()
@@ -580,6 +725,17 @@ class TkinterApp(GenerationTabsMixin):
         self._run_background(
             "Đang tải các model bắt buộc...",
             lambda _progress, _cancel: self.controller.download_required_models(),
+            lambda result: (self.refresh_models(), messagebox.showinfo("Thông báo", result)),
+        )
+
+    def install_gpu_for_selected_model(self) -> None:
+        selected = self.model_table.selection()
+        if not selected:
+            messagebox.showinfo("Thông báo", "Hãy chọn một model trong bảng.")
+            return
+        self._run_background(
+            "Đang cài tăng tốc GPU...",
+            lambda _progress, _cancel: self.controller.install_gpu_for_model(selected[0]),
             lambda result: (self.refresh_models(), messagebox.showinfo("Thông báo", result)),
         )
 
@@ -731,6 +887,16 @@ def _label_for_value(mapping: dict[str, str | None], value: str | None) -> str |
         if item_value == value:
             return label
     return None
+
+
+def _model_status_label(item) -> str:
+    if item.worker_installed is None:
+        return "Đã tải" if item.installed else "Chưa tải"
+    if not item.worker_installed:
+        return "Chưa cài worker"
+    if not item.hf_cached:
+        return "Worker OK"
+    return "Sẵn sàng"
 
 
 def _result_output_dirs(results) -> list[Path]:

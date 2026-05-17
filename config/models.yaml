@@ -2,7 +2,7 @@ models_root: "models"
 
 tts_models:
   omnivoice_vietnamese:
-    display_name: "OmniVoice Vietnamese"
+    display_name: "OmniVoice Vietnamese (splendor1811)"
     provider: "omnivoice"
     model_type: "tts"
     local_path: "models/omnivoice/vietnamese/splendor1811__omnivoice-vietnamese"
@@ -16,10 +16,117 @@ tts_models:
       supports_speed: true
       supports_pitch_shift: false
       supports_emotion: false
-    notes: "Model chính cho tiếng Việt, dùng cá nhân/học tập."
+    notes: "Community fine-tune tiếng Việt từ official k2-fsa/OmniVoice; model mặc định tiếng Việt."
+    ref_audio_hints:
+      min_seconds: 3.0
+      max_seconds: 10.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 10.0
+      needs_transcript: false
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "OmniVoice"
+      variant: "Vietnamese fine-tune"
+      variant_badge: "VN Fine-tune"
+      base_model: "k2-fsa/OmniVoice"
+      source_repo: "splendor1811/omnivoice-vietnamese"
+      risk: "stable"
+      description: "Community fine-tune tiếng Việt từ official k2-fsa/OmniVoice, hỗ trợ clone giọng từ audio mẫu và điều chỉnh tốc độ đọc."
+      highlight: "Model mặc định tiếng Việt"
+      quality_score: 4
+      speed_score: 3
+      vram_mb: 0
+      ram_mb: 2000
+      recommend_for: "Người dùng mới, đọc sách tiếng Việt, clone giọng cơ bản"
+      install_note: ""
+
+  omnivoice_vietnamese_hacht:
+    display_name: "OmniVoice Vietnamese (Hacht)"
+    provider: "omnivoice"
+    model_type: "tts"
+    local_path: "models/omnivoice/vietnamese/Hacht__omnivoice-vietnamese"
+    hf_repo: "Hacht/omnivoice-vietnamese"
+    language_priority: "vi"
+    required: false
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    notes: "Community test/duplicate từ splendor1811/omnivoice-vietnamese; chỉ dùng để A/B test."
+    ref_audio_hints:
+      min_seconds: 3.0
+      max_seconds: 10.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 10.0
+      needs_transcript: false
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "OmniVoice"
+      variant: "Vietnamese fine-tune test"
+      variant_badge: "VN Test"
+      base_model: "k2-fsa/OmniVoice"
+      source_repo: "Hacht/omnivoice-vietnamese"
+      risk: "test"
+      description: "Bản community test cùng dòng OmniVoice Vietnamese. Dùng để so sánh A/B, không phải model mặc định."
+      highlight: "Test A/B tiếng Việt"
+      quality_score: 0
+      speed_score: 0
+      vram_mb: 0
+      ram_mb: 2000
+      recommend_for: "A/B test với splendor1811 trước khi cân nhắc dùng lâu dài"
+      install_note: ""
+
+  omnivoice_vietnamese_hieuducle_ckpt4000:
+    display_name: "OmniVoice Vietnamese (hieuducle ckpt-4000)"
+    provider: "omnivoice"
+    model_type: "tts"
+    local_path: "models/omnivoice/vietnamese/hieuducle__omnivoice-vietnamese"
+    hf_repo: "hieuducle/omnivoice-vietnamese"
+    language_priority: "vi"
+    required: false
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      omnivoice_subfolder: "checkpoint-4000"
+      download_allow_patterns:
+        - "checkpoint-4000/*"
+    notes: "Checkpoint community chưa đóng gói theo layout root chuẩn; chỉ dùng để debug/test sau khi tải model."
+    ref_audio_hints:
+      min_seconds: 3.0
+      max_seconds: 10.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 10.0
+      needs_transcript: false
+    catalog_info:
+      category: "experimental"
+      origin: "community"
+      family: "OmniVoice"
+      variant: "Checkpoint 4000"
+      variant_badge: "Checkpoint"
+      base_model: "k2-fsa/OmniVoice"
+      source_repo: "hieuducle/omnivoice-vietnamese"
+      risk: "checkpoint"
+      description: "Checkpoint community thô trong thư mục checkpoint-4000. Không khuyến nghị cho production; chỉ dùng để kiểm thử khả năng đọc tiếng Việt."
+      highlight: "Không dùng production"
+      quality_score: 0
+      speed_score: 0
+      vram_mb: 0
+      ram_mb: 2000
+      recommend_for: "Debug/checkpoint test, không dùng làm mặc định"
+      install_note: "Tải model trước khi chạy; engine sẽ load checkpoint-4000."
 
   omnivoice_base:
-    display_name: "OmniVoice Base"
+    display_name: "OmniVoice Base (k2-fsa)"
     provider: "omnivoice"
     model_type: "tts"
     local_path: "models/omnivoice/base/k2-fsa__OmniVoice"
@@ -34,6 +141,28 @@ tts_models:
       supports_pitch_shift: false
       supports_emotion: false
     notes: "Model nền đa ngôn ngữ, dùng tốt cho tiếng Anh và thử nghiệm."
+    ref_audio_hints:
+      min_seconds: 3.0
+      max_seconds: 10.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 10.0
+      needs_transcript: false
+    catalog_info:
+      category: "official-cpu"
+      origin: "official"
+      family: "OmniVoice"
+      variant: "Multilingual base"
+      variant_badge: "Multilingual"
+      source_repo: "k2-fsa/OmniVoice"
+      risk: "stable"
+      description: "Official OmniVoice base đa ngôn ngữ từ k2-fsa, phù hợp tiếng Anh/Việt và thử nghiệm clone giọng đa ngôn ngữ."
+      highlight: "Đa ngôn ngữ (vi/en)"
+      quality_score: 3
+      speed_score: 3
+      vram_mb: 0
+      ram_mb: 2500
+      recommend_for: "Thử nghiệm đa ngôn ngữ, clone giọng tiếng Anh"
+      install_note: ""
 
   vieneu_v2_standard:
     display_name: "VieNeu TTS v2 Standard"
@@ -69,6 +198,22 @@ tts_models:
       Sơn: "Thái Sơn - Nam miền Nam"
       Ngoc: "Bích Ngọc - Nữ miền Bắc"
     notes: "Engine VieNeu chất lượng cao qua worker riêng; cài bằng install_vieneu_worker.bat."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "official-cpu"
+      description: "VieNeu TTS v2 tiêu chuẩn, backbone GGUF Q4_K_M 0.6B, 7 giọng đọc, hỗ trợ emotion natural/storytelling và clone giọng."
+      highlight: "Model chính VieNeu v2"
+      quality_score: 4
+      speed_score: 3
+      vram_mb: 0
+      ram_mb: 1200
+      recommend_for: "Đọc văn bản tiếng Việt chất lượng cao, không cần GPU"
+      install_note: "install_vieneu_worker.bat"
 
   vieneu_v2_turbo:
     display_name: "VieNeu TTS v2 Turbo"
@@ -102,6 +247,22 @@ tts_models:
       "Thục Đoan (Nữ - Miền Nam)": "Thục Đoan - Nữ miền Nam"
       "Xuân Vĩnh (Nam - Miền Nam)": "Xuân Vĩnh - Nam miền Nam"
     notes: "Engine VieNeu nhanh, hỗ trợ code-switching và clone giọng không cần transcript trong worker riêng."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: false
+    catalog_info:
+      category: "official-cpu"
+      description: "VieNeu Turbo dùng ONNX encoder/decoder, tốc độ nhanh hơn Standard đáng kể, hỗ trợ code-switching vi/en."
+      highlight: "Nhanh nhất VieNeu (CPU)"
+      quality_score: 3
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 800
+      recommend_for: "Cần tốc độ cao, text dài, máy CPU vừa"
+      install_note: "install_vieneu_worker.bat"
 
   vieneu_v2_turbo_gguf:
     display_name: "VieNeu TTS v2 Turbo GGUF"
@@ -135,6 +296,22 @@ tts_models:
       "Thục Đoan (Nữ - Miền Nam)": "Thục Đoan - Nữ miền Nam"
       "Xuân Vĩnh (Nam - Miền Nam)": "Xuân Vĩnh - Nam miền Nam"
     notes: "Bản VieNeu Turbo GGUF/ONNX CPU, nhẹ và rõ ràng cho máy yếu."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: false
+    catalog_info:
+      category: "official-cpu"
+      description: "Turbo GGUF/ONNX CPU, dùng voice preset cố định, không hỗ trợ clone giọng từ audio. Nhẹ nhất trong dòng VieNeu."
+      highlight: "Nhẹ nhất, chỉ preset"
+      quality_score: 3
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 700
+      recommend_for: "Máy ≤8GB RAM, chỉ cần giọng preset, ưu tiên tốc độ"
+      install_note: "install_vieneu_worker.bat"
 
   vieneu_legacy_q8_gguf:
     display_name: "VieNeu TTS Q8 GGUF Legacy"
@@ -173,6 +350,22 @@ tts_models:
       Sơn: "Thái Sơn - Nam miền Nam"
       Ngoc: "Bích Ngọc - Nữ miền Bắc"
     notes: "Cấu hình bám sát app VieNeu cũ: repo Q8 legacy, prompt chat format cũ, Distill codec và Top-K 40."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "official-cpu"
+      description: "Tương thích app VieNeu cũ: GGUF Q8 + Distill codec + chat format legacy. Dùng để tái tạo kết quả cũ hoặc debug."
+      highlight: "Tương thích Legacy VieNeu v1"
+      quality_score: 3
+      speed_score: 2
+      vram_mb: 0
+      ram_mb: 1800
+      recommend_for: "Tái tạo kết quả từ app VieNeu cũ, debug"
+      install_note: "install_vieneu_worker.bat"
 
   vieneu_03b_q4_gguf:
     display_name: "VieNeu TTS 0.3B Q4 GGUF"
@@ -207,6 +400,22 @@ tts_models:
       Ly: "Ly - Nữ miền Bắc"
       Ngoc: "Ngọc - Nữ miền Bắc"
     notes: "VieNeu 0.3B Q4 GGUF nhẹ nhất, ưu tiên CPU và GTX 970."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "official-cpu"
+      description: "VieNeu 0.3B Q4 GGUF — nhẹ nhất trong dòng Standard, ~180MB, phù hợp máy RAM thấp hoặc test nhanh."
+      highlight: "Nhẹ nhất Standard (0.3B)"
+      quality_score: 3
+      speed_score: 4
+      vram_mb: 0
+      ram_mb: 600
+      recommend_for: "Máy ≤8GB RAM, test nhanh, không cần chất lượng tối đa"
+      install_note: "install_vieneu_worker.bat"
 
   vieneu_03b_q8_gguf:
     display_name: "VieNeu TTS 0.3B Q8 GGUF"
@@ -241,6 +450,22 @@ tts_models:
       Ly: "Ly - Nữ miền Bắc"
       Ngoc: "Ngọc - Nữ miền Bắc"
     notes: "VieNeu 0.3B Q8 GGUF, chất lượng cao hơn Q4 nhưng nặng hơn."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "official-cpu"
+      description: "VieNeu 0.3B Q8 GGUF — chất lượng cao nhất trong dòng 0.3B GGUF, gần lossless, ~350MB."
+      highlight: "0.3B chất lượng cao nhất"
+      quality_score: 4
+      speed_score: 3
+      vram_mb: 0
+      ram_mb: 900
+      recommend_for: "Chất lượng 0.3B tối đa trên CPU, RAM 8-12GB"
+      install_note: "install_vieneu_worker.bat"
 
   vieneu_audiobook_nguyen_brat_q4:
     display_name: "VieNeu Audiobook Nguyen Brat Q4"
@@ -276,6 +501,564 @@ tts_models:
       Ly: "Ly - Nữ miền Bắc"
       Ngoc: "Ngọc - Nữ miền Bắc"
     notes: "Fine-tune audiobook tiếng Việt; ưu tiên giọng kể chuyện, bản GGUF Q4 nhẹ."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: false
+    catalog_info:
+      category: "community"
+      description: "Community fine-tune VieNeu trên dữ liệu audiobook tiếng Việt của nguyen-brat, giọng kể chuyện tự nhiên và truyền cảm."
+      highlight: "Fine-tune audiobook"
+      quality_score: 4
+      speed_score: 3
+      vram_mb: 0
+      ram_mb: 800
+      recommend_for: "Đọc sách nói, nội dung kể chuyện, podcast tiếng Việt"
+      install_note: "install_vieneu_worker.bat"
+
+  # ─── mradermacher GGUF variants (chất lượng cao hơn pnnbao-ump Q4) ───────────
+
+  vieneu_v2_mradermacher_q5km:
+    display_name: "VieNeu TTS v2 Q5_K_M (mradermacher)"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "mradermacher/VieNeu-TTS-GGUF"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "mradermacher/VieNeu-TTS-GGUF"
+      gguf_filename: "VieNeu-TTS.Q5_K_M.gguf"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    default_voice_preset: "Ly"
+    voice_presets:
+      Binh: "Thanh Bình - Nam miền Bắc"
+      Tuyen: "Phạm Tuyên - Nam miền Bắc"
+      Vinh: "Xuân Vĩnh - Nam miền Nam"
+      Doan: "Thục Đoan - Nữ miền Nam"
+      Ly: "Trúc Ly - Nữ miền Bắc"
+      Sơn: "Thái Sơn - Nam miền Nam"
+      Ngoc: "Bích Ngọc - Nữ miền Bắc"
+    notes: "Q5_K_M — chất lượng gần full float, nhỉnh hơn Q4 mặc định; ~484MB."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "community"
+      description: "Community re-quantize VieNeu 0.6B sang Q5_K_M bởi mradermacher. Cân bằng chất lượng-kích thước tốt nhất trong dòng GGUF (~484MB)."
+      highlight: "Cân bằng tốt nhất (Q5_K_M)"
+      quality_score: 4
+      speed_score: 3
+      vram_mb: 0
+      ram_mb: 1400
+      recommend_for: "Chất lượng cao, RAM vừa phải (10-12GB), khuyến nghị cho máy thông thường"
+      install_note: "install_vieneu_worker.bat"
+
+  vieneu_v2_mradermacher_q6k:
+    display_name: "VieNeu TTS v2 Q6_K (mradermacher)"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "mradermacher/VieNeu-TTS-GGUF"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "mradermacher/VieNeu-TTS-GGUF"
+      gguf_filename: "VieNeu-TTS.Q6_K.gguf"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    default_voice_preset: "Ly"
+    voice_presets:
+      Binh: "Thanh Bình - Nam miền Bắc"
+      Tuyen: "Phạm Tuyên - Nam miền Bắc"
+      Vinh: "Xuân Vĩnh - Nam miền Nam"
+      Doan: "Thục Đoan - Nữ miền Nam"
+      Ly: "Trúc Ly - Nữ miền Bắc"
+      Sơn: "Thái Sơn - Nam miền Nam"
+      Ngoc: "Bích Ngọc - Nữ miền Bắc"
+    notes: "Q6_K — gần lossless, khuyến nghị cho máy đủ RAM; ~570MB."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "community"
+      description: "Community re-quantize VieNeu 0.6B sang Q6_K bởi mradermacher. Gần lossless (~570MB), ít mất mát hơn Q5_K_M."
+      highlight: "Gần lossless (Q6_K)"
+      quality_score: 5
+      speed_score: 2
+      vram_mb: 0
+      ram_mb: 1600
+      recommend_for: "Chất lượng cao nhất CPU, có RAM ≥12GB"
+      install_note: "install_vieneu_worker.bat"
+
+  vieneu_v2_mradermacher_q8:
+    display_name: "VieNeu TTS v2 Q8_0 (mradermacher)"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "mradermacher/VieNeu-TTS-GGUF"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "mradermacher/VieNeu-TTS-GGUF"
+      gguf_filename: "VieNeu-TTS.Q8_0.gguf"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    default_voice_preset: "Ly"
+    voice_presets:
+      Binh: "Thanh Bình - Nam miền Bắc"
+      Tuyen: "Phạm Tuyên - Nam miền Bắc"
+      Vinh: "Xuân Vĩnh - Nam miền Nam"
+      Doan: "Thục Đoan - Nữ miền Nam"
+      Ly: "Trúc Ly - Nữ miền Bắc"
+      Sơn: "Thái Sơn - Nam miền Nam"
+      Ngoc: "Bích Ngọc - Nữ miền Bắc"
+    notes: "Q8_0 — lossless quantization, tương đương full float; ~595MB."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "community"
+      description: "Community re-quantize VieNeu 0.6B sang Q8_0 bởi mradermacher. Lossless — tương đương full float (~595MB), dùng để benchmark."
+      highlight: "Lossless GGUF (Q8_0)"
+      quality_score: 5
+      speed_score: 2
+      vram_mb: 0
+      ram_mb: 1800
+      recommend_for: "Benchmark chất lượng, kiểm tra tối đa CPU, RAM ≥16GB"
+      install_note: "install_vieneu_worker.bat"
+
+  # ─── Full PyTorch models (model.safetensors, không GGUF) ─────────────────────
+
+  vieneu_06b_pytorch:
+    display_name: "VieNeu TTS 0.6B PyTorch (Full)"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "pytorch"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    default_voice_preset: "Ly"
+    voice_presets:
+      Binh: "Thanh Bình - Nam miền Bắc"
+      Tuyen: "Phạm Tuyên - Nam miền Bắc"
+      Vinh: "Xuân Vĩnh - Nam miền Nam"
+      Doan: "Thục Đoan - Nữ miền Nam"
+      Ly: "Trúc Ly - Nữ miền Bắc"
+      Sơn: "Thái Sơn - Nam miền Nam"
+      Ngoc: "Bích Ngọc - Nữ miền Bắc"
+    notes: "Full float32 PyTorch (model.safetensors 1.1GB); chất lượng tối đa; cần RAM/VRAM đủ."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "official-cpu"
+      description: "VieNeu 0.6B full float32 PyTorch — không qua GGUF quantization. Chất lượng tối đa nhưng cần RAM nhiều (model.safetensors ~1.1GB)."
+      highlight: "Full float32 — tốt nhất CPU"
+      quality_score: 5
+      speed_score: 1
+      vram_mb: 0
+      ram_mb: 3500
+      recommend_for: "Chất lượng tối đa, sản xuất chuyên nghiệp, máy RAM ≥16GB"
+      install_note: "install_vieneu_worker.bat; tải model.safetensors ~1.1GB lần đầu"
+
+  vieneu_03b_pytorch:
+    display_name: "VieNeu TTS 0.3B PyTorch (Full)"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-0.3B"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "pytorch"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-0.3B"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    default_voice_preset: "Vinh"
+    voice_presets:
+      Vinh: "Vĩnh - Nam miền Nam"
+      Binh: "Bình - Nam miền Bắc"
+      Tuyen: "Tuyên - Nam miền Bắc"
+      Doan: "Đoan - Nữ miền Nam"
+      Ly: "Ly - Nữ miền Bắc"
+      Ngoc: "Ngọc - Nữ miền Bắc"
+    notes: "Full float32 0.3B (model.safetensors 488MB); nhẹ hơn 0.6B, vẫn tốt hơn GGUF Q4."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "official-cpu"
+      description: "VieNeu 0.3B full float32 PyTorch (~488MB). Chất lượng tốt hơn GGUF Q4 cùng kích thước, cân bằng giữa tài nguyên và chất lượng."
+      highlight: "Full float32, 0.3B nhẹ"
+      quality_score: 4
+      speed_score: 2
+      vram_mb: 0
+      ram_mb: 1800
+      recommend_for: "Chất lượng tốt hơn GGUF Q4 mà không cần 0.6B, RAM ≥12GB"
+      install_note: "install_vieneu_worker.bat"
+
+  vieneu_ngoc_huyen_03b_pytorch:
+    display_name: "VieNeu Ngọc Huyền 0.3B PyTorch (Full)"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-0.3B-ngoc-huyen"
+    language_priority: "vi"
+    required: false
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: false
+      supports_reference_text: false
+      supports_voice_presets: false
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      vieneu_mode: "pytorch"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-0.3B-ngoc-huyen"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    notes: "Merged/full Ngọc Huyền model.safetensors; giọng cố định, không cần profile hoặc preset."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: false
+    catalog_info:
+      category: "community"
+      description: "Ngọc Huyền 0.3B full PyTorch merged model. Đây là đường chạy chính cho giọng Ngọc Huyền, dùng model.safetensors thay vì hack voice codes từ LoRA adapter."
+      highlight: "Ngọc Huyền full"
+      quality_score: 4
+      speed_score: 2
+      vram_mb: 0
+      ram_mb: 1800
+      recommend_for: "Cần giọng Ngọc Huyền ổn định, ưu tiên chất lượng hơn tốc độ"
+      install_note: "install_vieneu_worker.bat"
+
+  vieneu_ngoc_huyen_03b_q4_gguf:
+    display_name: "VieNeu Ngọc Huyền 0.3B Q4 GGUF Legacy"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-0.3B-ngoc-huyen-gguf-Q4_0"
+    language_priority: "vi"
+    required: false
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: false
+      supports_reference_text: false
+      supports_voice_presets: false
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-0.3B-ngoc-huyen-gguf-Q4_0"
+      gguf_filename: "VieNeu-TTS-0.3B-ngoc-huyen-Q4_0.gguf"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    notes: "Debug/Legacy: test 2026-05-15 bị rò reference text; không khuyến nghị production. Giữ để so sánh với PyTorch full hoặc nghiên cứu quantize lại."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: false
+    catalog_info:
+      category: "experimental"
+      description: "Debug/Legacy: bản Ngọc Huyền GGUF Q4 hiện bị rò reference text trong test ngày 2026-05-15. Không khuyến nghị production; giữ để so sánh hoặc nghiên cứu quantize lại từ bản PyTorch full."
+      highlight: "Debug/Legacy"
+      quality_score: 1
+      speed_score: 3
+      vram_mb: 0
+      ram_mb: 800
+      recommend_for: "Chỉ dùng để debug/so sánh; production dùng Ngọc Huyền PyTorch Full"
+      install_note: "install_vieneu_worker.bat; không khuyến nghị production"
+
+  # ─── GPU/CUDA variants (cần install_vieneu_worker_cuda.bat) ──────────────────
+
+  vieneu_v2_standard_cuda:
+    display_name: "VieNeu TTS v2 Standard (CUDA)"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-v2"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-v2"
+      gguf_filename: "VieNeu-TTS-v2-Q4-K-M.gguf"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cuda"
+      backbone_device: "cuda"
+    default_voice_preset: "Ly"
+    voice_presets:
+      Binh: "Thanh Bình - Nam miền Bắc"
+      Tuyen: "Phạm Tuyên - Nam miền Bắc"
+      Vinh: "Xuân Vĩnh - Nam miền Nam"
+      Doan: "Thục Đoan - Nữ miền Nam"
+      Ly: "Trúc Ly - Nữ miền Bắc"
+      Sơn: "Thái Sơn - Nam miền Nam"
+      Ngoc: "Bích Ngọc - Nữ miền Bắc"
+    notes: "Bản GPU của v2 Standard; cần install_vieneu_worker_cuda.bat. GTX 1080 Ti dùng cu118."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "experimental"
+      origin: "official"
+      risk: "debug"
+      variant_badge: "Legacy CUDA"
+      description: "Legacy shortcut cho VieNeu v2 Standard CUDA. Ưu tiên chọn model Standard thường + Thiết bị xử lý = GPU CUDA."
+      highlight: "Legacy CUDA — giữ để tương thích cấu hình cũ"
+      quality_score: 4
+      speed_score: 5
+      vram_mb: 2000
+      ram_mb: 800
+      recommend_for: "Debug/so sánh; production nên dùng model gốc và chọn GPU CUDA trong Nâng cao"
+      install_note: "install_vieneu_worker_cuda.bat; GTX 1080 Ti chọn cu118"
+
+  vieneu_v2_turbo_cuda:
+    display_name: "VieNeu TTS v2 Turbo (CUDA)"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-v2-Turbo"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      vieneu_mode: "turbo"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-v2-Turbo-GGUF"
+      backbone_filename: "vieneu-tts-v2-turbo.gguf"
+      decoder_repo: "pnnbao-ump/VieNeu-Codec"
+      decoder_filename: "vieneu_decoder.onnx"
+      encoder_repo: "pnnbao-ump/VieNeu-Codec"
+      encoder_filename: "vieneu_encoder.onnx"
+      device: "cuda"
+    default_voice_preset: "Xuân Vĩnh (Nam - Miền Nam)"
+    voice_presets:
+      "Bích Ngọc (Nữ - Miền Bắc)": "Bích Ngọc - Nữ miền Bắc"
+      "Phạm Tuyên (Nam - Miền Bắc)": "Phạm Tuyên - Nam miền Bắc"
+      "Thục Đoan (Nữ - Miền Nam)": "Thục Đoan - Nữ miền Nam"
+      "Xuân Vĩnh (Nam - Miền Nam)": "Xuân Vĩnh - Nam miền Nam"
+    notes: "Bản GPU Turbo; cần install_vieneu_worker_cuda.bat. Nhanh nhất khi có CUDA."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: false
+    catalog_info:
+      category: "experimental"
+      origin: "official"
+      risk: "debug"
+      variant_badge: "Legacy CUDA"
+      description: "Legacy shortcut cho VieNeu Turbo CUDA. Ưu tiên chọn model Turbo thường + Thiết bị xử lý = GPU CUDA."
+      highlight: "Legacy CUDA — giữ để tương thích cấu hình cũ"
+      quality_score: 3
+      speed_score: 5
+      vram_mb: 1500
+      ram_mb: 600
+      recommend_for: "Debug/so sánh; production nên dùng model gốc và chọn GPU CUDA trong Nâng cao"
+      install_note: "install_vieneu_worker_cuda.bat"
+
+  vieneu_03b_q4_cuda:
+    display_name: "VieNeu TTS 0.3B Q4 (CUDA)"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-0.3B-q4-gguf"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: true
+      emotions: ["natural", "storytelling"]
+    runtime:
+      vieneu_mode: "standard"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-0.3B-q4-gguf"
+      gguf_filename: "VieNeu-TTS-0_3B-Q4_0.gguf"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cuda"
+      backbone_device: "cuda"
+    default_voice_preset: "Vinh"
+    voice_presets:
+      Vinh: "Vĩnh - Nam miền Nam"
+      Binh: "Bình - Nam miền Bắc"
+      Tuyen: "Tuyên - Nam miền Bắc"
+      Doan: "Đoan - Nữ miền Nam"
+      Ly: "Ly - Nữ miền Bắc"
+      Ngoc: "Ngọc - Nữ miền Bắc"
+    notes: "Bản GPU nhẹ nhất; cần install_vieneu_worker_cuda.bat."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: true
+    catalog_info:
+      category: "experimental"
+      origin: "official"
+      risk: "debug"
+      variant_badge: "Legacy CUDA"
+      description: "Legacy shortcut cho VieNeu 0.3B Q4 CUDA. Ưu tiên chọn model 0.3B Q4 thường + Thiết bị xử lý = GPU CUDA."
+      highlight: "Legacy CUDA — giữ để tương thích cấu hình cũ"
+      quality_score: 3
+      speed_score: 5
+      vram_mb: 1000
+      ram_mb: 400
+      recommend_for: "Debug/so sánh; production nên dùng model gốc và chọn GPU CUDA trong Nâng cao"
+      install_note: "install_vieneu_worker_cuda.bat"
+
+  # ─── LoRA legacy/experimental ────────────────────────────────────────────────
+
+  vieneu_lora_ngoc_huyen:
+    display_name: "VieNeu LoRA Ngọc Huyền Legacy (0.3B)"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-0.3B-lora-ngoc-huyen"
+    language_priority: "vi"
+    required: false
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: false
+      supports_reference_text: false
+      supports_voice_presets: false
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      vieneu_mode: "lora"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-0.3B-q4-gguf"
+      gguf_filename: "VieNeu-TTS-0_3B-Q4_0.gguf"
+      lora_repo: "pnnbao-ump/VieNeu-TTS-0.3B-lora-ngoc-huyen"
+      codec_repo: "neuphonic/neucodec-onnx-decoder-int8"
+      codec_device: "cpu"
+      backbone_device: "cpu"
+    notes: "Legacy thử nghiệm: dùng GGUF backbone + voice codes từ voices.json, không load PEFT adapter thật; ưu tiên dùng bản Ngọc Huyền PyTorch hoặc GGUF riêng."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 15.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: false
+    catalog_info:
+      category: "experimental"
+      description: "Legacy experimental: không load PEFT LoRA adapter thật, chỉ dùng voice codes từ voices.json trên base GGUF. Có nguy cơ lệch giọng hoặc rò reference text; giữ lại để debug/tương thích."
+      highlight: "Legacy, không khuyến nghị"
+      quality_score: 2
+      speed_score: 3
+      vram_mb: 0
+      ram_mb: 800
+      recommend_for: "Chỉ dùng để so sánh hoặc debug legacy LoRA path"
+      install_note: "install_vieneu_worker.bat; ưu tiên dùng model Ngọc Huyền mới"
 
   qwen3_tts_06b_base:
     display_name: "Qwen3 TTS 0.6B Base"
@@ -294,6 +1077,22 @@ tts_models:
       supports_pitch_shift: false
       supports_emotion: false
     notes: "Engine Qwen3-TTS thử nghiệm, ưu tiên clone voice bằng Profile giọng; phù hợp tiếng Anh và các ngôn ngữ Qwen hỗ trợ chính thức."
+    ref_audio_hints:
+      min_seconds: 3.0
+      max_seconds: 30.0
+      optimal_min_seconds: 10.0
+      optimal_max_seconds: 20.0
+      needs_transcript: true
+    catalog_info:
+      category: "multilingual"
+      description: "Qwen3 TTS 0.6B đa ngôn ngữ (en/zh/ja/ko/de/fr...), clone giọng qua Voice Profile. Bắt buộc cung cấp audio mẫu."
+      highlight: "Clone giọng đa ngôn ngữ"
+      quality_score: 4
+      speed_score: 3
+      vram_mb: 0
+      ram_mb: 2000
+      recommend_for: "Clone giọng tiếng Anh và các ngôn ngữ không phải tiếng Việt"
+      install_note: "install_qwen_worker.bat"
 
   qwen3_tts_17b_base:
     display_name: "Qwen3 TTS 1.7B Base"
@@ -312,6 +1111,22 @@ tts_models:
       supports_pitch_shift: false
       supports_emotion: false
     notes: "Engine Qwen3-TTS clone voice chất lượng cao hơn nhưng nặng hơn; nên thử 0.6B trước."
+    ref_audio_hints:
+      min_seconds: 3.0
+      max_seconds: 30.0
+      optimal_min_seconds: 10.0
+      optimal_max_seconds: 20.0
+      needs_transcript: true
+    catalog_info:
+      category: "multilingual"
+      description: "Qwen3 TTS 1.7B đa ngôn ngữ — chất lượng clone giọng cao hơn 0.6B đáng kể, nhưng cần RAM nhiều hơn."
+      highlight: "Clone giọng chất lượng cao"
+      quality_score: 5
+      speed_score: 2
+      vram_mb: 0
+      ram_mb: 5000
+      recommend_for: "Clone giọng chất lượng tối đa đa ngôn ngữ, máy ≥16GB RAM"
+      install_note: "install_qwen_worker.bat"
 
   valtec_vietnamese_zeroshot:
     display_name: "Valtec Vietnamese TTS"
@@ -337,6 +1152,22 @@ tts_models:
       SM: "SM - Nam miền Nam"
       NM2: "NM2 - Nam miền Bắc 2"
     notes: "Engine tiếng Việt nhẹ, chạy CPU qua worker riêng; phù hợp máy yếu và hỗ trợ clone giọng từ audio mẫu ngắn."
+    ref_audio_hints:
+      min_seconds: 2.0
+      max_seconds: 10.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 10.0
+      needs_transcript: false
+    catalog_info:
+      category: "official-cpu"
+      description: "ValtecTTS tiếng Việt nhẹ, chạy CPU. Hỗ trợ 5 giọng preset và zero-shot clone giọng từ audio mẫu ngắn. Hỗ trợ điều chỉnh tốc độ."
+      highlight: "Nhẹ nhất, zero-shot clone"
+      quality_score: 3
+      speed_score: 4
+      vram_mb: 0
+      ram_mb: 1200
+      recommend_for: "Máy yếu, clone giọng nhanh từ mẫu ngắn, cần điều chỉnh tốc độ"
+      install_note: "install_valtec_worker.bat"
 
 support_models:
   higgs_audio_v2_tokenizer:
@@ -348,6 +1179,16 @@ support_models:
     language_priority: "multilingual"
     required: true
     notes: "Tokenizer âm thanh bắt buộc cho OmniVoice nếu model không chứa thư mục audio_tokenizer."
+    catalog_info:
+      category: "support"
+      description: "Tokenizer âm thanh bắt buộc cho OmniVoice. Tải tự động cùng OmniVoice Vietnamese."
+      highlight: "Bắt buộc cho OmniVoice"
+      quality_score: 0
+      speed_score: 0
+      vram_mb: 0
+      ram_mb: 200
+      recommend_for: "Tự động — không cần chọn thủ công"
+      install_note: ""
 
   chunkformer_vie:
     display_name: "ChunkFormer Vietnamese ASR"
@@ -358,3 +1199,13 @@ support_models:
     language_priority: "vi"
     required: false
     notes: "Dành cho căn timestamp SRT chính xác hơn ở giai đoạn sau."
+    catalog_info:
+      category: "support"
+      description: "ASR tiếng Việt ChunkFormer, dùng để căn timestamp SRT chính xác. Tùy chọn, chưa tích hợp vào workflow chính."
+      highlight: "ASR cho SRT timestamp"
+      quality_score: 0
+      speed_score: 0
+      vram_mb: 0
+      ram_mb: 1500
+      recommend_for: "Căn timestamp SRT chính xác (tính năng tương lai)"
+      install_note: ""

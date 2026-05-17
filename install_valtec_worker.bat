@@ -13,9 +13,14 @@ if not exist vendor mkdir vendor
 if not exist vendor\valtec-tts\.git (
   git clone https://github.com/tronghieuit/valtec-tts.git vendor\valtec-tts
 ) else (
-  git -C vendor\valtec-tts pull --ff-only
+    git -C vendor\valtec-tts pull --ff-only
 )
-uv pip install -e vendor\valtec-tts
-uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+set PY=.venv\Scripts\python.exe
+if not exist "%PY%" (
+    echo Valtec worker Python not found: %PY%
+    exit /b 1
+)
+uv pip install --python "%PY%" -e vendor\valtec-tts
+uv pip install --python "%PY%" torch --index-url https://download.pytorch.org/whl/cpu
 
-pause
+if "%OMNI_TTS_KEEP_WINDOW%"=="1" pause

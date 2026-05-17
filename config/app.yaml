@@ -19,3 +19,4 @@ generation:
   default_model_id: "omnivoice_vietnamese"
   sentence_pause_ms: 450
   max_chunk_chars: 220
+  crossfade_ms: 80

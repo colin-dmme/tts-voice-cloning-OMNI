@@ -16,6 +16,7 @@ DEFAULT_PREFERENCES = {
     "speed": 1.0,
     "pitch_shift": 0.0,
     "emotion": "natural",
+    "runtime_target": "auto",
     "codec_repo": None,
     "temperature": None,
     "top_k": None,
@@ -24,6 +25,12 @@ DEFAULT_PREFERENCES = {
     "overwrite": False,
     "split_output": True,
     "output_srt": False,
+    "window_geometry": "",
+    "window_state": "normal",
+    "text_pane_sash": None,
+    "text_pane_ratio": None,
+    "file_pane_sash": None,
+    "file_pane_ratio": None,
 }
 
 

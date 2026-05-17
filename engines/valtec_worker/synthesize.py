@@ -37,7 +37,7 @@ def synthesize(payload: dict[str, Any], output_path: Path) -> None:
 
 
 def _clone_voice(payload: dict[str, Any], output_path: Path, ref_audio: str) -> None:
-    tts = _create_zeroshot_tts()
+    tts = _create_zeroshot_tts(_device(payload))
     prepared_ref = _prepare_reference_audio(ref_audio)
     clone_voice = getattr(tts, "clone_voice", None)
     if callable(clone_voice):
@@ -61,7 +61,7 @@ def _clone_voice(payload: dict[str, Any], output_path: Path, ref_audio: str) -> 
     _write_audio_result(result, output_path)
 
 
-def _create_zeroshot_tts():
+def _create_zeroshot_tts(device: str = "cpu"):
     from valtec_tts import ZeroShotTTS
 
     paths = _resolve_zeroshot_paths()
@@ -70,10 +70,10 @@ def _create_zeroshot_tts():
         return ZeroShotTTS(
             checkpoint_path=str(checkpoint_path),
             config_path=str(config_path),
-            device="cpu",
+            device=device,
         )
     try:
-        return ZeroShotTTS(device="cpu")
+        return ZeroShotTTS(device=device)
     except FileNotFoundError:
         paths = _resolve_zeroshot_paths()
         if paths is None:
@@ -82,7 +82,7 @@ def _create_zeroshot_tts():
         return ZeroShotTTS(
             checkpoint_path=str(checkpoint_path),
             config_path=str(config_path),
-            device="cpu",
+            device=device,
         )
 
 
@@ -107,7 +107,7 @@ def _resolve_zeroshot_paths() -> tuple[Path, Path] | None:
 def _preset_voice(payload: dict[str, Any], output_path: Path) -> None:
     from valtec_tts import TTS
 
-    tts = TTS(device="cpu")
+    tts = TTS(device=_device(payload))
     speaker = _clean_text(payload.get("speaker")) or DEFAULT_SPEAKER
     speak = getattr(tts, "speak", None)
     if callable(speak):
@@ -178,6 +178,11 @@ def _clean_text(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _device(payload: dict[str, Any]) -> str:
+    value = _clean_text(payload.get("device")).lower()
+    return value if value in {"cpu", "cuda"} else "cpu"
 
 
 def parse_args() -> argparse.Namespace:

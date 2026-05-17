@@ -55,6 +55,11 @@ def build_app() -> gr.Blocks:
                         choices=handlers.voice_profile_choices(),
                         value="",
                     )
+                    profile_compat_info = gr.Textbox(
+                        label="Tương thích profile",
+                        interactive=False,
+                        lines=1,
+                    )
                     voice_preset = gr.Dropdown(
                         label="Preset giọng (khi không clone)",
                         choices=handlers.speaker_choices_for_model(default_model),
@@ -72,6 +77,11 @@ def build_app() -> gr.Blocks:
                         label="Cảm xúc VieNeu",
                         choices=[("Tự nhiên", "natural"), ("Kể chuyện", "storytelling")],
                         value="natural",
+                    )
+                    runtime_target = gr.Dropdown(
+                        label="Thiết bị xử lý",
+                        choices=handlers.runtime_target_choices(),
+                        value="auto",
                     )
                     temperature = gr.Slider(
                         label="Temperature VieNeu",
@@ -132,6 +142,7 @@ def build_app() -> gr.Blocks:
                     voice_preset,
                     speed,
                     emotion,
+                    runtime_target,
                     temperature,
                     top_k,
                     sentence_pause_ms,
@@ -155,6 +166,16 @@ def build_app() -> gr.Blocks:
                 handlers.speaker_changed_updates,
                 inputs=[voice_preset, model_id],
                 outputs=[voice_profile_id],
+            )
+            voice_profile_id.change(
+                handlers.profile_compat_update,
+                inputs=[voice_profile_id, model_id],
+                outputs=[profile_compat_info],
+            )
+            model_id.change(
+                handlers.profile_compat_update,
+                inputs=[voice_profile_id, model_id],
+                outputs=[profile_compat_info],
             )
 
         with gr.Tab("Quản lý model"):
@@ -194,8 +215,11 @@ def build_app() -> gr.Blocks:
                 )
                 download_btn = gr.Button("Tải model")
                 download_required_btn = gr.Button("Tải các model bắt buộc còn thiếu")
+                install_gpu_btn = gr.Button("Cài tăng tốc GPU cho model")
                 refresh_btn = gr.Button("Làm mới")
+                catalog_btn = gr.Button("Xem catalog model")
             model_message = gr.Textbox(label="Thông báo", interactive=False)
+            catalog_html = gr.HTML(visible=False)
 
             download_btn.click(
                 handlers.download_selected_model,
@@ -206,7 +230,13 @@ def build_app() -> gr.Blocks:
                 handlers.download_required_models,
                 outputs=[model_message, model_table],
             )
+            install_gpu_btn.click(
+                handlers.install_gpu_for_model,
+                inputs=[download_model_id],
+                outputs=[model_message, runtime_table],
+            )
             refresh_btn.click(handlers.refresh_model_table, outputs=[model_table])
             refresh_btn.click(handlers.refresh_runtime_table, outputs=[runtime_table])
+            catalog_btn.click(handlers.get_model_catalog_html, outputs=[catalog_html])
 
     return app

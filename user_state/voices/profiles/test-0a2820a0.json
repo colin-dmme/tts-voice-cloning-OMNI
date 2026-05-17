@@ -1,0 +1,16 @@
+{
+  "profile_id": "test-0a2820a0",
+  "name": "test",
+  "audio_path": "voices/samples/test-0a2820a0.wav",
+  "transcript": "Vừa mới chớm thu, tiết trời đã khang khác, nắng vàng hơn và cũng dịu hơn.",
+  "language": "vi",
+  "project": "test",
+  "notes": "",
+  "created_at": "2026-05-16T13:45:40",
+  "updated_at": "2026-05-16T13:45:40",
+  "schema_version": 1,
+  "duration_seconds": 6.974708333333333,
+  "sample_rate": 24000,
+  "default_sample_id": "",
+  "extra_samples": []
+}

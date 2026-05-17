@@ -12,6 +12,20 @@ App TTS local ưu tiên tiếng Việt, có lõi tách khỏi giao diện để 
 
 ## Chạy app
 
+Chạy 1-click cho máy làm việc hoặc máy thuê:
+
+```bat
+Start-ColinTTS.bat
+```
+
+File này tự chuẩn bị môi trường `uv`, pull source mới nhất nếu có Git, restore `user_state/` vào profile/setting runtime rồi mở giao diện Tkinter.
+
+Nếu máy thuê chưa có source, chạy bootstrap từ GitHub bằng PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/colin-dmme/tts-voice-cloning-OMNI/main/scripts/install_from_github.ps1 | iex"
+```
+
 Chạy giao diện web Gradio:
 
 ```bat
@@ -89,6 +103,16 @@ Khi bật chế độ tách file, `.srt` sẽ xuất mỗi cue/dòng subtitle th
 Profile giọng được lưu trong `voices/profiles/`, còn file audio mẫu được copy vào `voices/samples/`. Các giao diện chỉ chọn `profile_id`; core sẽ tự lấy file giọng mẫu và transcript khi tạo audio.
 
 Cache Hugging Face cũng được trỏ về `.hf_cache/` khi chạy qua các file `.bat`, để dữ liệu không bị rải sang cache hệ thống.
+
+## Đồng bộ máy thuê
+
+Máy chính là nguồn chuẩn cho profile giọng và setting dùng chung. Khi muốn đưa state hiện tại lên GitHub:
+
+```bat
+Sync-State-To-Git.bat
+```
+
+Script này export `voices/profiles`, `voices/samples` và các setting UI portable vào `user_state/`, commit riêng phần state đó rồi push lên branch hiện tại. Trên máy thuê mới, `Start-ColinTTS.bat` sẽ restore `user_state/` trước khi mở app. Model, cache tải model, output và license vẫn không đưa vào Git.
 
 Nếu dùng GTX 1080 Ti, chạy:
 

@@ -7,7 +7,7 @@ from typing import get_args
 from uuid import uuid4
 
 from omni_tts_core.audio.wav_tools import convert_to_wav_24k_mono, load_audio_info
-from omni_tts_core.paths import ensure_dir
+from omni_tts_core.paths import ensure_dir, project_path
 from omni_tts_shared.errors import ConfigError
 from omni_tts_shared.schemas import AudioSampleMeta, LanguageCode, ProfileSaveWarning, VoiceProfile
 
@@ -168,7 +168,8 @@ class VoiceProfileManager:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ConfigError(f"Profile giọng không hợp lệ: {path}") from exc
-        return VoiceProfile.model_validate(data)
+        profile = VoiceProfile.model_validate(data)
+        return self._normalize_paths(profile)
 
     def _write_profile(self, profile: VoiceProfile) -> None:
         path = self._profile_path(profile.profile_id)
@@ -191,6 +192,30 @@ class VoiceProfileManager:
             if not candidate.exists():
                 return candidate
             index += 1
+
+    def _normalize_paths(self, profile: VoiceProfile) -> VoiceProfile:
+        extra_samples = [
+            sample.model_copy(update={"audio_path": self._normalize_audio_path(sample.audio_path)})
+            for sample in profile.extra_samples
+        ]
+        return profile.model_copy(
+            update={
+                "audio_path": self._normalize_audio_path(profile.audio_path),
+                "extra_samples": extra_samples,
+            }
+        )
+
+    def _normalize_audio_path(self, value: Path) -> Path:
+        if value.exists():
+            return value
+        if not value.is_absolute():
+            candidate = project_path(value)
+            if candidate.exists():
+                return candidate
+        sample_candidate = self.samples_dir / value.name
+        if value.name and sample_candidate.exists():
+            return sample_candidate
+        return project_path(value) if not value.is_absolute() else value
 
 
 def _new_profile_id(name: str) -> str:

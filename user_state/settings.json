@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "ui_tkinter": {
+    "runtime_target": "cuda",
+    "codec_repo": "neuphonic/neucodec-onnx-decoder-int8",
+    "max_chunk_chars": 220,
+    "emotion": "natural",
+    "speed": 1.0,
+    "voice_profile_id": "kallay-6068ff65",
+    "top_k": null,
+    "output_srt": false,
+    "speaker_id": null,
+    "temperature": null,
+    "split_output": true,
+    "pitch_shift": 0.0,
+    "language": "auto",
+    "overwrite": false,
+    "sentence_pause_ms": 100,
+    "model_id": "qwen3_tts_17b_base"
+  }
+}

@@ -5,6 +5,7 @@ from typing import Any
 
 import gradio as gr
 
+from omni_tts_core.user_state import restore_user_state
 from omni_tts_core.service import TtsService
 from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES
 from omni_tts_shared.errors import OmniTtsError
@@ -16,6 +17,7 @@ from omni_tts_shared.voice_presets import (
 from omni_tts_shared.vieneu_codecs import NO_CODEC_ID, NO_CODEC_LABEL
 
 
+restore_user_state()
 service = TtsService()
 
 

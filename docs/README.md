@@ -8,6 +8,7 @@
 | [vieneu-engine.md](vieneu-engine.md) | Chi tiết VieNeu integration: 4 modes, 16 models, GPU setup, cách thêm model/mode, known issues, roadmap | 2026-05-15 |
 | [voice-profile-optimization.md](voice-profile-optimization.md) | Hiện trạng và kế hoạch dài hạn tối ưu Profile giọng cho app đa engine | 2026-05-15 |
 | [runtime-device-policy.md](runtime-device-policy.md) | Quy ước Auto/CPU/GPU CUDA cho app đa engine, detector/policy/runtime target | 2026-05-16 |
+| [rented-machine-workflow.md](rented-machine-workflow.md) | Cách dùng GitHub làm state source cho máy thuê mới hoàn toàn | 2026-05-17 |
 | [engineering-decisions.md](engineering-decisions.md) | Source of truth cho các quyết định kỹ thuật cần giữ nhất quán khi dùng Codex/Cursor/Claude/tự code | 2026-05-15 |
 | [license_obfuscation_release_notes.md](license_obfuscation_release_notes.md) | License & obfuscation release notes | — |
 | [portable_distribution_notes.md](portable_distribution_notes.md) | Portable distribution notes | — |

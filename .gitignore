@@ -36,6 +36,10 @@ logs/
 voices/
 config/ui_tkinter.json
 
+# Git-backed portable user state lives in user_state/ and is intentionally tracked.
+!user_state/
+!user_state/**
+
 # Local license secrets and generated customer licenses
 secrets/
 config/license_private_key.pem

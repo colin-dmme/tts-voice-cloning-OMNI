@@ -1,0 +1,16 @@
+{
+  "profile_id": "kallay-6068ff65",
+  "name": "Kallay",
+  "audio_path": "voices/samples/kallay-6068ff65.wav",
+  "transcript": "if you wanna get more views with less effort,it's critical you understand, how the algorithms actually work and once you learn this I guarantee. you will never look at content the same way again. in this video, I'm gonna break down how social algorithms work",
+  "language": "en",
+  "project": "tiktok",
+  "notes": "",
+  "created_at": "2026-05-16T21:51:32",
+  "updated_at": "2026-05-16T21:51:45",
+  "schema_version": 1,
+  "duration_seconds": 13.322458333333334,
+  "sample_rate": 24000,
+  "default_sample_id": "",
+  "extra_samples": []
+}

@@ -13,6 +13,7 @@ Bản portable cho Windows cần đáp ứng:
 - source Python gốc không được gửi khách;
 - code trong `app/src` và worker đã được PyArmor obfuscate;
 - license vẫn dùng local signed license;
+- riêng bản owner/internal có thể build với `-OwnerBuild` để không yêu cầu nhập license;
 - model và engine nặng có thể copy riêng khi cần.
 
 ## Lệnh build
@@ -28,6 +29,14 @@ Build bản đầy đủ hơn để gửi khách, nếu ổ đĩa còn đủ dun
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\build_portable.ps1 -IncludeModels -IncludeVoices -IncludeEngineEnvs
 ```
+
+Build bản owner/internal để dùng trên máy thuê, không yêu cầu nhập license:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_portable.ps1 -OutputRoot "D:\_coder" -IncludeEngineEnvs -IncludeWorkerCaches -IncludeUserState -OwnerBuild
+```
+
+Nếu runtime Python của `uv` bị khóa quyền trên máy build, có thể truyền thêm `-RuntimeSource "C:\path\to\python"` để dùng một thư mục Python 3.12 khác làm nguồn runtime portable.
 
 Vị trí output mặc định:
 
@@ -46,6 +55,7 @@ dist_portable/colinttslocal/colinttslocal.bat
 ```text
 colinttslocal/
   colinttslocal.bat
+  Create-DesktopShortcut.ps1
   README_FIRST.txt
   app/
     src/                         # source đã obfuscate
@@ -113,3 +123,5 @@ secrets/license_private_key.pem
 ```
 
 Khách mở tab `Bản quyền`, sao chép mã máy, gửi lại cho chủ phần mềm. Chủ phần mềm tạo `license.json` bằng tool nội bộ rồi gửi khách nhập trong app.
+
+Bản owner/internal dùng `COLIN_TTS_LICENSE_MODE=disabled` trong `colinttslocal.bat`, chỉ để chủ phần mềm dùng riêng. Không gửi bản này cho khách.

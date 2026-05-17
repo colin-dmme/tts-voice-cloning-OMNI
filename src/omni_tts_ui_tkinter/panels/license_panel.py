@@ -79,7 +79,9 @@ class LicensePanel(ttk.Frame):
 
     def refresh_status(self) -> None:
         status = self.controller.license_status()
-        label = "Đã kích hoạt" if status.valid else "Chưa kích hoạt"
+        label = "Không yêu cầu bản quyền" if status.code == "disabled" else (
+            "Đã kích hoạt" if status.valid else "Chưa kích hoạt"
+        )
         self.status_var.set(label)
         self.detail_var.set(format_license_status(status))
         foreground = "#1f7a3a" if status.valid else "#a3362d"

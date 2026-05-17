@@ -40,6 +40,15 @@ class LocalSignedLicenseProvider:
         return self.get_status().feature_enabled(feature)
 
     def get_status(self) -> LicenseStatus:
+        if _license_mode() == "disabled":
+            return self._status(
+                True,
+                "disabled",
+                "Bản nội bộ đang tắt yêu cầu bản quyền.",
+                email="owner",
+                plan="internal",
+                features={"tts": True, "vieneu": True, "qwen": True},
+            )
         if not self.public_key_path.exists():
             return self._status(
                 False,
@@ -222,3 +231,7 @@ def _parse_features(value: Any) -> dict[str, bool]:
     if not isinstance(value, dict):
         return {}
     return {str(key): bool(item) for key, item in value.items()}
+
+
+def _license_mode() -> str:
+    return os.environ.get("COLIN_TTS_LICENSE_MODE", "").strip().lower()

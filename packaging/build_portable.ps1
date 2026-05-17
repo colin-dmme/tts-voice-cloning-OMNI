@@ -2,8 +2,11 @@ param(
     [string]$OutputRoot = "dist_portable",
     [switch]$IncludeModels,
     [switch]$IncludeVoices,
+    [switch]$IncludeUserState,
     [switch]$IncludeEngineEnvs,
     [switch]$IncludeWorkerCaches,
+    [switch]$OwnerBuild,
+    [string]$RuntimeSource = "",
     [switch]$SkipRuntime
 )
 
@@ -73,18 +76,26 @@ function Read-VenvHome {
 
 function Write-Runner {
     $runner = Join-Path $PortableRoot "colinttslocal.bat"
-    @'
+    $licenseModeLine = if ($OwnerBuild) {
+        "set COLIN_TTS_LICENSE_MODE=disabled"
+    } else {
+        "set COLIN_TTS_LICENSE_MODE=required"
+    }
+    @"
 @echo off
 setlocal
 cd /d "%~dp0"
 
 set COLIN_TTS_ROOT=%~dp0
 set OMNI_TTS_LICENSE_PUBLIC_KEY=%~dp0config\license_public_key.pem
+$licenseModeLine
 set HF_HOME=%~dp0.hf_cache
 set HF_HUB_CACHE=%~dp0.hf_cache\hub
 set HF_HUB_DISABLE_SYMLINKS_WARNING=1
 set PYTHONPATH=%~dp0app;%~dp0app\src
 set PATH=%~dp0runtime\python;%~dp0runtime\python\DLLs;%PATH%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Create-DesktopShortcut.ps1" >nul 2>nul
 
 echo Starting Colin TTS Local...
 "%~dp0runtime\python\python.exe" -m omni_tts_ui_tkinter.main
@@ -94,19 +105,56 @@ if errorlevel 1 (
   echo Colin TTS Local stopped with an error.
   pause
 )
-'@ | Set-Content -LiteralPath $runner -Encoding ASCII
+"@ | Set-Content -LiteralPath $runner -Encoding ASCII
+}
+
+function Write-ShortcutScript {
+    $script = Join-Path $PortableRoot "Create-DesktopShortcut.ps1"
+    @'
+$ErrorActionPreference = "SilentlyContinue"
+
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$target = Join-Path $root "colinttslocal.bat"
+$desktop = [Environment]::GetFolderPath("Desktop")
+if (!$desktop) {
+    return
+}
+
+$shortcutPath = Join-Path $desktop "Colin TTS Local.lnk"
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $target
+$shortcut.WorkingDirectory = $root
+$shortcut.Description = "Open Colin TTS Local"
+$shortcut.IconLocation = "$env:SystemRoot\System32\SHELL32.dll,220"
+$shortcut.Save()
+'@ | Set-Content -LiteralPath $script -Encoding ASCII
 }
 
 function Write-CustomerReadme {
     $readme = Join-Path $PortableRoot "README_FIRST.txt"
+    if ($OwnerBuild) {
+        @'
+Colin TTS Local owner portable
+
+1. Double-click colinttslocal.bat to open the app.
+2. The first run creates a Desktop shortcut named Colin TTS Local.
+3. This owner/internal build does not require license activation.
+4. Do not send this package to customers.
+
+Do not move files out of this folder. If Windows blocks the zip, right-click the zip, choose Properties, and unblock it before extracting.
+'@ | Set-Content -LiteralPath $readme -Encoding UTF8
+        return
+    }
     @'
 Colin TTS Local portable
 
 1. Double-click colinttslocal.bat to open the app.
-2. Open the Ban quyen tab and copy the machine code.
-3. Send that machine code to the software owner to receive license.json.
-4. In the app, click Nhap file license and choose license.json.
-5. After activation, use the app normally.
+2. The first run creates a Desktop shortcut named Colin TTS Local.
+3. Open the Ban quyen tab and copy the machine code.
+4. Send that machine code to the software owner to receive license.json.
+5. In the app, click Nhap file license and choose license.json.
+6. After activation, use the app normally.
 
 Do not move files out of this folder. If Windows blocks the zip, right-click the zip, choose Properties, and unblock it before extracting.
 '@ | Set-Content -LiteralPath $readme -Encoding UTF8
@@ -120,6 +168,16 @@ function Copy-Config {
     Copy-Item -LiteralPath (Join-Path $ProjectRoot "config\license_public_key.pem") -Destination $target -Force
 }
 
+function Copy-UserState {
+    $source = Join-Path $ProjectRoot "user_state"
+    if (!(Test-Path -LiteralPath $source)) {
+        Write-Host "Skipping missing user_state."
+        return
+    }
+    Write-Host "Copying user_state..."
+    Copy-Directory -Source $source -Destination (Join-Path $PortableRoot "user_state") -ExcludeDirs @("__pycache__")
+}
+
 function Copy-MainRuntime {
     if ($SkipRuntime) {
         Write-Host "Skipping runtime copy."
@@ -127,7 +185,11 @@ function Copy-MainRuntime {
     }
 
     $venv = Join-Path $ProjectRoot ".venv"
-    $pythonHome = Read-VenvHome (Join-Path $venv "pyvenv.cfg")
+    $pythonHome = if ($RuntimeSource) {
+        (Resolve-Path -LiteralPath $RuntimeSource).Path
+    } else {
+        Read-VenvHome (Join-Path $venv "pyvenv.cfg")
+    }
     Write-Host "Copying Python runtime..."
     Copy-Directory -Source $pythonHome -Destination $RuntimePython -ExcludeDirs @("__pycache__")
 
@@ -140,7 +202,14 @@ function Copy-MainRuntime {
         -ExcludeFiles @("__editable__*", "_editable_impl_*.pth")
 }
 
-function Build-ObfuscatedSource {
+function Build-AppSource {
+    if ($OwnerBuild) {
+        Write-Host "Copying plain src for owner build..."
+        New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
+        Copy-Directory -Source (Join-Path $ProjectRoot "src") -Destination (Join-Path $AppDir "src") -ExcludeDirs @("__pycache__")
+        return
+    }
+
     Write-Host "Obfuscating src..."
     if (Test-Path -LiteralPath $ObfuscatedSrc) {
         Remove-Item -LiteralPath $ObfuscatedSrc -Recurse -Force
@@ -165,9 +234,16 @@ function Build-Worker {
 
     Write-Host "Preparing worker $Name..."
     New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
-    Copy-Item -LiteralPath (Join-Path $sourceDir "README.md") -Destination $targetDir -Force -ErrorAction SilentlyContinue
-    Copy-Item -LiteralPath (Join-Path $sourceDir "pyproject.toml") -Destination $targetDir -Force -ErrorAction SilentlyContinue
-    Copy-Item -LiteralPath (Join-Path $sourceDir "uv.lock") -Destination $targetDir -Force -ErrorAction SilentlyContinue
+    if ($OwnerBuild) {
+        Copy-Directory `
+            -Source $sourceDir `
+            -Destination $targetDir `
+            -ExcludeDirs @(".venv", "__pycache__", "vendor", "pretrained", "site-packages")
+    } else {
+        Copy-Item -LiteralPath (Join-Path $sourceDir "README.md") -Destination $targetDir -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath (Join-Path $sourceDir "pyproject.toml") -Destination $targetDir -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath (Join-Path $sourceDir "uv.lock") -Destination $targetDir -Force -ErrorAction SilentlyContinue
+    }
     if (Test-Path -LiteralPath (Join-Path $sourceDir "vendor")) {
         Copy-Directory `
             -Source (Join-Path $sourceDir "vendor") `
@@ -181,15 +257,22 @@ function Build-Worker {
             -ExcludeDirs @("__pycache__")
     }
 
-    if (Test-Path -LiteralPath $workerBuild) {
-        Remove-Item -LiteralPath $workerBuild -Recurse -Force
+    if (!$OwnerBuild) {
+        if (Test-Path -LiteralPath $workerBuild) {
+            Remove-Item -LiteralPath $workerBuild -Recurse -Force
+        }
+        & uvx pyarmor gen -O $workerBuild (Join-Path $sourceDir "synthesize.py")
+        if ($LASTEXITCODE -ne 0) {
+            throw "PyArmor failed for worker $Name"
+        }
+        Copy-Item -LiteralPath (Join-Path $workerBuild "synthesize.py") -Destination $targetDir -Force
+        Copy-Directory -Source (Join-Path $workerBuild "pyarmor_runtime_000000") -Destination (Join-Path $targetDir "pyarmor_runtime_000000")
+        if (Test-Path -LiteralPath (Join-Path $sourceDir "modes")) {
+            Copy-Directory -Source (Join-Path $sourceDir "modes") -Destination (Join-Path $targetDir "modes") -ExcludeDirs @("__pycache__")
+        }
+        Copy-Item -LiteralPath (Join-Path $sourceDir "worker_utils.py") -Destination $targetDir -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath (Join-Path $sourceDir "encode_reference.py") -Destination $targetDir -Force -ErrorAction SilentlyContinue
     }
-    & uvx pyarmor gen -O $workerBuild (Join-Path $sourceDir "synthesize.py")
-    if ($LASTEXITCODE -ne 0) {
-        throw "PyArmor failed for worker $Name"
-    }
-    Copy-Item -LiteralPath (Join-Path $workerBuild "synthesize.py") -Destination $targetDir -Force
-    Copy-Directory -Source (Join-Path $workerBuild "pyarmor_runtime_000000") -Destination (Join-Path $targetDir "pyarmor_runtime_000000")
 
     if ($IncludeEngineEnvs) {
         Write-Host "Copying worker site-packages for $Name..."
@@ -248,7 +331,7 @@ if (Test-Path -LiteralPath $PortableRoot) {
 New-Item -ItemType Directory -Force -Path $PortableRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $BuildRoot | Out-Null
 
-Build-ObfuscatedSource
+Build-AppSource
 Copy-Config
 Copy-MainRuntime
 Build-Worker -Name "vieneu_worker"
@@ -270,11 +353,16 @@ if ($IncludeVoices) {
     Copy-Directory -Source (Join-Path $ProjectRoot "voices") -Destination (Join-Path $PortableRoot "voices")
 }
 
+if ($IncludeUserState) {
+    Copy-UserState
+}
+
 if ($IncludeWorkerCaches) {
     Copy-WorkerCaches
 }
 
 Write-Runner
+Write-ShortcutScript
 Write-CustomerReadme
 
 Write-Host ""
@@ -284,4 +372,4 @@ Write-Host ""
 Write-Host "For a customer-ready full package, run with:"
 Write-Host ".\packaging\build_portable.ps1 -IncludeModels -IncludeVoices -IncludeEngineEnvs"
 Write-Host ""
-Write-Host "For a lighter package, omit -IncludeModels and add -IncludeWorkerCaches."
+Write-Host "For a lighter owner package, omit -IncludeModels and add -IncludeWorkerCaches -IncludeUserState -OwnerBuild."

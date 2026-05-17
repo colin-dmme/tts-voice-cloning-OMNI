@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -33,10 +34,16 @@ class AppSettings:
 
     @property
     def host(self) -> str:
+        override = os.environ.get("COLIN_TTS_HOST") or os.environ.get("OMNI_TTS_HOST")
+        if override:
+            return override
         return str(self._data.get("app", {}).get("host", "127.0.0.1"))
 
     @property
     def port(self) -> int:
+        override = os.environ.get("COLIN_TTS_PORT") or os.environ.get("OMNI_TTS_PORT")
+        if override:
+            return int(override)
         return int(self._data.get("app", {}).get("port", 7860))
 
     @property

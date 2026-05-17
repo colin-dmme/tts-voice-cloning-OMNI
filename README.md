@@ -27,6 +27,16 @@ Nếu máy thuê chưa có source, chạy bootstrap từ GitHub bằng PowerShel
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/colin-dmme/tts-voice-cloning-OMNI/main/scripts/install_from_github.ps1 | iex"
 ```
 
+Nếu máy thuê là Docker GPU Linux, mở container template `pytorch`, expose port `7860`, rồi chạy:
+
+```bash
+git clone https://github.com/colin-dmme/tts-voice-cloning-OMNI.git
+cd tts-voice-cloning-OMNI
+bash Start-ColinTTS-Docker-GPU.sh
+```
+
+Sau đó mở URL port `7860` do nhà cung cấp cloud hiển thị. Xem thêm `docs/docker_gpu_webui.md`.
+
 Chạy giao diện web Gradio:
 
 ```bat

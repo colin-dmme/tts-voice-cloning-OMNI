@@ -13,7 +13,7 @@ if ! command -v uv >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
-PYTORCH_INDEX="${PYTORCH_CUDA_INDEX_URL:-https://download.pytorch.org/whl/cu126}"
+PYTORCH_INDEX="${PYTORCH_CUDA_INDEX_URL:-https://download.pytorch.org/whl/cu128}"
 
 echo "Installing optional OmniVoice dependencies for Linux CUDA..."
 uv sync --extra tts --inexact

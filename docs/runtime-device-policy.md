@@ -85,6 +85,7 @@ Khi thêm model mới:
 - Wheel CUDA nội bộ: `runtime_wheels/windows/cp312/cuda/llama_cpp_python-0.3.16-cp312-cp312-win_amd64.whl`, SHA256 `1191E0DD8DE468D1628BBB29270706D04DACB8CF9A6AA54A7E65840B23AEBE38`.
 - `install_vieneu_worker_cuda.bat` đã ưu tiên cài wheel nội bộ này, rồi re-apply PyTorch `cu118` để tránh dependency kéo worker về CPU.
 - Probe worker sau cài: `torch.cuda.is_available() == True`, `llama_cpp.llama_supports_gpu_offload() == True`.
+- RTX 50xx/5090 Blackwell có compute capability `sm_120` và cần PyTorch CUDA 12.8+. Nếu gặp lỗi `no kernel image is available`, chạy `Fix-RTX50-CUDA.bat` trong portable hoặc `install_qwen_worker_blackwell.bat` trong source checkout. Không đổi đường GTX 1080 Ti/`cu118` vì Pascal vẫn cần bộ cài riêng.
 - `VieNeu TTS v2 Standard (CUDA)` tạo WAV thành công: `outputs/jobs/20260516_065613_815765ff/output.wav`, 1 đoạn, khoảng 4.5 giây.
 - Khi truyền trực tiếp Profile giọng/ref audio vào `VieNeu TTS v2 Standard (CUDA)`, worker từng crash native `0xC0000005` sau warning PyTorch. Đã đổi sang luồng an toàn hơn: encode audio mẫu trong process riêng thành `ref_codes.npy`, cache theo profile/sample/model, rồi Standard/GGUF generate bằng `ref_codes + ref_text`.
 - Smoke test sau chỉnh: `VieNeu TTS v2 Standard (CUDA)` + profile `ngoc-huyen-10s` + Distill tạo WAV thành công tại `outputs/jobs/20260516_143613_5c9100d9/output.wav`; chạy lại dùng cache tại `outputs/jobs/20260516_143710_17f2dbd3/output.wav`.

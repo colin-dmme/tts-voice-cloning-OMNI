@@ -169,6 +169,6 @@ def _provider_label(provider: str) -> str:
 def _install_hint(provider: str) -> str:
     return {
         "vieneu": "install_vieneu_worker.bat hoặc install_vieneu_worker_cuda.bat",
-        "qwen": "install_qwen_worker.bat",
+        "qwen": "install_qwen_worker.bat hoặc install_qwen_worker_blackwell.bat nếu dùng RTX 50xx",
         "valtec": "install_valtec_worker.bat",
     }.get(provider, "script cài tương ứng")

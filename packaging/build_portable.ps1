@@ -139,8 +139,9 @@ Colin TTS Local owner portable
 
 1. Double-click colinttslocal.bat to open the app.
 2. The first run creates a Desktop shortcut named Colin TTS Local.
-3. This owner/internal build does not require license activation.
-4. Do not send this package to customers.
+3. On RTX 50xx / Blackwell GPUs, run Fix-RTX50-CUDA.bat once before using GPU CUDA.
+4. This owner/internal build does not require license activation.
+5. Do not send this package to customers.
 
 Do not move files out of this folder. If Windows blocks the zip, right-click the zip, choose Properties, and unblock it before extracting.
 '@ | Set-Content -LiteralPath $readme -Encoding UTF8
@@ -151,10 +152,11 @@ Colin TTS Local portable
 
 1. Double-click colinttslocal.bat to open the app.
 2. The first run creates a Desktop shortcut named Colin TTS Local.
-3. Open the Ban quyen tab and copy the machine code.
-4. Send that machine code to the software owner to receive license.json.
-5. In the app, click Nhap file license and choose license.json.
-6. After activation, use the app normally.
+3. On RTX 50xx / Blackwell GPUs, run Fix-RTX50-CUDA.bat once before using GPU CUDA.
+4. Open the Ban quyen tab and copy the machine code.
+5. Send that machine code to the software owner to receive license.json.
+6. In the app, click Nhap file license and choose license.json.
+7. After activation, use the app normally.
 
 Do not move files out of this folder. If Windows blocks the zip, right-click the zip, choose Properties, and unblock it before extracting.
 '@ | Set-Content -LiteralPath $readme -Encoding UTF8
@@ -166,6 +168,18 @@ function Copy-Config {
     Copy-Item -LiteralPath (Join-Path $ProjectRoot "config\app.yaml") -Destination $target -Force
     Copy-Item -LiteralPath (Join-Path $ProjectRoot "config\models.yaml") -Destination $target -Force
     Copy-Item -LiteralPath (Join-Path $ProjectRoot "config\license_public_key.pem") -Destination $target -Force
+}
+
+function Copy-PortableTools {
+    $tools = @(
+        "Fix-RTX50-CUDA.bat"
+    )
+    foreach ($tool in $tools) {
+        $source = Join-Path $ProjectRoot $tool
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination $PortableRoot -Force
+        }
+    }
 }
 
 function Copy-UserState {
@@ -333,6 +347,7 @@ New-Item -ItemType Directory -Force -Path $BuildRoot | Out-Null
 
 Build-AppSource
 Copy-Config
+Copy-PortableTools
 Copy-MainRuntime
 Build-Worker -Name "vieneu_worker"
 Build-Worker -Name "qwen_worker"

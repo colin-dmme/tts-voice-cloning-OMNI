@@ -29,6 +29,8 @@ Script này sẽ:
 - mở Web UI ở `0.0.0.0:7860`;
 - dùng owner mode mặc định, không yêu cầu license.
 
+Linux GPU scripts dùng PyTorch CUDA 12.8 mặc định để hỗ trợ RTX 50xx/5090 Blackwell (`sm_120`). Nếu cần ép index khác, đặt biến `PYTORCH_CUDA_INDEX_URL` trước khi chạy script.
+
 Nếu muốn giữ license như bản khách hàng:
 
 ```bash

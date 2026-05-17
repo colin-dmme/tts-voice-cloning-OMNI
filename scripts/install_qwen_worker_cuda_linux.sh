@@ -23,7 +23,7 @@ if [[ ! -x "$PY" ]]; then
   exit 1
 fi
 
-PYTORCH_INDEX="${PYTORCH_CUDA_INDEX_URL:-https://download.pytorch.org/whl/cu126}"
+PYTORCH_INDEX="${PYTORCH_CUDA_INDEX_URL:-https://download.pytorch.org/whl/cu128}"
 uv pip install --python "$PY" qwen-tts
 uv pip install --python "$PY" --force-reinstall torch --index-url "$PYTORCH_INDEX"
 

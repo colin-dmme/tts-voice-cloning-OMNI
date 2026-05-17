@@ -132,3 +132,15 @@ install_tts_deps_cuda126.bat
 ```
 
 File này sẽ cài nhóm TTS rồi ép cài lại `torch==2.7.1+cu126` và `torchaudio==2.7.1+cu126`, phù hợp hơn với GTX 1080 Ti.
+
+Nếu dùng RTX 50xx/5090 Blackwell và gặp lỗi `CUDA capability sm_120` hoặc `no kernel image is available`, chạy:
+
+```bat
+Fix-RTX50-CUDA.bat
+```
+
+Với source checkout có thể cài riêng Qwen worker Blackwell bằng:
+
+```bat
+install_qwen_worker_blackwell.bat
+```

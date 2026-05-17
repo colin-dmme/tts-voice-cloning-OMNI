@@ -56,6 +56,7 @@ dist_portable/colinttslocal/colinttslocal.bat
 colinttslocal/
   colinttslocal.bat
   Create-DesktopShortcut.ps1
+  Fix-RTX50-CUDA.bat
   README_FIRST.txt
   app/
     src/                         # source đã obfuscate
@@ -125,3 +126,13 @@ secrets/license_private_key.pem
 Khách mở tab `Bản quyền`, sao chép mã máy, gửi lại cho chủ phần mềm. Chủ phần mềm tạo `license.json` bằng tool nội bộ rồi gửi khách nhập trong app.
 
 Bản owner/internal dùng `COLIN_TTS_LICENSE_MODE=disabled` trong `colinttslocal.bat`, chỉ để chủ phần mềm dùng riêng. Không gửi bản này cho khách.
+
+## RTX 50xx / Blackwell
+
+Nếu máy thuê dùng RTX 5090/50xx và báo `CUDA capability sm_120` hoặc `no kernel image is available`, chạy một lần trong thư mục portable:
+
+```bat
+Fix-RTX50-CUDA.bat
+```
+
+Script này nâng PyTorch của runtime portable và Qwen worker lên CUDA 12.8 để có kernel `sm_120`. Sau khi chạy xong, đóng app và mở lại `colinttslocal.bat`.

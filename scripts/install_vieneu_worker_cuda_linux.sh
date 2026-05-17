@@ -23,7 +23,7 @@ if [[ ! -x "$PY" ]]; then
   exit 1
 fi
 
-PYTORCH_INDEX="${PYTORCH_CUDA_INDEX_URL:-https://download.pytorch.org/whl/cu126}"
+PYTORCH_INDEX="${PYTORCH_CUDA_INDEX_URL:-https://download.pytorch.org/whl/cu128}"
 
 echo "[1/5] Installing PyTorch CUDA..."
 uv pip install --python "$PY" --force-reinstall torch torchaudio --index-url "$PYTORCH_INDEX"

@@ -66,10 +66,11 @@ def install_worker(worker_name: str) -> None:
 
 def gpu_installer_for_provider(provider: str) -> Path | None:
     if os.name == "nt":
+        blackwell = _host_gpu_is_blackwell()
         script = {
-            "omnivoice": "install_tts_deps_cuda126.bat",
+            "omnivoice": "install_tts_deps_cuda128.bat" if blackwell else "install_tts_deps_cuda126.bat",
             "vieneu": "install_vieneu_worker_cuda.bat",
-            "qwen": "install_qwen_worker.bat",
+            "qwen": "install_qwen_worker_blackwell.bat" if blackwell else "install_qwen_worker.bat",
         }.get(provider)
     else:
         script = {
@@ -80,6 +81,26 @@ def gpu_installer_for_provider(provider: str) -> Path | None:
     if not script:
         return None
     return PROJECT_ROOT / script
+
+
+def _host_gpu_is_blackwell() -> bool:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,compute_cap",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return False
+    if result.returncode != 0:
+        return False
+    text = (result.stdout or "").lower()
+    return "rtx 50" in text or "5090" in text or "5080" in text or "12.0" in text
 
 
 def install_gpu_acceleration(provider: str) -> str:

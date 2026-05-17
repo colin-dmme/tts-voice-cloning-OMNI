@@ -35,6 +35,7 @@ class ProviderDeviceInfo:
     torch_version: str = ""
     device_name: str = ""
     capability: str = ""
+    arch_list: tuple[str, ...] = ()
     total_vram_mb: int = 0
     onnxruntime_cuda: bool = False
     llama_gpu_offload: bool = False
@@ -127,7 +128,7 @@ class RuntimeDevicePolicy:
             install_hint = {
                 "omnivoice": "Hãy cài PyTorch CUDA cho môi trường chính bằng install_tts_deps_cuda126.bat.",
                 "vieneu": "Hãy chạy install_vieneu_worker_cuda.bat rồi kiểm tra lại.",
-                "qwen": "Hãy chạy install_qwen_worker.bat với PyTorch CUDA hoặc kiểm tra driver NVIDIA.",
+                "qwen": "Hãy chạy install_qwen_worker.bat; nếu dùng RTX 50xx hãy chạy install_qwen_worker_blackwell.bat hoặc Fix-RTX50-CUDA.bat.",
                 "valtec": "Valtec worker hiện mặc định CPU; cần cài worker có PyTorch CUDA trước.",
             }.get(spec.provider, "Hãy kiểm tra CUDA runtime.")
             raise ConfigError(f"CUDA chưa khả dụng cho {spec.provider}. {install_hint}")
@@ -238,14 +239,21 @@ def _probe_worker(provider: str, worker_name: str) -> ProviderDeviceInfo:
         provider=provider,
         installed=True,
         torch_available=bool(data.get("torch_available")),
-        cuda_available=bool(data.get("cuda_available")),
+        cuda_available=bool(data.get("cuda_available")) and not _unsupported_arch_message(
+            str(data.get("capability") or ""),
+            data.get("arch_list") or [],
+        ),
         torch_version=str(data.get("torch_version") or ""),
         device_name=str(data.get("device_name") or ""),
         capability=str(data.get("capability") or ""),
+        arch_list=tuple(str(item) for item in (data.get("arch_list") or [])),
         total_vram_mb=int(data.get("total_vram_mb") or 0),
         onnxruntime_cuda=bool(data.get("onnxruntime_cuda")),
         llama_gpu_offload=bool(data.get("llama_gpu_offload")),
-        message=str(data.get("message") or ""),
+        message=str(data.get("message") or "") or _unsupported_arch_message(
+            str(data.get("capability") or ""),
+            data.get("arch_list") or [],
+        ),
     )
 
 
@@ -267,6 +275,7 @@ def _torch_module_info(provider: str, torch_module) -> ProviderDeviceInfo:
     device_name = ""
     capability = ""
     total_vram_mb = 0
+    arch_list: list[str] = []
     if cuda_available:
         try:
             device_name = str(torch_module.cuda.get_device_name(0))
@@ -274,18 +283,37 @@ def _torch_module_info(provider: str, torch_module) -> ProviderDeviceInfo:
             capability = f"{major}.{minor}"
             props = torch_module.cuda.get_device_properties(0)
             total_vram_mb = int(props.total_memory / 1024 / 1024)
+            arch_list = [str(item) for item in torch_module.cuda.get_arch_list()]
         except Exception:
             pass
+    arch_warning = _unsupported_arch_message(capability, arch_list)
     return ProviderDeviceInfo(
         provider=provider,
         installed=True,
         torch_available=True,
-        cuda_available=cuda_available,
+        cuda_available=cuda_available and not arch_warning,
         torch_version=str(getattr(torch_module, "__version__", "")),
         device_name=device_name,
         capability=capability,
+        arch_list=tuple(arch_list),
         total_vram_mb=total_vram_mb,
+        message=arch_warning,
     )
+
+
+def _unsupported_arch_message(capability: str, arch_list) -> str:
+    if not capability or not arch_list:
+        return ""
+    arch = "sm_" + capability.replace(".", "")
+    arch_values = {str(item) for item in arch_list}
+    if arch in arch_values:
+        return ""
+    if arch == "sm_120":
+        return (
+            "GPU RTX 50xx/Blackwell cần PyTorch CUDA 12.8+ có sm_120. "
+            "Hãy chạy Fix-RTX50-CUDA.bat trong portable hoặc install_qwen_worker_blackwell.bat trong source checkout."
+        )
+    return f"PyTorch hiện tại không có kernel cho compute capability {arch}."
 
 
 _TORCH_PROBE_CODE = r"""
@@ -296,6 +324,7 @@ data = {
     "torch_version": "",
     "device_name": "",
     "capability": "",
+    "arch_list": [],
     "total_vram_mb": 0,
     "onnxruntime_cuda": False,
     "llama_gpu_offload": False,
@@ -311,6 +340,7 @@ try:
         major, minor = torch.cuda.get_device_capability(0)
         data["capability"] = f"{major}.{minor}"
         data["total_vram_mb"] = int(torch.cuda.get_device_properties(0).total_memory / 1024 / 1024)
+        data["arch_list"] = [str(item) for item in torch.cuda.get_arch_list()]
 except Exception as exc:
     data["message"] = str(exc)
 try:

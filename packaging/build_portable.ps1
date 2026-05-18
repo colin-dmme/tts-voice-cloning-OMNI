@@ -6,6 +6,7 @@ param(
     [switch]$IncludeEngineEnvs,
     [switch]$IncludeWorkerCaches,
     [switch]$OwnerBuild,
+    [switch]$PlainSource,
     [string]$RuntimeSource = "",
     [switch]$SkipRuntime
 )
@@ -25,6 +26,7 @@ $ObfuscatedWorkers = Join-Path $BuildRoot "obfuscated_workers"
 $AppDir = Join-Path $PortableRoot "app"
 $RuntimeDir = Join-Path $PortableRoot "runtime"
 $RuntimePython = Join-Path $RuntimeDir "python"
+$UsePlainSource = $OwnerBuild -or $PlainSource
 
 function Copy-Directory {
     param(
@@ -217,8 +219,8 @@ function Copy-MainRuntime {
 }
 
 function Build-AppSource {
-    if ($OwnerBuild) {
-        Write-Host "Copying plain src for owner build..."
+    if ($UsePlainSource) {
+        Write-Host "Copying plain src..."
         New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
         Copy-Directory -Source (Join-Path $ProjectRoot "src") -Destination (Join-Path $AppDir "src") -ExcludeDirs @("__pycache__")
         return
@@ -248,7 +250,7 @@ function Build-Worker {
 
     Write-Host "Preparing worker $Name..."
     New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
-    if ($OwnerBuild) {
+    if ($UsePlainSource) {
         Copy-Directory `
             -Source $sourceDir `
             -Destination $targetDir `
@@ -271,7 +273,7 @@ function Build-Worker {
             -ExcludeDirs @("__pycache__")
     }
 
-    if (!$OwnerBuild) {
+    if (!$UsePlainSource) {
         if (Test-Path -LiteralPath $workerBuild) {
             Remove-Item -LiteralPath $workerBuild -Recurse -Force
         }
@@ -388,3 +390,4 @@ Write-Host "For a customer-ready full package, run with:"
 Write-Host ".\packaging\build_portable.ps1 -IncludeModels -IncludeVoices -IncludeEngineEnvs"
 Write-Host ""
 Write-Host "For a lighter owner package, omit -IncludeModels and add -IncludeWorkerCaches -IncludeUserState -OwnerBuild."
+Write-Host "If PyArmor is unavailable, add -PlainSource to keep license checks but skip obfuscation."

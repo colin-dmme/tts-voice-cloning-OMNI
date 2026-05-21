@@ -22,12 +22,17 @@ class UiSettings:
     temperature: float | None = None
     top_k: int | None = None
     sentence_pause_ms: int = 450
+    paragraph_pause_ms: int = 0
+    srt_file_padding_ms: int = 0
     max_chunk_chars: int = 220
     output_dir: Path | None = None
     output_stem: str | None = None
     overwrite: bool = False
     split_output: bool = True
+    output_audio_format: str = "wav"
+    mp3_bitrate_kbps: int = 192
     output_srt: bool = False
+    join_split_output_audio: bool = False
 
     def to_request(self, text: str) -> GenerateSpeechRequest:
         return GenerateSpeechRequest(
@@ -46,10 +51,15 @@ class UiSettings:
             temperature=self.temperature,
             top_k=self.top_k,
             sentence_pause_ms=self.sentence_pause_ms,
+            paragraph_pause_ms=self.paragraph_pause_ms,
+            srt_file_padding_ms=self.paragraph_pause_ms,
             max_chunk_chars=self.max_chunk_chars,
             output_dir=self.output_dir,
             output_stem=self.output_stem,
             overwrite=self.overwrite,
             output_mode="split" if self.split_output else "merged",
+            output_audio_format=self.output_audio_format,
+            mp3_bitrate_kbps=self.mp3_bitrate_kbps,
             output_srt=self.output_srt,
+            join_split_output_audio=self.join_split_output_audio,
         )

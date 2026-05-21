@@ -375,19 +375,24 @@ def _runtime_device_detail(actual_device: str | None, device_name: str) -> str:
 def format_result(result: GenerateSpeechResult) -> str:
     if result.item_audio_paths:
         joined = "\n".join(str(path) for path in result.item_audio_paths)
+        merged_line = ""
+        if result.audio_path and result.audio_path not in result.item_audio_paths:
+            merged_line = f"\nAudio tổng: {result.audio_path}"
         srt_line = ""
         if result.item_srt_paths:
             srt_joined = "\n".join(str(path) for path in result.item_srt_paths)
             srt_line = f"\nSRT:\n{srt_joined}"
+        elif result.srt_path:
+            srt_line = f"\nSRT: {result.srt_path}"
         return (
             f"{result.message}\n"
             f"Số đoạn nhỏ: {result.segment_count}, tổng {result.duration_seconds:.1f} giây\n"
-            f"Audio:\n{joined}{srt_line}"
+            f"Audio:\n{joined}{merged_line}{srt_line}"
         )
     srt_line = f"\nSRT: {result.srt_path}" if result.srt_path else ""
     return (
         f"Hoàn tất {result.segment_count} đoạn, {result.duration_seconds:.1f} giây\n"
-        f"WAV: {result.audio_path}{srt_line}"
+        f"Audio: {result.audio_path}{srt_line}"
     )
 
 

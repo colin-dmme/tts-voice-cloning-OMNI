@@ -105,11 +105,11 @@ Source code nằm riêng trong `src/omni_tts_ui_tkinter/` và chỉ gọi core q
 - Kéo thả hoặc chọn nhiều file nguồn `.txt`, `.md`, `.srt`.
 - Mặc định xuất WAV/SRT cùng thư mục với file nguồn và dùng tên file nguồn.
 - Có thể chọn thư mục xuất riêng.
-- Có checkbox `Tách mỗi dòng SRT/đoạn văn thành một file audio`, mặc định bật và Tkinter sẽ nhớ trạng thái cho lần mở sau.
+- Có checkbox `Tách dòng SRT/đoạn văn thành file riêng`, mặc định bật và Tkinter sẽ nhớ trạng thái cho lần mở sau.
 - Quản lý profile giọng trong tab `Profile giọng`, lưu theo tên, dự án, transcript và ghi chú.
 - Quản lý model và tải các model bắt buộc còn thiếu.
 
-Khi bật chế độ tách file, `.srt` sẽ xuất mỗi cue/dòng subtitle thành một cặp file riêng như `tenfile_001.wav` và `tenfile_001.srt`. Nếu nhập văn bản trực tiếp, mỗi đoạn cách nhau bằng một dòng trống sẽ thành một file audio riêng.
+Khi bật chế độ tách file, `.srt` sẽ xuất mỗi cue/dòng subtitle thành một cặp file riêng như `tenfile_001.wav` và `tenfile_001.srt`. Nếu nhập văn bản trực tiếp, mỗi đoạn cách nhau bằng một dòng trống sẽ thành một file audio riêng. `Nghỉ giữa câu/chunk` áp dụng bên trong đoạn dài bị chia nhỏ; `Nghỉ giữa đoạn trong file tổng` áp dụng giữa các đoạn gốc khi xuất một file liền mạch, nối thêm file tổng, hoặc tạo SRT timeline.
 
 Profile giọng được lưu trong `voices/profiles/`, còn file audio mẫu được copy vào `voices/samples/`. Các giao diện chỉ chọn `profile_id`; core sẽ tự lấy file giọng mẫu và transcript khi tạo audio.
 

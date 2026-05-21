@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import time
 from threading import Event
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from omni_tts_core.progress import check_cancel
 
@@ -14,6 +14,7 @@ def run_worker_process(
     env: Mapping[str, str],
     timeout: float,
     cancel_event: Event | None,
+    tick_callback: Callable[[], None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     process = subprocess.Popen(
         list(command),
@@ -34,6 +35,13 @@ def run_worker_process(
                 stderr=stderr,
             )
         except subprocess.TimeoutExpired:
+            if tick_callback is not None:
+                try:
+                    tick_callback()
+                except Exception:
+                    process.kill()
+                    process.communicate()
+                    raise
             if time.monotonic() - started_at > timeout:
                 process.kill()
                 stdout, stderr = process.communicate()

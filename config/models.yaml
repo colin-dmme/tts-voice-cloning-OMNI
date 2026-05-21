@@ -41,6 +41,46 @@ tts_models:
       recommend_for: "Người dùng mới, đọc sách tiếng Việt, clone giọng cơ bản"
       install_note: ""
 
+  khanh_tts_omnivoice:
+    display_name: "KhanhTTS OmniVoice (kjanh)"
+    provider: "omnivoice"
+    model_type: "tts"
+    local_path: "models/omnivoice/vietnamese/kjanh__KhanhTTS-OmniVoice"
+    hf_repo: "kjanh/KhanhTTS-OmniVoice"
+    language_priority: "vi-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: true
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    notes: "Community fine-tune vi/en từ k2-fsa/OmniVoice; đưa vào để A/B test trước khi dùng production."
+    ref_audio_hints:
+      min_seconds: 3.0
+      max_seconds: 10.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 10.0
+      needs_transcript: false
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "OmniVoice"
+      variant: "KhanhTTS vi/en fine-tune"
+      variant_badge: "KhanhTTS"
+      base_model: "k2-fsa/OmniVoice"
+      source_repo: "kjanh/KhanhTTS-OmniVoice"
+      risk: "test"
+      description: "Fine-tune OmniVoice cho tiếng Việt và tiếng Anh, hướng tới phát âm tiếng Việt, code-switching vi/en và clone giọng từ mẫu ngắn. Cần A/B test kỹ trước production."
+      highlight: "A/B test vi/en mới"
+      quality_score: 0
+      speed_score: 0
+      vram_mb: 0
+      ram_mb: 3500
+      recommend_for: "A/B test đọc tiếng Việt, tên riêng, từ hiếm và câu trộn Việt-Anh trước khi nâng lên model khuyên dùng"
+      install_note: "Tải model trước khi chạy; chưa đặt làm mặc định."
+
   omnivoice_vietnamese_hacht:
     display_name: "OmniVoice Vietnamese (Hacht)"
     provider: "omnivoice"

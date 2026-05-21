@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 LanguageCode = Literal["auto", "vi", "en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"]
 OutputMode = Literal["merged", "split"]
+OutputAudioFormat = Literal["wav", "mp3"]
 RuntimeTarget = Literal["auto", "cpu", "cuda"]
 
 
@@ -65,13 +66,31 @@ class GenerateSpeechRequest(BaseModel):
     temperature: float | None = Field(default=None, ge=0.1, le=2.0)
     top_k: int | None = Field(default=None, ge=1, le=200)
     sentence_pause_ms: int = Field(default=450, ge=0, le=3000)
+    paragraph_pause_ms: int = Field(default=0, ge=0, le=10000)
+    srt_file_padding_ms: int = Field(default=0, ge=0, le=10000)
     max_chunk_chars: int = Field(default=220, ge=60, le=800)
     output_dir: Path | None = None
     output_stem: str | None = None
     source_path: Path | None = None
     overwrite: bool = False
     output_mode: OutputMode = "split"
+    output_audio_format: OutputAudioFormat = "wav"
+    mp3_bitrate_kbps: int = Field(default=192, ge=64, le=320)
     output_srt: bool = False
+    join_split_output_audio: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_pause_fields(cls, data):
+        if isinstance(data, dict) and "paragraph_pause_ms" not in data and "srt_file_padding_ms" in data:
+            data = dict(data)
+            data["paragraph_pause_ms"] = data["srt_file_padding_ms"]
+        return data
+
+    @model_validator(mode="after")
+    def sync_legacy_pause_field(self):
+        self.srt_file_padding_ms = self.paragraph_pause_ms
+        return self
 
 
 class GenerateSpeechResult(BaseModel):

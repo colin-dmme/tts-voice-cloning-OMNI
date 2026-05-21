@@ -21,10 +21,15 @@ DEFAULT_PREFERENCES = {
     "temperature": None,
     "top_k": None,
     "sentence_pause_ms": 450,
+    "paragraph_pause_ms": 0,
+    "srt_file_padding_ms": 0,
     "max_chunk_chars": 220,
     "overwrite": False,
     "split_output": True,
+    "output_audio_format": "wav",
+    "mp3_bitrate_kbps": 192,
     "output_srt": False,
+    "join_split_output_audio": False,
     "window_geometry": "",
     "window_state": "normal",
     "text_pane_sash": None,
@@ -45,6 +50,8 @@ class TkinterPreferences:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return dict(DEFAULT_PREFERENCES)
+        if "paragraph_pause_ms" not in data and "srt_file_padding_ms" in data:
+            data["paragraph_pause_ms"] = data["srt_file_padding_ms"]
         merged = dict(DEFAULT_PREFERENCES)
         merged.update(data)
         return merged

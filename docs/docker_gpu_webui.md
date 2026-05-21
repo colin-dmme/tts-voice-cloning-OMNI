@@ -57,7 +57,7 @@ Trong tab `Tạo giọng đọc`:
 
 - nhập text trực tiếp, hoặc upload `.srt`, `.txt`, `.md`;
 - chọn model, profile giọng, codec, thiết bị `GPU CUDA`;
-- bật `Tách mỗi dòng SRT/đoạn văn thành một file audio` nếu muốn xuất từng dòng;
+- bật `Tách dòng SRT/đoạn văn thành file riêng` nếu muốn xuất từng dòng;
 - bấm `Tạo audio`;
 - tải từng file hoặc tải toàn bộ bằng file ZIP.
 

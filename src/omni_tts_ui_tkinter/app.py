@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import tkinter as tk
 import time
 from pathlib import Path
 from threading import Event
 from tkinter import filedialog, messagebox, ttk
+from urllib.parse import unquote, urlparse
 
+from omni_tts_core.text.source_reader import SUPPORTED_TEXT_EXTENSIONS, count_source_text_chars
 from omni_tts_core.progress import ProgressEvent
 from omni_tts_shared.errors import GenerationCancelled, OmniTtsError
 from omni_tts_shared.languages import LANGUAGE_CODES, LANGUAGE_LABELS, language_choices
@@ -22,7 +25,6 @@ from omni_tts_ui_tkinter.widgets import (
     browse_directory,
     browse_file,
     clear_log,
-    split_paths,
 )
 
 
@@ -44,12 +46,17 @@ class TkinterApp(GenerationTabsMixin):
         self.action_buttons: list[ttk.Button] = []
         self.text_output_dirs: list[Path] = []
         self.file_output_dirs: list[Path] = []
+        self.source_file_items: dict[str, tuple[Path, int, str]] = {}
+        self._source_file_next_id = 0
         self.text_open_folder_button: ttk.Button | None = None
         self.file_open_folder_button: ttk.Button | None = None
         self.language_combos: list[ttk.Combobox] = []
         self.profile_combos: list[ttk.Combobox] = []
         self.speaker_combos: list[ttk.Combobox] = []
         self.codec_combos: list[ttk.Combobox] = []
+        self.mp3_bitrate_combos: list[ttk.Combobox] = []
+        self.join_split_audio_checks: list[ttk.Checkbutton] = []
+        self.output_audio_format_map = {"WAV": "wav", "MP3": "mp3"}
         self.runtime_target_map = dict(self.controller.runtime_target_choices())
         self.sampling_spins: list[ttk.Spinbox] = []
         self.speed_spins: list[ttk.Spinbox] = []
@@ -66,6 +73,8 @@ class TkinterApp(GenerationTabsMixin):
         self._init_vars()
         self._configure_root()
         self._build_layout()
+        self._sync_mp3_bitrate_state()
+        self._sync_join_split_audio_state()
         self.refresh_models()
         self._bind_preference_traces()
 
@@ -80,6 +89,8 @@ class TkinterApp(GenerationTabsMixin):
         self.codec_var = tk.StringVar(value=self._codec_label_for_repo(model_id, self.preference_data.get("codec_repo")))
         self.ref_audio_var = tk.StringVar()
         self.ref_text_var = tk.StringVar()
+        self.source_path_var = tk.StringVar()
+        self.file_summary_var = tk.StringVar(value="Chưa có file.")
         self.output_dir_var = tk.StringVar(value=str(self.preference_data.get("output_dir") or ""))
         self.output_stem_var = tk.StringVar(value=str(self.preference_data.get("output_stem") or ""))
         self.speed_var = tk.DoubleVar(value=float(self.preference_data.get("speed", 1.0)))
@@ -98,12 +109,23 @@ class TkinterApp(GenerationTabsMixin):
         self.runtime_var = tk.StringVar(value="")
         self.voice_source_var = tk.StringVar(value="")
         self.pause_var = tk.IntVar(value=int(self.preference_data.get("sentence_pause_ms", 450)))
+        paragraph_pause = self.preference_data.get(
+            "paragraph_pause_ms",
+            self.preference_data.get("srt_file_padding_ms", 0),
+        )
+        self.paragraph_pause_var = tk.IntVar(value=int(paragraph_pause))
         self.chunk_var = tk.IntVar(value=int(self.preference_data.get("max_chunk_chars", 220)))
         self.overwrite_var = tk.BooleanVar(value=bool(self.preference_data.get("overwrite", False)))
         self.split_output_var = tk.BooleanVar(
             value=bool(self.preference_data.get("split_output", True))
         )
+        output_format = str(self.preference_data.get("output_audio_format") or "wav").lower()
+        self.output_audio_format_var = tk.StringVar(value="MP3" if output_format == "mp3" else "WAV")
+        self.mp3_bitrate_var = tk.IntVar(value=int(self.preference_data.get("mp3_bitrate_kbps") or 192))
         self.output_srt_var = tk.BooleanVar(value=bool(self.preference_data.get("output_srt", False)))
+        self.join_split_audio_var = tk.BooleanVar(
+            value=bool(self.preference_data.get("join_split_output_audio", False))
+        )
         self.status_var = tk.StringVar(value=self.controller.startup_notice())
         self.progress_var = tk.DoubleVar(value=0.0)
         self.profile_compat_var = tk.StringVar(value="")
@@ -145,6 +167,9 @@ class TkinterApp(GenerationTabsMixin):
 
     def _selected_runtime_target(self) -> str:
         return self.runtime_target_map.get(self.runtime_target_var.get(), "auto")
+
+    def _selected_output_audio_format(self) -> str:
+        return self.output_audio_format_map.get(self.output_audio_format_var.get(), "wav")
 
     def _runtime_target_label_for_value(self, value: str | None) -> str:
         target = value or "auto"
@@ -364,16 +389,124 @@ class TkinterApp(GenerationTabsMixin):
         )
         self.add_dropped_files([Path(path) for path in paths])
 
+    def add_pasted_source_files(self) -> None:
+        raw_text = self.source_path_var.get().strip()
+        if not raw_text:
+            return
+        paths = self._parse_source_path_input(raw_text)
+        if not paths:
+            messagebox.showwarning("Thêm file", "Chưa tìm thấy đường dẫn file hợp lệ.")
+            return
+        if self._add_source_paths(paths):
+            self.source_path_var.set("")
+
     def add_dropped_files(self, paths: list[Path]) -> None:
-        existing = set(self.file_list.get(0, "end"))
-        for path in paths:
-            text = str(path)
-            if text not in existing:
-                self.file_list.insert("end", text)
-                existing.add(text)
+        self._add_source_paths(paths)
 
     def clear_source_files(self) -> None:
-        self.file_list.delete(0, "end")
+        for item_id in self.file_list.get_children():
+            self.file_list.delete(item_id)
+        self.source_file_items.clear()
+        self._refresh_source_file_summary()
+
+    def _add_source_paths(self, paths: list[Path]) -> int:
+        existing = {item[2] for item in self.source_file_items.values()}
+        added = 0
+        skipped: list[str] = []
+        duplicates = 0
+        for path in paths:
+            normalized = path.expanduser()
+            key = self._source_file_key(normalized)
+            if key in existing:
+                duplicates += 1
+                continue
+            if not normalized.exists() or not normalized.is_file():
+                skipped.append(f"{normalized} (không tìm thấy file)")
+                continue
+            if normalized.suffix.lower() not in SUPPORTED_TEXT_EXTENSIONS:
+                skipped.append(f"{normalized} (chưa hỗ trợ định dạng này)")
+                continue
+            try:
+                char_count = count_source_text_chars(normalized)
+            except Exception as exc:
+                skipped.append(f"{normalized} (không đọc được: {exc})")
+                continue
+
+            self._source_file_next_id += 1
+            item_id = f"source_file_{self._source_file_next_id}"
+            parent_label = normalized.parent.name or str(normalized.parent)
+            self.source_file_items[item_id] = (normalized, char_count, key)
+            self.file_list.insert(
+                "",
+                "end",
+                iid=item_id,
+                values=(normalized.name, parent_label, self._format_count(char_count)),
+            )
+            existing.add(key)
+            added += 1
+        self._refresh_source_file_summary()
+        if skipped:
+            messagebox.showwarning("Một số file chưa được thêm", "\n".join(skipped[:8]))
+        elif duplicates and not added:
+            messagebox.showinfo("Thêm file", "File này đã có trong danh sách.")
+        return added
+
+    def _parse_source_path_input(self, value: str) -> list[Path]:
+        paths: list[Path] = []
+        normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+        for raw_line in normalized.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            for token in self._source_path_tokens(line):
+                paths.append(self._source_path_from_text(token))
+        return paths
+
+    def _source_path_tokens(self, line: str) -> list[str]:
+        stripped = line.strip()
+        if self._source_path_from_text(stripped).exists():
+            return [stripped]
+        quoted = re.findall(r'"([^"]+)"|\'([^\']+)\'', stripped)
+        if quoted:
+            return [double or single for double, single in quoted]
+        if ";" in stripped:
+            return [part.strip() for part in stripped.split(";") if part.strip()]
+        return [stripped]
+
+    def _source_path_from_text(self, value: str) -> Path:
+        text = value.strip().strip('"').strip("'").strip()
+        parsed = urlparse(text)
+        if parsed.scheme.lower() == "file":
+            if parsed.netloc:
+                text = f"//{parsed.netloc}{unquote(parsed.path)}"
+            else:
+                text = unquote(parsed.path)
+                if re.match(r"^/[A-Za-z]:", text):
+                    text = text[1:]
+        return Path(text)
+
+    def _source_file_key(self, path: Path) -> str:
+        return str(path.resolve(strict=False)).casefold()
+
+    def _source_file_paths(self) -> list[Path]:
+        return [
+            self.source_file_items[item_id][0]
+            for item_id in self.file_list.get_children()
+            if item_id in self.source_file_items
+        ]
+
+    def _refresh_source_file_summary(self) -> None:
+        count = len(self.source_file_items)
+        if count == 0:
+            self.file_summary_var.set("Chưa có file.")
+            return
+        total_chars = sum(item[1] for item in self.source_file_items.values())
+        self.file_summary_var.set(
+            f"{count} file • tổng {self._format_count(total_chars)} ký tự"
+        )
+
+    def _format_count(self, value: int) -> str:
+        return f"{value:,}".replace(",", ".")
 
     def clear_text_log(self) -> None:
         clear_log(self.text_log)
@@ -385,6 +518,8 @@ class TkinterApp(GenerationTabsMixin):
         output_dir_text = self.output_dir_var.get().strip()
         ref_audio_text = self.ref_audio_var.get().strip()
         output_stem = None if for_files else self.output_stem_var.get().strip() or None
+        split_output = bool(self.split_output_var.get())
+        join_split_output_audio = split_output and bool(self.join_split_audio_var.get())
         return UiSettings(
             language=LANGUAGE_CODES.get(self.language_var.get(), "vi"),
             model_id=self._current_model_id(),
@@ -400,12 +535,17 @@ class TkinterApp(GenerationTabsMixin):
             temperature=float(self.temperature_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
             top_k=int(self.top_k_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
             sentence_pause_ms=int(self.pause_var.get()),
+            paragraph_pause_ms=int(self.paragraph_pause_var.get()),
+            srt_file_padding_ms=int(self.paragraph_pause_var.get()),
             max_chunk_chars=int(self.chunk_var.get()),
             output_dir=Path(output_dir_text) if output_dir_text else None,
             output_stem=output_stem,
             overwrite=bool(self.overwrite_var.get()),
-            split_output=bool(self.split_output_var.get()),
+            split_output=split_output,
+            output_audio_format=self._selected_output_audio_format(),
+            mp3_bitrate_kbps=int(self.mp3_bitrate_var.get()),
             output_srt=bool(self.output_srt_var.get()),
+            join_split_output_audio=join_split_output_audio,
         )
 
     def save_preferences(self) -> None:
@@ -432,10 +572,15 @@ class TkinterApp(GenerationTabsMixin):
             "temperature": float(self.temperature_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
             "top_k": int(self.top_k_var.get()) if self.controller.model_supports_sampling(self._current_model_id()) else None,
             "sentence_pause_ms": int(self.pause_var.get()),
+            "paragraph_pause_ms": int(self.paragraph_pause_var.get()),
+            "srt_file_padding_ms": int(self.paragraph_pause_var.get()),
             "max_chunk_chars": int(self.chunk_var.get()),
             "overwrite": bool(self.overwrite_var.get()),
             "split_output": bool(self.split_output_var.get()),
+            "output_audio_format": self._selected_output_audio_format(),
+            "mp3_bitrate_kbps": int(self.mp3_bitrate_var.get()),
             "output_srt": bool(self.output_srt_var.get()),
+            "join_split_output_audio": bool(self.split_output_var.get()) and bool(self.join_split_audio_var.get()),
         })
         self.preferences.save(self.preference_data)
 
@@ -455,15 +600,38 @@ class TkinterApp(GenerationTabsMixin):
             self.temperature_var,
             self.top_k_var,
             self.pause_var,
+            self.paragraph_pause_var,
             self.chunk_var,
             self.overwrite_var,
             self.split_output_var,
+            self.output_audio_format_var,
+            self.mp3_bitrate_var,
             self.output_srt_var,
+            self.join_split_audio_var,
         ]
         for variable in variables:
             variable.trace_add("write", lambda *_args: self.save_preferences())
+        self.output_audio_format_var.trace_add("write", lambda *_args: self._sync_mp3_bitrate_state())
+        self.split_output_var.trace_add("write", lambda *_args: self._sync_join_split_audio_state())
         self._preference_trace_ready = True
         self.save_preferences()
+
+    def _sync_mp3_bitrate_state(self) -> None:
+        state = "readonly" if self._selected_output_audio_format() == "mp3" else "disabled"
+        for combo in self.mp3_bitrate_combos:
+            combo.configure(state=state)
+
+    def on_split_output_changed(self) -> None:
+        self._sync_join_split_audio_state()
+        self.save_preferences()
+
+    def _sync_join_split_audio_state(self) -> None:
+        split_enabled = bool(self.split_output_var.get())
+        if not split_enabled and bool(self.join_split_audio_var.get()):
+            self.join_split_audio_var.set(False)
+        state = "normal" if split_enabled else "disabled"
+        for check in self.join_split_audio_checks:
+            check.configure(state=state)
 
     def generate_from_text(self) -> None:
         text = self.text_input.get("1.0", "end").strip()
@@ -481,7 +649,7 @@ class TkinterApp(GenerationTabsMixin):
         )
 
     def generate_from_files(self) -> None:
-        paths = split_paths("\n".join(self.file_list.get(0, "end")))
+        paths = self._source_file_paths()
         settings = self.current_settings(for_files=True)
         if not self._show_license_problem(settings.model_id):
             return
@@ -532,9 +700,14 @@ class TkinterApp(GenerationTabsMixin):
             f"Profile: {self.voice_profile_var.get()}; Preset giọng: {self.speaker_var.get()}; "
             f"Codec: {self.codec_var.get()}; Thiết bị xử lý: {self.controller.runtime_target_label(settings.runtime_target)}\n"
             f"Temperature: {settings.temperature or 'mặc định'}; Top-K: {settings.top_k or 'mặc định'}; "
-            f"Độ dài đoạn: {settings.max_chunk_chars}; Nghỉ: {settings.sentence_pause_ms} ms\n"
+            f"Độ dài đoạn nhỏ: {settings.max_chunk_chars}; "
+            f"Nghỉ giữa câu/chunk: {settings.sentence_pause_ms} ms; "
+            f"Nghỉ giữa đoạn trong file tổng: {settings.paragraph_pause_ms} ms\n"
             f"Tách file: {'Có' if settings.split_output else 'Không'}; "
+            f"Định dạng audio: {settings.output_audio_format.upper()}"
+            f"{f' {settings.mp3_bitrate_kbps} kbps' if settings.output_audio_format == 'mp3' else ''}; "
             f"Xuất SRT: {'Có' if settings.output_srt else 'Không'}; "
+            f"File audio tổng: {'Có' if settings.join_split_output_audio else 'Không'}; "
             f"Ghi đè: {'Có' if settings.overwrite else 'Không'}\n"
             f"Thư mục xuất: {output_dir}; Tên file xuất: {output_stem}"
         )

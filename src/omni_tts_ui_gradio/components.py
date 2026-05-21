@@ -6,6 +6,17 @@ from omni_tts_core.config import AppSettings
 from omni_tts_ui_gradio import handlers
 
 
+def _preferred_int(preferences: dict, defaults: dict, key: str, default: int, legacy_key: str | None = None) -> int:
+    value = preferences.get(key)
+    if value is None and legacy_key is not None:
+        value = preferences.get(legacy_key)
+    if value is None:
+        value = defaults.get(key)
+    if value is None and legacy_key is not None:
+        value = defaults.get(legacy_key)
+    return int(default if value is None else value)
+
+
 def build_app() -> gr.Blocks:
     settings = AppSettings()
     choices = handlers.model_choices()
@@ -122,17 +133,30 @@ def build_app() -> gr.Blocks:
                         interactive=handlers.model_supports_sampling(default_model),
                     )
                     sentence_pause_ms = gr.Slider(
-                        label="Silence Pad, ms",
+                        label="Nghỉ giữa câu/chunk, ms",
                         minimum=0,
                         maximum=2000,
-                        value=int(preferences.get("sentence_pause_ms") or settings.generation_defaults.get("sentence_pause_ms", 450)),
+                        value=_preferred_int(preferences, settings.generation_defaults, "sentence_pause_ms", 450),
+                        step=50,
+                    )
+                    paragraph_pause_ms = gr.Slider(
+                        label="Nghỉ giữa đoạn trong file tổng, ms",
+                        minimum=0,
+                        maximum=10000,
+                        value=_preferred_int(
+                            preferences,
+                            settings.generation_defaults,
+                            "paragraph_pause_ms",
+                            0,
+                            legacy_key="srt_file_padding_ms",
+                        ),
                         step=50,
                     )
                     max_chunk_chars = gr.Slider(
-                        label="Max Chars mỗi đoạn",
+                        label="Max ký tự mỗi đoạn nhỏ",
                         minimum=80,
                         maximum=700,
-                        value=int(preferences.get("max_chunk_chars") or settings.generation_defaults.get("max_chunk_chars", 220)),
+                        value=_preferred_int(preferences, settings.generation_defaults, "max_chunk_chars", 220),
                         step=20,
                     )
                     output_stem = gr.Textbox(
@@ -145,24 +169,38 @@ def build_app() -> gr.Blocks:
                         value=str(preferences.get("output_dir") or ""),
                         placeholder="Để trống để lưu vào outputs/jobs",
                     )
+                    output_audio_format = gr.Dropdown(
+                        label="Định dạng audio",
+                        choices=[("WAV PCM 16-bit", "wav"), ("MP3", "mp3")],
+                        value=str(preferences.get("output_audio_format") or settings.generation_defaults.get("output_audio_format", "wav")),
+                    )
+                    mp3_bitrate_kbps = gr.Dropdown(
+                        label="Bitrate MP3",
+                        choices=[128, 160, 192, 256, 320],
+                        value=int(preferences.get("mp3_bitrate_kbps") or settings.generation_defaults.get("mp3_bitrate_kbps", 192)),
+                    )
                     overwrite = gr.Checkbox(
                         label="Ghi đè file nếu đã tồn tại",
                         value=bool(preferences.get("overwrite", False)),
                     )
                     split_output = gr.Checkbox(
-                        label="Tách mỗi dòng SRT/đoạn văn thành một file audio",
+                        label="Tách dòng SRT/đoạn văn thành file riêng",
                         value=bool(preferences.get("split_output", True)),
                     )
                     output_srt = gr.Checkbox(
                         label="Xuất kèm SRT",
                         value=bool(preferences.get("output_srt", False)),
                     )
+                    join_split_output_audio = gr.Checkbox(
+                        label="Nối thêm file tổng",
+                        value=bool(preferences.get("join_split_output_audio", False)),
+                    )
                     generate_btn = gr.Button("Tạo audio", variant="primary")
 
             status = gr.Textbox(label="Trạng thái", interactive=False)
             audio_preview = gr.Audio(label="Nghe thử", type="filepath")
             with gr.Row():
-                audio_file = gr.File(label="File WAV")
+                audio_file = gr.File(label="File audio")
                 srt_file = gr.File(label="File SRT")
                 zip_file = gr.File(label="Tải toàn bộ ZIP")
 
@@ -185,12 +223,16 @@ def build_app() -> gr.Blocks:
                     temperature,
                     top_k,
                     sentence_pause_ms,
+                    paragraph_pause_ms,
                     max_chunk_chars,
                     output_stem,
                     output_dir,
+                    output_audio_format,
+                    mp3_bitrate_kbps,
                     overwrite,
                     split_output,
                     output_srt,
+                    join_split_output_audio,
                 ],
                 outputs=[status, audio_preview, audio_file, srt_file, zip_file],
             )

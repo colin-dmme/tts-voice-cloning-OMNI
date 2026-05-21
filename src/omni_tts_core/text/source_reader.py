@@ -28,6 +28,10 @@ def read_source_text(path: Path) -> str:
     return content.strip()
 
 
+def count_source_text_chars(path: Path) -> int:
+    return len(read_source_text(path))
+
+
 def read_source_units(path: Path) -> list[SourceUnit]:
     if not path.exists():
         raise ConfigError(f"Không tìm thấy file nguồn: {path}")
@@ -42,34 +46,41 @@ def read_source_units(path: Path) -> list[SourceUnit]:
 
 def strip_srt_markup(content: str) -> str:
     lines = []
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.isdigit() or "-->" in line:
-            continue
-        line = re.sub(r"<[^>]+>", "", line)
-        if line:
-            lines.append(line)
+    for block in _srt_blocks(content):
+        lines.extend(_srt_text_lines(block))
     return "\n".join(lines)
 
 
 def parse_srt_units(content: str) -> list[SourceUnit]:
     units = []
-    blocks = re.split(r"\n\s*\n", content.replace("\r", "\n").strip())
-    for block in blocks:
-        lines = []
-        for raw_line in block.splitlines():
-            line = raw_line.strip()
-            if not line or line.isdigit() or "-->" in line:
-                continue
-            line = re.sub(r"<[^>]+>", "", line).strip()
-            if line:
-                lines.append(line)
+    for block in _srt_blocks(content):
+        lines = _srt_text_lines(block)
         text = " ".join(lines).strip()
         if text:
             units.append(SourceUnit(index=len(units) + 1, text=text))
     return units
+
+
+def _srt_blocks(content: str) -> list[str]:
+    normalized = content.replace("\r", "\n").strip()
+    if not normalized:
+        return []
+    return re.split(r"\n\s*\n", normalized)
+
+
+def _srt_text_lines(block: str) -> list[str]:
+    raw_lines = [line.strip() for line in block.splitlines() if line.strip()]
+    if len(raw_lines) >= 2 and raw_lines[0].isdigit() and "-->" in raw_lines[1]:
+        raw_lines = raw_lines[1:]
+
+    lines = []
+    for line in raw_lines:
+        if "-->" in line:
+            continue
+        line = re.sub(r"<[^>]+>", "", line).strip()
+        if line:
+            lines.append(line)
+    return lines
 
 
 def paragraph_units(content: str) -> list[SourceUnit]:

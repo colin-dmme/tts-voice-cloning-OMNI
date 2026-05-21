@@ -4,12 +4,19 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 import soundfile as sf
 
-from omni_tts_core.engines.base import BaseTtsEngine, TtsEngineRequest, TtsEngineResult
+from omni_tts_core.engines.base import (
+    BaseTtsEngine,
+    BatchChunkCallback,
+    BatchProgressCallback,
+    TtsEngineRequest,
+    TtsEngineResult,
+)
 from omni_tts_core.engines.subprocess_tools import run_worker_process
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
@@ -69,11 +76,19 @@ class VieneuSubprocessEngine(BaseTtsEngine):
             audio, sample_rate = sf.read(str(output_path), dtype="float32")
             return TtsEngineResult(audio=audio, sample_rate=int(sample_rate))
 
-    def generate_batch(self, requests: list[TtsEngineRequest]) -> list[TtsEngineResult]:
+    def generate_batch(
+        self,
+        requests: list[TtsEngineRequest],
+        progress_callback: BatchProgressCallback | None = None,
+        chunk_callback: BatchChunkCallback | None = None,
+    ) -> list[TtsEngineResult]:
         if not requests:
             return []
         if len(requests) == 1:
-            return [self.generate(requests[0])]
+            result = self.generate(requests[0])
+            if progress_callback is not None:
+                progress_callback(1, 1)
+            return [result]
 
         runtime = self._worker_runtime()
         (PROJECT_ROOT / "outputs").mkdir(parents=True, exist_ok=True)
@@ -101,6 +116,11 @@ class VieneuSubprocessEngine(BaseTtsEngine):
             command = [str(runtime.python_path), str(self.worker_script), "--request", str(payload_path)]
             env = _worker_env(project_path(".hf_cache"), runtime.python_paths)
 
+            reported_chunks: set[int] = set()
+
+            def report_ready_chunks() -> None:
+                _report_ready_chunks(chunks, reported_chunks, progress_callback, chunk_callback)
+
             try:
                 completed = run_worker_process(
                     command,
@@ -108,9 +128,11 @@ class VieneuSubprocessEngine(BaseTtsEngine):
                     env=env,
                     timeout=900 + 300 * len(requests),
                     cancel_event=cancel_event,
+                    tick_callback=report_ready_chunks,
                 )
             except subprocess.TimeoutExpired as exc:
                 raise GenerationError("VieNeu batch xử lý quá lâu và đã bị dừng.") from exc
+            report_ready_chunks()
 
             if completed.returncode != 0:
                 if completed.returncode == -1073741819:
@@ -348,6 +370,37 @@ def _clean_worker_error(message: str) -> str:
         if "Standard CPU hiện không hỗ trợ clone" in line:
             return line
     return lines[-1]
+
+
+def _report_ready_chunks(
+    chunks: list[dict],
+    reported_chunks: set[int],
+    progress_callback: BatchProgressCallback | None,
+    chunk_callback: BatchChunkCallback | None,
+) -> None:
+    before = len(reported_chunks)
+    for index, chunk in enumerate(chunks):
+        if index in reported_chunks:
+            continue
+        out = Path(chunk["output_path"])
+        if not _audio_file_ready(out):
+            continue
+        reported_chunks.add(index)
+        if chunk_callback is not None:
+            chunk_callback(index, out)
+    if progress_callback is not None and len(reported_chunks) != before:
+        progress_callback(len(reported_chunks), len(chunks))
+
+
+def _audio_file_ready(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        if time.time() - path.stat().st_mtime < 0.2:
+            return False
+        return sf.info(str(path)).frames > 0
+    except Exception:
+        return False
 
 
 def _native_crash_message(message: str) -> str:

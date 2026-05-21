@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
+from typing import Callable
 
 import numpy as np
 
@@ -31,9 +32,24 @@ class TtsEngineResult:
     sample_rate: int
 
 
+BatchProgressCallback = Callable[[int, int], None]
+BatchChunkCallback = Callable[[int, Path], None]
+
+
 class BaseTtsEngine:
     def generate(self, request: TtsEngineRequest) -> TtsEngineResult:
         raise NotImplementedError
 
-    def generate_batch(self, requests: list[TtsEngineRequest]) -> list[TtsEngineResult]:
-        return [self.generate(r) for r in requests]
+    def generate_batch(
+        self,
+        requests: list[TtsEngineRequest],
+        progress_callback: BatchProgressCallback | None = None,
+        chunk_callback: BatchChunkCallback | None = None,
+    ) -> list[TtsEngineResult]:
+        results = []
+        total = len(requests)
+        for index, request in enumerate(requests, start=1):
+            results.append(self.generate(request))
+            if progress_callback is not None:
+                progress_callback(index, total)
+        return results

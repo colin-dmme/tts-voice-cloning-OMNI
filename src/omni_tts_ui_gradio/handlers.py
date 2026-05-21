@@ -331,12 +331,16 @@ def generate_speech(
     temperature: float,
     top_k: int,
     sentence_pause_ms: int,
+    paragraph_pause_ms: int,
     max_chunk_chars: int,
     output_stem: str,
     output_dir: str,
+    output_audio_format: str,
+    mp3_bitrate_kbps: int,
     overwrite: bool,
     split_output: bool,
     output_srt: bool,
+    join_split_output_audio: bool,
 ):
     try:
         sources = _source_paths(source_files)
@@ -359,12 +363,17 @@ def generate_speech(
             temperature=float(temperature) if service.supports_vieneu_sampling(model_id) else None,
             top_k=int(top_k) if service.supports_vieneu_sampling(model_id) else None,
             sentence_pause_ms=int(sentence_pause_ms),
+            paragraph_pause_ms=int(paragraph_pause_ms),
+            srt_file_padding_ms=int(paragraph_pause_ms),
             max_chunk_chars=int(max_chunk_chars),
             output_dir=_optional_path(output_dir),
             output_stem=output_stem.strip() or None,
             overwrite=bool(overwrite),
             output_mode="split" if split_output else "merged",
+            output_audio_format=output_audio_format or "wav",
+            mp3_bitrate_kbps=int(mp3_bitrate_kbps),
             output_srt=bool(output_srt),
+            join_split_output_audio=bool(join_split_output_audio),
         )
         _save_generation_preferences(
             {
@@ -382,10 +391,15 @@ def generate_speech(
                 "temperature": float(temperature) if service.supports_vieneu_sampling(model_id) else None,
                 "top_k": int(top_k) if service.supports_vieneu_sampling(model_id) else None,
                 "sentence_pause_ms": int(sentence_pause_ms),
+                "paragraph_pause_ms": int(paragraph_pause_ms),
+                "srt_file_padding_ms": int(paragraph_pause_ms),
                 "max_chunk_chars": int(max_chunk_chars),
                 "overwrite": bool(overwrite),
                 "split_output": bool(split_output),
+                "output_audio_format": output_audio_format or "wav",
+                "mp3_bitrate_kbps": int(mp3_bitrate_kbps),
                 "output_srt": bool(output_srt),
+                "join_split_output_audio": bool(join_split_output_audio),
             }
         )
 
@@ -551,7 +565,9 @@ def _optional_path(value: str | None) -> Path | None:
 
 def _result_paths(result) -> list[Path]:
     paths: list[Path] = []
-    paths.extend(result.item_audio_paths or [result.audio_path])
+    if result.audio_path:
+        paths.append(result.audio_path)
+    paths.extend(result.item_audio_paths)
     if result.item_srt_paths:
         paths.extend(result.item_srt_paths)
     elif result.srt_path:
@@ -587,13 +603,22 @@ def _zip_results(results, zip_path: Path) -> Path | None:
 def _results_message(results, package_path: Path | None) -> str:
     total_segments = sum(item.segment_count for item in results)
     total_duration = sum(item.duration_seconds for item in results)
-    audio_count = sum(len(item.item_audio_paths) or 1 for item in results)
+    audio_count = sum(_result_audio_count(item) for item in results)
     messages = "; ".join(item.message for item in results)
     package_text = f" Gói tải về: {package_path.name}." if package_path else ""
     return (
         f"{messages} {audio_count} file audio, {total_segments} đoạn, "
         f"{total_duration:.1f} giây.{package_text}"
     )
+
+
+def _result_audio_count(result) -> int:
+    paths = []
+    if result.audio_path:
+        paths.append(Path(result.audio_path))
+    paths.extend(Path(path) for path in result.item_audio_paths)
+    seen = {path.resolve() for path in paths if path.exists() and path.suffix.lower() in {".wav", ".mp3"}}
+    return len(seen) or 1
 
 
 def _first_audio(results) -> Path | None:

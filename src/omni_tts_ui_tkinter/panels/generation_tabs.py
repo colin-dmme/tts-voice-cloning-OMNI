@@ -64,11 +64,30 @@ class GenerationTabsMixin:
 
         top = ttk.Frame(tab)
         top.grid(row=0, column=0, columnspan=2, sticky="ew")
-        ttk.Button(top, text="Thêm file", command=self.add_source_files).pack(side="left")
-        ttk.Button(top, text="Xóa danh sách", command=self.clear_source_files).pack(
-            side="left", padx=(8, 0)
+        top.columnconfigure(2, weight=1)
+        ttk.Button(top, text="Thêm file", command=self.add_source_files).grid(
+            row=0, column=0, sticky="w"
         )
-        ttk.Label(top, text="Hỗ trợ: .txt, .md, .srt").pack(side="left", padx=(14, 0))
+        ttk.Button(top, text="Xóa danh sách", command=self.clear_source_files).grid(
+            row=0, column=1, sticky="w", padx=(8, 0)
+        )
+        ttk.Label(top, text="Hỗ trợ: .txt, .md, .srt").grid(
+            row=0, column=2, sticky="w", padx=(14, 0)
+        )
+        ttk.Label(top, text="Dán đường dẫn").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        self.source_path_entry = ttk.Entry(top, textvariable=self.source_path_var)
+        self.source_path_entry.grid(
+            row=1,
+            column=1,
+            columnspan=2,
+            sticky="ew",
+            padx=(8, 8),
+            pady=(8, 0),
+        )
+        self.source_path_entry.bind("<Return>", lambda _event: self.add_pasted_source_files())
+        ttk.Button(top, text="Thêm nhanh", command=self.add_pasted_source_files).grid(
+            row=1, column=3, sticky="e", pady=(8, 0)
+        )
 
         paned = ttk.Panedwindow(tab, orient="horizontal")
         paned.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
@@ -76,13 +95,38 @@ class GenerationTabsMixin:
         file_pane = ttk.Frame(paned)
         file_pane.columnconfigure(0, weight=1)
         file_pane.rowconfigure(0, weight=1)
-        self.file_list = tk.Listbox(file_pane, selectmode="extended", height=14)
-        self.file_list.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        list_frame = ttk.Frame(file_pane)
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+        list_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        columns = ("file", "folder", "chars")
+        self.file_list = ttk.Treeview(
+            list_frame,
+            columns=columns,
+            show="headings",
+            selectmode="extended",
+            height=14,
+        )
+        self.file_list.heading("file", text="Tên file")
+        self.file_list.heading("folder", text="Thư mục cha")
+        self.file_list.heading("chars", text="Ký tự")
+        self.file_list.column("file", width=280, anchor="w")
+        self.file_list.column("folder", width=220, anchor="w")
+        self.file_list.column("chars", width=90, anchor="e", stretch=False)
+        self.file_list.grid(row=0, column=0, sticky="nsew")
+        file_scroll = ttk.Scrollbar(list_frame, orient="vertical", command=self.file_list.yview)
+        file_scroll.grid(row=0, column=1, sticky="ns")
+        self.file_list.configure(yscrollcommand=file_scroll.set)
         enabled = enable_file_drop(self.file_list, self.add_dropped_files)
-        hint = "Kéo thả một hoặc nhiều file vào danh sách." if enabled else (
-            "Bấm Thêm file để chọn một hoặc nhiều file nguồn."
+        hint = (
+            "Kéo thả, bấm Thêm file hoặc dán đường dẫn vào ô phía trên."
+            if enabled
+            else "Bấm Thêm file hoặc dán đường dẫn vào ô phía trên."
         )
         ttk.Label(file_pane, text=hint).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(file_pane, textvariable=self.file_summary_var).grid(
+            row=2, column=0, sticky="w", pady=(2, 0)
+        )
 
         right = ttk.Frame(paned)
         right.columnconfigure(0, weight=1)
@@ -188,13 +232,11 @@ class GenerationTabsMixin:
         controls = ttk.Notebook(parent)
 
         basic_tab = ttk.Frame(controls, padding=8)
-        voice_tab = ttk.Frame(controls, padding=8)
-        vieneu_tab = ttk.Frame(controls, padding=8)
         advanced_tab = ttk.Frame(controls, padding=8)
+        vieneu_tab = ttk.Frame(controls, padding=8)
         controls.add(basic_tab, text="Cơ bản")
-        controls.add(voice_tab, text="Giọng")
-        controls.add(vieneu_tab, text="VieNeu")
         controls.add(advanced_tab, text="Nâng cao")
+        controls.add(vieneu_tab, text="VieNeu")
 
         ttk.Label(basic_tab, text="Model TTS").pack(anchor="w")
         model_combo = ttk.Combobox(
@@ -223,9 +265,11 @@ class GenerationTabsMixin:
         language_combo.pack(fill="x", pady=(4, 8))
         self.language_combos.append(language_combo)
 
-        ttk.Label(voice_tab, text="Profile giọng").pack(anchor="w")
+        ttk.Separator(basic_tab).pack(fill="x", pady=(4, 10))
+
+        ttk.Label(basic_tab, text="Profile giọng").pack(anchor="w")
         profile_combo = ttk.Combobox(
-            voice_tab,
+            basic_tab,
             textvariable=self.voice_profile_var,
             values=list(self.voice_profile_map.keys()),
             state="readonly",
@@ -235,13 +279,13 @@ class GenerationTabsMixin:
         self.voice_profile_combos.append(profile_combo)
         self.profile_combos.append(profile_combo)
 
-        compat_label = ttk.Label(voice_tab, textvariable=self.profile_compat_var, foreground="#555555", wraplength=340)
+        compat_label = ttk.Label(basic_tab, textvariable=self.profile_compat_var, foreground="#555555", wraplength=340)
         compat_label.pack(anchor="w", pady=(0, 6))
         self.profile_compat_labels.append(compat_label)
 
-        ttk.Label(voice_tab, text="Preset giọng (khi không clone)").pack(anchor="w")
+        ttk.Label(basic_tab, text="Preset giọng (khi không clone)").pack(anchor="w")
         speaker_combo = ttk.Combobox(
-            voice_tab,
+            basic_tab,
             textvariable=self.speaker_var,
             values=list(self.speaker_map.keys()),
             state="disabled",
@@ -250,7 +294,7 @@ class GenerationTabsMixin:
         speaker_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_voice_preset_changed())
         self.speaker_combos.append(speaker_combo)
 
-        ttk.Label(voice_tab, textvariable=self.voice_source_var, foreground="#444444", wraplength=360).pack(
+        ttk.Label(basic_tab, textvariable=self.voice_source_var, foreground="#444444", wraplength=360).pack(
             anchor="w", pady=(0, 8)
         )
 
@@ -288,8 +332,9 @@ class GenerationTabsMixin:
             state="readonly",
         )
         runtime_combo.pack(fill="x", pady=(4, 8))
-        self._spin(advanced_tab, "Silence Pad, ms", self.pause_var, 0, 3000, 50)
-        self._spin(advanced_tab, "Max Chars mỗi đoạn", self.chunk_var, 60, 800, 20)
+        self._spin(advanced_tab, "Nghỉ giữa câu/chunk, ms", self.pause_var, 0, 3000, 50)
+        self._spin(advanced_tab, "Nghỉ giữa đoạn trong file tổng, ms", self.paragraph_pause_var, 0, 10000, 50)
+        self._spin(advanced_tab, "Max ký tự mỗi đoạn nhỏ", self.chunk_var, 60, 800, 20)
         return controls
 
     def _build_output_controls(
@@ -320,6 +365,29 @@ class GenerationTabsMixin:
             )
             row += 1
 
+        ttk.Label(frame, text="Định dạng audio").grid(row=row, column=0, sticky="w", pady=2)
+        format_row = ttk.Frame(frame)
+        format_row.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=2)
+        ttk.Combobox(
+            format_row,
+            textvariable=self.output_audio_format_var,
+            values=list(self.output_audio_format_map.keys()),
+            state="readonly",
+            width=10,
+        ).pack(side="left")
+        ttk.Label(format_row, text="Bitrate MP3").pack(side="left", padx=(12, 4))
+        bitrate_combo = ttk.Combobox(
+            format_row,
+            textvariable=self.mp3_bitrate_var,
+            values=[128, 160, 192, 256, 320],
+            state="readonly",
+            width=8,
+        )
+        bitrate_combo.pack(side="left")
+        ttk.Label(format_row, text="kbps").pack(side="left", padx=(4, 0))
+        self.mp3_bitrate_combos.append(bitrate_combo)
+        row += 1
+
         checks = ttk.Frame(frame)
         checks.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         ttk.Checkbutton(
@@ -330,9 +398,9 @@ class GenerationTabsMixin:
         ).pack(side="left")
         ttk.Checkbutton(
             checks,
-            text="Tách mỗi dòng SRT/đoạn văn thành một file audio",
+            text="Tách dòng SRT/đoạn văn thành file riêng",
             variable=self.split_output_var,
-            command=self.save_preferences,
+            command=self.on_split_output_changed,
         ).pack(side="left", padx=(14, 0))
         ttk.Checkbutton(
             checks,
@@ -340,6 +408,14 @@ class GenerationTabsMixin:
             variable=self.output_srt_var,
             command=self.save_preferences,
         ).pack(side="left", padx=(14, 0))
+        join_check = ttk.Checkbutton(
+            checks,
+            text="Tạo thêm file audio tổng",
+            variable=self.join_split_audio_var,
+            command=self.save_preferences,
+        )
+        join_check.pack(side="left", padx=(14, 0))
+        self.join_split_audio_checks.append(join_check)
 
         open_button = ttk.Button(
             checks,

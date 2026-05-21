@@ -18,5 +18,9 @@ generation:
   default_language: "vi"
   default_model_id: "omnivoice_vietnamese"
   sentence_pause_ms: 450
+  paragraph_pause_ms: 0
+  srt_file_padding_ms: 0
+  output_audio_format: "wav"
+  mp3_bitrate_kbps: 192
   max_chunk_chars: 220
   crossfade_ms: 80

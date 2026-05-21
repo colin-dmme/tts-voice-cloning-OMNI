@@ -24,10 +24,15 @@ PORTABLE_TKINTER_KEYS = {
     "temperature",
     "top_k",
     "sentence_pause_ms",
+    "paragraph_pause_ms",
+    "srt_file_padding_ms",
     "max_chunk_chars",
     "overwrite",
     "split_output",
+    "output_audio_format",
+    "mp3_bitrate_kbps",
     "output_srt",
+    "join_split_output_audio",
 }
 
 

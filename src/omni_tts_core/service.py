@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from threading import Event
 
-from omni_tts_core.audio.wav_tools import concatenate_segments, duration_seconds, save_wav
+from omni_tts_core.audio.wav_tools import concatenate_segments, duration_seconds, read_audio_mono, save_audio
 from omni_tts_core.config import AppSettings
 from omni_tts_core.engine_profile_cache import EngineProfileCache
 from omni_tts_core.model_catalog import open_catalog
-from omni_tts_core.engines.base import TtsEngineRequest
+from omni_tts_core.engines.base import TtsEngineRequest, TtsEngineResult
 from omni_tts_core.engines.omnivoice_engine import OmniVoiceEngine
 from omni_tts_core.engines.qwen_engine import QwenSubprocessEngine
 from omni_tts_core.engines.valtec_engine import ValtecSubprocessEngine
@@ -218,16 +218,30 @@ class TtsService:
         cancel_event: Event | None = None,
     ) -> GenerateSpeechResult:
         check_cancel(cancel_event)
+        if request.output_mode == "split":
+            return self._generate_split_text(request, request.text, progress_callback, cancel_event)
+        return self._generate_merged_text(request, progress_callback, cancel_event)
+
+    def _generate_merged_text(
+        self,
+        request: GenerateSpeechRequest,
+        progress_callback: ProgressCallback | None = None,
+        cancel_event: Event | None = None,
+    ) -> GenerateSpeechResult:
+        check_cancel(cancel_event)
         request = self._apply_voice_profile(request)
         spec = self.registry.get(request.model_id)
         self._ensure_request_can_generate(request, spec)
-        if request.output_mode == "split":
-            return self._generate_split_text(request, request.text, progress_callback, cancel_event)
-        text = _prepare_text(request.text, request.language)
-        chunks = split_text(text, request.max_chunk_chars)
+        units = _prepared_text_units(request.text, request.language, request.max_chunk_chars)
+        chunks = [chunk for unit in units for chunk in unit["chunks"]]
         if not chunks:
             raise ConfigError("Không có nội dung để đọc.")
-        emit_progress(progress_callback, f"Đã tách thành {len(chunks)} đoạn.", 0, len(chunks))
+        emit_progress(
+            progress_callback,
+            f"Đã tách thành {len(units)} đoạn gốc, {len(chunks)} đoạn đọc.",
+            0,
+            len(chunks),
+        )
 
         job_id, job_dir = self.job_store.create_job_dir()
         output_dir = _resolve_output_dir(request, job_dir)
@@ -238,14 +252,25 @@ class TtsService:
             output_stem,
             request.overwrite,
             request.output_srt,
+            request.output_audio_format,
         )
         self.job_store.save_json(job_dir / "request.json", request)
         self.job_store.save_json(
             job_dir / "chunks.json",
             {
                 "max_chunk_chars": request.max_chunk_chars,
+                "sentence_pause_ms": request.sentence_pause_ms,
+                "paragraph_pause_ms": _paragraph_pause_ms(request),
+                "unit_count": len(units),
                 "chunk_count": len(chunks),
-                "chunks": chunks,
+                "units": [
+                    {
+                        "index": unit["unit"].index,
+                        "text": unit["unit"].text,
+                        "chunks": unit["chunks"],
+                    }
+                    for unit in units
+                ],
             },
         )
 
@@ -272,35 +297,71 @@ class TtsService:
         ]
         check_cancel(cancel_event)
         emit_progress(progress_callback, f"Đang tạo {len(chunks)} đoạn...", 0, len(chunks))
-        batch_results = engine.generate_batch(engine_requests)
+        batch_results = engine.generate_batch(
+            engine_requests,
+            progress_callback=lambda done, total: emit_progress(
+                progress_callback,
+                f"Đã tạo {done}/{total} đoạn...",
+                done,
+                total,
+            ),
+        )
         check_cancel(cancel_event)
+        if len(batch_results) != len(engine_requests):
+            raise ConfigError("Engine trả về số đoạn audio không khớp với yêu cầu.")
         emit_progress(progress_callback, f"Hoàn tất {len(chunks)} đoạn.", len(chunks), len(chunks))
 
-        audio_segments = []
+        paragraph_audio_segments = []
         timings: list[SegmentTiming] = []
         current_seconds = 0.0
         sample_rate = 24000
-        pause_seconds = request.sentence_pause_ms / 1000
+        chunk_cursor = 0
+        sentence_pause_seconds = request.sentence_pause_ms / 1000
+        paragraph_pause_seconds = _paragraph_pause_ms(request) / 1000
 
-        for index, (chunk, result) in enumerate(zip(chunks, batch_results), start=1):
-            sample_rate = result.sample_rate
-            segment_duration = duration_seconds(result.audio, sample_rate)
-            timings.append(
-                SegmentTiming(
-                    index=index,
-                    text=chunk,
-                    start_seconds=current_seconds,
-                    end_seconds=current_seconds + segment_duration,
+        for unit_index, unit in enumerate(units):
+            unit_chunks = unit["chunks"]
+            unit_results = batch_results[chunk_cursor : chunk_cursor + len(unit_chunks)]
+            chunk_cursor += len(unit_chunks)
+            unit_audio_segments = []
+            unit_sample_rate = sample_rate
+
+            for chunk_index, (chunk, result) in enumerate(zip(unit_chunks, unit_results)):
+                unit_sample_rate = result.sample_rate
+                segment_duration = duration_seconds(result.audio, unit_sample_rate)
+                timings.append(
+                    SegmentTiming(
+                        index=len(timings) + 1,
+                        text=chunk,
+                        start_seconds=current_seconds,
+                        end_seconds=current_seconds + segment_duration,
+                    )
+                )
+                current_seconds += segment_duration
+                if chunk_index < len(unit_chunks) - 1:
+                    current_seconds += sentence_pause_seconds
+                unit_audio_segments.append(result.audio)
+
+            if paragraph_audio_segments and unit_sample_rate != sample_rate:
+                raise ConfigError("Không thể nối audio vì sample rate các đoạn không khớp.")
+            sample_rate = unit_sample_rate
+            paragraph_audio_segments.append(
+                concatenate_segments(
+                    unit_audio_segments,
+                    sample_rate,
+                    request.sentence_pause_ms,
+                    self.settings.crossfade_ms,
                 )
             )
-            current_seconds += segment_duration + pause_seconds
-            audio_segments.append(result.audio)
+            if unit_index < len(units) - 1:
+                current_seconds += paragraph_pause_seconds
 
         check_cancel(cancel_event)
-        save_message = "Đang lưu WAV và SRT..." if request.output_srt else "Đang lưu WAV..."
+        audio_label = _audio_format_label(request.output_audio_format)
+        save_message = f"Đang lưu {audio_label} và SRT..." if request.output_srt else f"Đang lưu {audio_label}..."
         emit_progress(progress_callback, save_message, len(chunks), len(chunks))
-        combined = concatenate_segments(audio_segments, sample_rate, request.sentence_pause_ms, self.settings.crossfade_ms)
-        save_wav(audio_path, combined, sample_rate)
+        combined = concatenate_segments(paragraph_audio_segments, sample_rate, _paragraph_pause_ms(request), 0)
+        save_audio(audio_path, combined, sample_rate, request.output_audio_format, request.mp3_bitrate_kbps)
         if request.output_srt and srt_path is not None:
             write_srt(srt_path, timings)
 
@@ -490,8 +551,7 @@ class TtsService:
             if not chunks:
                 continue
             unit_stem = f"{output_stem}_{unit.index:03}"
-            audio_path = output_dir / f"{unit_stem}.wav"
-            srt_path = output_dir / f"{unit_stem}.srt" if request.output_srt else None
+            audio_path = _audio_output_path(output_dir, unit_stem, request.output_audio_format)
             start_index = len(engine_requests)
             for chunk in chunks:
                 engine_requests.append(
@@ -519,7 +579,6 @@ class TtsService:
                     "start_index": start_index,
                     "count": len(chunks),
                     "audio_path": audio_path,
-                    "srt_path": srt_path,
                 }
             )
 
@@ -531,90 +590,249 @@ class TtsService:
             progress_callback,
             f"Đang tạo {len(engine_requests)} đoạn cho {len(split_jobs)} file audio...",
             0,
-            len(units),
+            len(engine_requests),
         )
-        batch_results = engine.generate_batch(engine_requests)
+        saved_audio_paths: dict[int, Path] = {}
+        saved_durations: dict[int, float] = {}
+        saved_segment_counts: dict[int, int] = {}
+        chunk_paths: dict[int, Path] = {}
+
+        def remember_saved(
+            job_index: int,
+            audio_path: Path,
+            audio_duration: float,
+            segment_count: int,
+        ) -> None:
+            saved_audio_paths[job_index] = audio_path
+            saved_durations[job_index] = audio_duration
+            saved_segment_counts[job_index] = segment_count
+
+        def save_ready_jobs_from_chunk_paths() -> None:
+            for job_index, job in enumerate(split_jobs, start=1):
+                if job_index in saved_audio_paths:
+                    continue
+                start_index = job["start_index"]
+                paths = []
+                for chunk_index in range(start_index, start_index + job["count"]):
+                    path = chunk_paths.get(chunk_index)
+                    if path is None:
+                        break
+                    paths.append(path)
+                else:
+                    check_cancel(cancel_event)
+                    job_results = [_read_tts_result(path) for path in paths]
+                    audio_path, audio_duration, segment_count = self._save_split_job_outputs(
+                        job,
+                        job_results,
+                        request,
+                    )
+                    remember_saved(job_index, audio_path, audio_duration, segment_count)
+                    emit_progress(
+                        progress_callback,
+                        f"Hoàn tất file {job_index}/{len(split_jobs)}.",
+                        job_index,
+                        len(split_jobs),
+                    )
+
+        def on_chunk_ready(chunk_index: int, path: Path) -> None:
+            chunk_paths[chunk_index] = path
+            save_ready_jobs_from_chunk_paths()
+
+        def on_batch_progress(done: int, total: int) -> None:
+            emit_progress(
+                progress_callback,
+                f"Đã tạo {done}/{total} đoạn cho {len(split_jobs)} file audio...",
+                done,
+                total,
+            )
+
+        batch_results = engine.generate_batch(
+            engine_requests,
+            progress_callback=on_batch_progress,
+            chunk_callback=on_chunk_ready,
+        )
         check_cancel(cancel_event)
         if len(batch_results) != len(engine_requests):
             raise ConfigError("Engine trả về số đoạn audio không khớp với yêu cầu.")
 
-        audio_paths: list[Path] = []
-        srt_paths: list[Path] = []
-        total_duration = 0.0
-        total_segments = 0
-        pause_seconds = request.sentence_pause_ms / 1000
-
         for job_index, job in enumerate(split_jobs, start=1):
+            if job_index in saved_audio_paths:
+                continue
             check_cancel(cancel_event)
             emit_progress(
                 progress_callback,
                 f"Đang lưu file {job_index}/{len(split_jobs)}...",
                 job_index - 1,
-                len(units),
+                len(split_jobs),
             )
             start_index = job["start_index"]
             job_results = batch_results[start_index : start_index + job["count"]]
-            chunks = job["chunks"]
-
-            audio_segments = []
-            timings: list[SegmentTiming] = []
-            current_seconds = 0.0
-            sample_rate = 24000
-            for segment_index, (chunk, result) in enumerate(zip(chunks, job_results), start=1):
-                sample_rate = result.sample_rate
-                segment_duration = duration_seconds(result.audio, sample_rate)
-                timings.append(
-                    SegmentTiming(
-                        index=segment_index,
-                        text=chunk,
-                        start_seconds=current_seconds,
-                        end_seconds=current_seconds + segment_duration,
-                    )
-                )
-                current_seconds += segment_duration + pause_seconds
-                audio_segments.append(result.audio)
-
-            combined = concatenate_segments(
-                audio_segments,
-                sample_rate,
-                request.sentence_pause_ms,
-                self.settings.crossfade_ms,
+            audio_path, audio_duration, segment_count = self._save_split_job_outputs(
+                job,
+                job_results,
+                request,
             )
-            audio_path = job["audio_path"]
-            srt_path = job["srt_path"]
-            save_wav(audio_path, combined, sample_rate)
-            if request.output_srt and srt_path is not None:
-                write_srt(srt_path, timings)
-
-            audio_paths.append(audio_path)
-            if srt_path is not None:
-                srt_paths.append(srt_path)
-            total_duration += duration_seconds(combined, sample_rate)
-            total_segments += len(timings)
+            remember_saved(job_index, audio_path, audio_duration, segment_count)
             emit_progress(
                 progress_callback,
                 f"Hoàn tất file {job_index}/{len(split_jobs)}.",
                 job_index,
-                len(units),
+                len(split_jobs),
+            )
+
+        audio_paths = [
+            saved_audio_paths[index]
+            for index in range(1, len(split_jobs) + 1)
+            if index in saved_audio_paths
+        ]
+        total_duration = sum(saved_durations.values())
+        total_segments = sum(saved_segment_counts.values())
+        if len(audio_paths) != len(split_jobs):
+            raise ConfigError("Không lưu đủ số file audio đã tách.")
+
+        srt_path = None
+        if request.output_srt:
+            srt_path = output_dir / f"{output_stem}.srt"
+            write_srt(
+                srt_path,
+                _split_timeline_segments(split_jobs, saved_durations, _paragraph_pause_ms(request)),
+            )
+
+        joined_audio_path = None
+        joined_duration = None
+        if request.join_split_output_audio:
+            joined_audio_path = _audio_output_path(output_dir, output_stem, request.output_audio_format)
+            joined_duration = self._join_split_jobs_from_results(
+                split_jobs,
+                batch_results,
+                joined_audio_path,
+                request,
             )
 
         return GenerateSpeechResult(
             job_id=job_id,
-            audio_path=audio_paths[0],
-            srt_path=srt_paths[0] if srt_paths else None,
+            audio_path=joined_audio_path or audio_paths[0],
+            srt_path=srt_path,
             job_dir=job_dir,
             segment_count=total_segments,
-            duration_seconds=total_duration,
-            message=f"Đã tạo {len(audio_paths)} file audio riêng.",
+            duration_seconds=joined_duration or total_duration,
+            message=(
+                f"Đã tạo {len(audio_paths)} file audio riêng và file tổng."
+                if joined_audio_path
+                else f"Đã tạo {len(audio_paths)} file audio riêng."
+            ),
             item_audio_paths=audio_paths,
-            item_srt_paths=srt_paths,
+            item_srt_paths=[],
         )
+
+    def _save_split_job_outputs(
+        self,
+        job: dict,
+        job_results: list[TtsEngineResult],
+        request: GenerateSpeechRequest,
+    ) -> tuple[Path, float, int]:
+        combined, sample_rate, segment_count = self._build_split_job_audio(job, job_results, request)
+        audio_path = job["audio_path"]
+        save_audio(audio_path, combined, sample_rate, request.output_audio_format, request.mp3_bitrate_kbps)
+
+        return audio_path, duration_seconds(combined, sample_rate), segment_count
+
+    def _build_split_job_audio(
+        self,
+        job: dict,
+        job_results: list[TtsEngineResult],
+        request: GenerateSpeechRequest,
+    ) -> tuple:
+        chunks = job["chunks"]
+        audio_segments = []
+        sample_rate = 24000
+
+        for result in job_results:
+            sample_rate = result.sample_rate
+            audio_segments.append(result.audio)
+
+        combined = concatenate_segments(
+            audio_segments,
+            sample_rate,
+            request.sentence_pause_ms,
+            self.settings.crossfade_ms,
+        )
+
+        return combined, sample_rate, len(chunks)
+
+    def _join_split_jobs_from_results(
+        self,
+        split_jobs: list[dict],
+        batch_results: list[TtsEngineResult],
+        output_path: Path,
+        request: GenerateSpeechRequest,
+    ) -> float:
+        audio_segments = []
+        sample_rate = 24000
+        for job in split_jobs:
+            start_index = job["start_index"]
+            job_results = batch_results[start_index : start_index + job["count"]]
+            combined, current_rate, _segment_count = self._build_split_job_audio(job, job_results, request)
+            if audio_segments and current_rate != sample_rate:
+                raise ConfigError("Không thể nối file tổng vì sample rate các file audio không khớp.")
+            sample_rate = current_rate
+            audio_segments.append(combined)
+        combined = concatenate_segments(audio_segments, sample_rate, _paragraph_pause_ms(request), 0)
+        save_audio(output_path, combined, sample_rate, request.output_audio_format, request.mp3_bitrate_kbps)
+        return duration_seconds(combined, sample_rate)
+
+
+def _split_timeline_segments(
+    split_jobs: list[dict],
+    durations: dict[int, float],
+    paragraph_pause_ms: int,
+) -> list[SegmentTiming]:
+    segments: list[SegmentTiming] = []
+    current_seconds = 0.0
+    padding_seconds = max(0, paragraph_pause_ms) / 1000
+    for index, job in enumerate(split_jobs, start=1):
+        duration = durations.get(index, 0.0)
+        unit = job["unit"]
+        segments.append(
+            SegmentTiming(
+                index=index,
+                text=unit.text,
+                start_seconds=current_seconds,
+                end_seconds=current_seconds + duration,
+            )
+        )
+        current_seconds += duration + padding_seconds
+    return segments
 
 
 def _prepare_text(text: str, language: str) -> str:
     if language == "vi":
         return normalize_vietnamese_text(text)
     return text.strip()
+
+
+def _prepared_text_units(text: str, language: str, max_chunk_chars: int) -> list[dict]:
+    prepared_units = []
+    for unit in text_units_from_blank_lines(text):
+        prepared_text = _prepare_text(unit.text, language)
+        chunks = split_text(prepared_text, max_chunk_chars)
+        if chunks:
+            prepared_units.append(
+                {
+                    "unit": unit,
+                    "chunks": chunks,
+                }
+            )
+    return prepared_units
+
+
+def _paragraph_pause_ms(request: GenerateSpeechRequest) -> int:
+    return max(0, int(request.paragraph_pause_ms))
+
+
+def _read_tts_result(path: Path) -> TtsEngineResult:
+    audio, sample_rate = read_audio_mono(path)
+    return TtsEngineResult(audio=audio, sample_rate=int(sample_rate))
 
 
 def _clean_path(path: Path | None) -> Path | None:
@@ -739,19 +957,32 @@ def _split_output_dir(base_dir: Path, stem: str, overwrite: bool) -> Path:
     raise ConfigError(f"Không tìm được thư mục xuất trống trong: {base_dir}")
 
 
+def _audio_output_path(output_dir: Path, stem: str, output_audio_format: str) -> Path:
+    return output_dir / f"{stem}{_audio_extension(output_audio_format)}"
+
+
+def _audio_extension(output_audio_format: str) -> str:
+    return ".mp3" if output_audio_format == "mp3" else ".wav"
+
+
+def _audio_format_label(output_audio_format: str) -> str:
+    return "MP3" if output_audio_format == "mp3" else "WAV"
+
+
 def _available_output_pair(
     output_dir: Path,
     stem: str,
     overwrite: bool,
     output_srt: bool,
+    output_audio_format: str,
 ) -> tuple[Path, Path | None]:
-    audio_path = output_dir / f"{stem}.wav"
+    audio_path = _audio_output_path(output_dir, stem, output_audio_format)
     srt_path = output_dir / f"{stem}.srt" if output_srt else None
     srt_available = srt_path is None or not srt_path.exists()
     if overwrite or (not audio_path.exists() and srt_available):
         return audio_path, srt_path
     for index in range(1, 1000):
-        audio_candidate = output_dir / f"{stem}_{index}.wav"
+        audio_candidate = _audio_output_path(output_dir, f"{stem}_{index}", output_audio_format)
         srt_candidate = output_dir / f"{stem}_{index}.srt" if output_srt else None
         srt_candidate_available = srt_candidate is None or not srt_candidate.exists()
         if not audio_candidate.exists() and srt_candidate_available:

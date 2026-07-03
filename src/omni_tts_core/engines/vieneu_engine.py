@@ -22,6 +22,7 @@ from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
 from omni_tts_core.progress import check_cancel
 from omni_tts_core.runtime_devices import RuntimeDevicePolicy
+from omni_tts_core.storage_paths import hf_cache_env
 from omni_tts_shared.errors import EngineDependencyError, GenerationError
 
 if TYPE_CHECKING:
@@ -53,7 +54,7 @@ class VieneuSubprocessEngine(BaseTtsEngine):
                 encoding="utf-8",
             )
             command = [str(runtime.python_path), str(self.worker_script), "--request", str(payload_path)]
-            env = _worker_env(project_path(".hf_cache"), runtime.python_paths)
+            env = _worker_env(runtime.python_paths)
             try:
                 completed = run_worker_process(
                     command,
@@ -114,7 +115,7 @@ class VieneuSubprocessEngine(BaseTtsEngine):
             )
 
             command = [str(runtime.python_path), str(self.worker_script), "--request", str(payload_path)]
-            env = _worker_env(project_path(".hf_cache"), runtime.python_paths)
+            env = _worker_env(runtime.python_paths)
 
             reported_chunks: set[int] = set()
 
@@ -248,7 +249,7 @@ class VieneuSubprocessEngine(BaseTtsEngine):
             encoding="utf-8",
         )
         runtime = self._worker_runtime()
-        env = _worker_env(project_path(".hf_cache"), runtime.python_paths)
+        env = _worker_env(runtime.python_paths)
         try:
             completed = run_worker_process(
                 [str(runtime.python_path), str(self.encoder_script), "--request", str(payload_path)],
@@ -336,13 +337,9 @@ def _runtime_payload(runtime: dict) -> dict:
     return {key: value for key, value in runtime.items() if key in allowed and value not in ("", None)}
 
 
-def _worker_env(hf_cache: Path, python_paths: list[Path]) -> dict:
+def _worker_env(python_paths: list[Path]) -> dict:
     env = dict(os.environ)
-    env.update({
-        "HF_HOME": str(hf_cache),
-        "HF_HUB_CACHE": str(hf_cache / "hub"),
-        "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
-    })
+    env.update(hf_cache_env())
     if python_paths:
         env["PYTHONPATH"] = os.pathsep.join(str(p) for p in python_paths)
     return env

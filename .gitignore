@@ -35,6 +35,10 @@ outputs/
 logs/
 voices/
 config/ui_tkinter.json
+config/storage.local.yaml
+config/file_queue.sqlite3
+config/file_queue.sqlite3-shm
+config/file_queue.sqlite3-wal
 
 # Git-backed portable user state lives in user_state/ and is intentionally tracked.
 !user_state/

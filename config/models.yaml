@@ -204,6 +204,118 @@ tts_models:
       recommend_for: "Thử nghiệm đa ngôn ngữ, clone giọng tiếng Anh"
       install_note: ""
 
+  f5tts_v1_base_swivid:
+    display_name: "F5-TTS v1 Base (SWivid)"
+    provider: "f5tts"
+    model_type: "tts"
+    local_path: "models/f5tts/swivid__F5-TTS"
+    hf_repo: "SWivid/F5-TTS"
+    language_priority: "zh-en"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "en", "zh"]
+      supports_voice_profile: true
+      requires_voice_profile: true
+      supports_reference_text: true
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      f5_model: "F5TTS_v1_Base"
+      f5_ckpt_filename: "F5TTS_v1_Base/model_1250000.safetensors"
+      f5_vocab_filename: "F5TTS_v1_Base/vocab.txt"
+      ode_method: "euler"
+      use_ema: true
+      f5_nfe_step: 32
+      f5_cfg_strength: 2.0
+      f5_sway_sampling_coef: -1.0
+      f5_cross_fade_duration: 0.15
+      f5_target_rms: 0.1
+      f5_remove_silence: false
+      download_allow_patterns:
+        - "F5TTS_v1_Base/model_1250000.safetensors"
+        - "F5TTS_v1_Base/vocab.txt"
+    notes: "Official F5-TTS v1 Base từ SWivid; ưu tiên clone voice bằng audio mẫu ngắn + transcript."
+    ref_audio_hints:
+      min_seconds: 3.0
+      max_seconds: 12.0
+      optimal_min_seconds: 5.0
+      optimal_max_seconds: 10.0
+      needs_transcript: true
+    catalog_info:
+      category: "official-gpu"
+      origin: "official"
+      family: "F5-TTS"
+      variant: "v1 Base"
+      variant_badge: "F5 v1"
+      source_repo: "SWivid/F5-TTS"
+      risk: "test"
+      description: "Flow-matching zero-shot TTS, phù hợp A/B test clone giọng tiếng Anh/Trung bằng audio mẫu dưới 12 giây và transcript chính xác."
+      highlight: "Clone voice test"
+      quality_score: 4
+      speed_score: 2
+      vram_mb: 6000
+      ram_mb: 6000
+      recommend_for: "A/B test clone voice tiếng Anh/Trung; chưa đặt làm mặc định cho tiếng Việt"
+      install_note: "install_f5_worker.bat hoặc install_f5_worker_cuda.bat"
+
+  chatterbox_turbo_resembleai:
+    display_name: "Chatterbox Turbo (ResembleAI)"
+    provider: "chatterbox"
+    model_type: "tts"
+    local_path: "models/chatterbox/resembleai__chatterbox-turbo"
+    hf_repo: "ResembleAI/chatterbox-turbo"
+    language_priority: "en"
+    required: false
+    capabilities:
+      supported_languages: ["en"]
+      supports_voice_profile: true
+      requires_voice_profile: true
+      supports_reference_text: false
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      chatterbox_temperature: 0.8
+      chatterbox_top_p: 0.95
+      chatterbox_top_k: 1000
+      chatterbox_repetition_penalty: 1.2
+      chatterbox_norm_loudness: true
+      download_allow_patterns:
+        - "added_tokens.json"
+        - "conds.pt"
+        - "merges.txt"
+        - "s3gen_meanflow.safetensors"
+        - "special_tokens_map.json"
+        - "t3_turbo_v1.safetensors"
+        - "t3_turbo_v1.yaml"
+        - "tokenizer_config.json"
+        - "ve.safetensors"
+        - "vocab.json"
+    notes: "Official Chatterbox Turbo 350M từ ResembleAI; ưu tiên clone voice tiếng Anh bằng audio mẫu >=5 giây, có PerTh watermark mặc định."
+    ref_audio_hints:
+      min_seconds: 5.1
+      max_seconds: 15.0
+      optimal_min_seconds: 8.0
+      optimal_max_seconds: 10.0
+      needs_transcript: false
+    catalog_info:
+      category: "official-gpu"
+      origin: "official"
+      family: "Chatterbox"
+      variant: "Turbo"
+      variant_badge: "Turbo"
+      source_repo: "ResembleAI/chatterbox-turbo"
+      risk: "test"
+      description: "Chatterbox Turbo 350M, tiếng Anh, hỗ trợ zero-shot clone voice từ vài giây audio mẫu và paralinguistic tags như [laugh], [chuckle], [sigh]."
+      highlight: "Clone voice tiếng Anh nhanh"
+      quality_score: 4
+      speed_score: 5
+      vram_mb: 6000
+      ram_mb: 7000
+      recommend_for: "A/B test clone voice tiếng Anh, narration/voice agent có tag biểu cảm; chưa dùng cho tiếng Việt"
+      install_note: "install_chatterbox_worker.bat hoặc install_chatterbox_worker_cuda.bat"
+
   vieneu_v2_standard:
     display_name: "VieNeu TTS v2 Standard"
     provider: "vieneu"

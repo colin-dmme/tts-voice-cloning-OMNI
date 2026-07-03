@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from tkinter import TclError
 
+from omni_tts_ui_tkinter.path_intake import parse_path_text
+
 
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -34,5 +36,4 @@ def enable_file_drop(widget, callback) -> bool:
 
 
 def parse_drop_files(data: str, widget) -> list[Path]:
-    items = widget.tk.splitlist(data)
-    return [Path(item) for item in items if item]
+    return parse_path_text(data, widget.tk.splitlist)

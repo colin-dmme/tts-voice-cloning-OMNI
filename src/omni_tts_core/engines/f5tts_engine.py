@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 import soundfile as sf
 
@@ -22,25 +22,21 @@ from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
 from omni_tts_core.progress import check_cancel
 from omni_tts_core.runtime_devices import RuntimeDevicePolicy
-from omni_tts_core.storage_paths import hf_cache_env
+from omni_tts_core.storage_paths import hf_cache_env, hf_cache_root
 from omni_tts_shared.errors import EngineDependencyError, GenerationError
 
-if TYPE_CHECKING:
-    from omni_tts_core.engine_profile_cache import EngineProfileCache
 
-
-class QwenSubprocessEngine(BaseTtsEngine):
-    def __init__(self, spec: ModelSpec, cache: "EngineProfileCache | None" = None) -> None:
+class F5TtsSubprocessEngine(BaseTtsEngine):
+    def __init__(self, spec: ModelSpec) -> None:
         self.spec = spec
-        self._cache = cache
         self._device_policy = RuntimeDevicePolicy()
-        self.worker_dir = project_path("engines/qwen_worker")
+        self.worker_dir = project_path("engines/f5_worker")
         self.worker_script = self.worker_dir / "synthesize.py"
 
     def generate(self, request: TtsEngineRequest) -> TtsEngineResult:
         runtime = self._worker_runtime()
         (PROJECT_ROOT / "outputs").mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="qwen_", dir=PROJECT_ROOT / "outputs") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="f5tts_", dir=PROJECT_ROOT / "outputs") as temp_dir:
             output_path = Path(temp_dir) / "output.wav"
             payload_path = Path(temp_dir) / "request.json"
             payload_path.write_text(
@@ -48,10 +44,7 @@ class QwenSubprocessEngine(BaseTtsEngine):
                 encoding="utf-8",
             )
             command = [str(runtime.python_path), str(self.worker_script), "--request", str(payload_path)]
-            env = dict(os.environ)
-            env.update(hf_cache_env())
-            if runtime.python_paths:
-                env["PYTHONPATH"] = os.pathsep.join(str(path) for path in runtime.python_paths)
+            env = _worker_env(runtime.python_paths)
             try:
                 completed = run_worker_process(
                     command,
@@ -61,32 +54,15 @@ class QwenSubprocessEngine(BaseTtsEngine):
                     cancel_event=request.cancel_event,
                 )
             except subprocess.TimeoutExpired as exc:
-                raise GenerationError("Qwen3-TTS xử lý quá lâu và đã bị dừng.") from exc
+                raise GenerationError("F5-TTS xử lý quá lâu và đã bị dừng.") from exc
             if completed.returncode != 0:
                 message = _clean_worker_error(completed.stderr.strip() or completed.stdout.strip())
-                raise GenerationError(f"Qwen3-TTS không sinh được audio: {message}")
+                raise GenerationError(f"F5-TTS không sinh được audio: {message}")
             check_cancel(request.cancel_event)
             if not output_path.exists():
-                raise GenerationError("Qwen3-TTS không tạo file WAV đầu ra.")
-            self._try_write_cache_meta(request)
+                raise GenerationError("F5-TTS không tạo file WAV đầu ra.")
             audio, sample_rate = sf.read(str(output_path), dtype="float32")
             return TtsEngineResult(audio=audio, sample_rate=int(sample_rate))
-
-    def _worker_runtime(self) -> "WorkerRuntime":
-        portable_python = PROJECT_ROOT / "runtime" / "python" / "python.exe"
-        portable_site = self.worker_dir / "site-packages"
-        if portable_python.exists() and portable_site.exists():
-            return WorkerRuntime(portable_python, [self.worker_dir, portable_site])
-        candidates = [
-            self.worker_dir / ".venv" / "Scripts" / "python.exe",
-            self.worker_dir / ".venv" / "bin" / "python",
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                return WorkerRuntime(candidate, [])
-        raise EngineDependencyError(
-            "Qwen worker chưa được cài. Hãy chạy install_qwen_worker.bat trước."
-        )
 
     def generate_batch(
         self,
@@ -104,20 +80,17 @@ class QwenSubprocessEngine(BaseTtsEngine):
 
         runtime = self._worker_runtime()
         (PROJECT_ROOT / "outputs").mkdir(parents=True, exist_ok=True)
-
         first = requests[0]
         cancel_event = first.cancel_event
 
-        with tempfile.TemporaryDirectory(prefix="qwen_batch_", dir=PROJECT_ROOT / "outputs") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="f5tts_batch_", dir=PROJECT_ROOT / "outputs") as temp_dir:
             temp_path = Path(temp_dir)
-
             chunks = []
             for index, req in enumerate(requests):
                 out = temp_path / f"chunk_{index:03d}.wav"
                 chunks.append({"text": req.text, "output_path": str(out)})
 
             batch_payload = {**self._base_payload(first), "batch": True, "chunks": chunks}
-
             payload_path = temp_path / "request.json"
             payload_path.write_text(
                 json.dumps(batch_payload, ensure_ascii=False, indent=2),
@@ -125,11 +98,7 @@ class QwenSubprocessEngine(BaseTtsEngine):
             )
 
             command = [str(runtime.python_path), str(self.worker_script), "--request", str(payload_path)]
-            env = dict(os.environ)
-            env.update(hf_cache_env())
-            if runtime.python_paths:
-                env["PYTHONPATH"] = os.pathsep.join(str(path) for path in runtime.python_paths)
-
+            env = _worker_env(runtime.python_paths)
             reported_chunks: set[int] = set()
 
             def report_ready_chunks() -> None:
@@ -145,58 +114,76 @@ class QwenSubprocessEngine(BaseTtsEngine):
                     tick_callback=report_ready_chunks,
                 )
             except subprocess.TimeoutExpired as exc:
-                raise GenerationError("Qwen3-TTS batch xử lý quá lâu và đã bị dừng.") from exc
+                raise GenerationError("F5-TTS batch xử lý quá lâu và đã bị dừng.") from exc
             report_ready_chunks()
 
             if completed.returncode != 0:
                 message = _clean_worker_error(completed.stderr.strip() or completed.stdout.strip())
-                raise GenerationError(f"Qwen3-TTS không sinh được audio (batch): {message}")
+                raise GenerationError(f"F5-TTS không sinh được audio (batch): {message}")
 
             check_cancel(cancel_event)
-            self._try_write_cache_meta(first)
-
             results = []
             for chunk in chunks:
                 out = Path(chunk["output_path"])
                 if not out.exists():
-                    raise GenerationError(f"Qwen3-TTS không tạo file WAV đầu ra cho chunk: {out.name}")
+                    raise GenerationError(f"F5-TTS không tạo file WAV đầu ra cho chunk: {out.name}")
                 audio, sample_rate = sf.read(str(out), dtype="float32")
                 results.append(TtsEngineResult(audio=audio, sample_rate=int(sample_rate)))
             return results
+
+    def _worker_runtime(self) -> "WorkerRuntime":
+        portable_python = PROJECT_ROOT / "runtime" / "python" / "python.exe"
+        portable_site = self.worker_dir / "site-packages"
+        if portable_python.exists() and portable_site.exists():
+            return WorkerRuntime(portable_python, [self.worker_dir, portable_site])
+        candidates = [
+            self.worker_dir / ".venv" / "Scripts" / "python.exe",
+            self.worker_dir / ".venv" / "bin" / "python",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return WorkerRuntime(candidate, [])
+        raise EngineDependencyError(
+            "F5-TTS worker chưa được cài. Hãy chạy install_f5_worker.bat "
+            "hoặc install_f5_worker_cuda.bat trước."
+        )
 
     def _base_payload(self, request: TtsEngineRequest) -> dict:
         payload: dict = {
             "language": request.language,
             "hf_repo": self.spec.hf_repo,
             "model_path": str(self.spec.local_path),
+            "hf_cache_dir": str(hf_cache_root()),
+            "f5_model": str(self.spec.runtime.get("f5_model") or "F5TTS_v1_Base"),
+            "ode_method": str(self.spec.runtime.get("ode_method") or "euler"),
+            "use_ema": bool(self.spec.runtime.get("use_ema", True)),
             "speed": request.speed,
+            "nfe_step": request.f5_nfe_step or int(_runtime_default(self.spec.runtime, "f5_nfe_step", 32)),
+            "cfg_strength": request.f5_cfg_strength
+            if request.f5_cfg_strength is not None
+            else float(_runtime_default(self.spec.runtime, "f5_cfg_strength", 2.0)),
+            "sway_sampling_coef": request.f5_sway_sampling_coef
+            if request.f5_sway_sampling_coef is not None
+            else float(_runtime_default(self.spec.runtime, "f5_sway_sampling_coef", -1.0)),
+            "cross_fade_duration": request.f5_cross_fade_duration
+            if request.f5_cross_fade_duration is not None
+            else float(_runtime_default(self.spec.runtime, "f5_cross_fade_duration", 0.15)),
+            "target_rms": request.f5_target_rms
+            if request.f5_target_rms is not None
+            else float(_runtime_default(self.spec.runtime, "f5_target_rms", 0.1)),
+            "remove_silence": bool(request.f5_remove_silence),
         }
         if request.reference_audio_path:
             payload["ref_audio"] = str(request.reference_audio_path)
         if request.reference_text:
             payload["ref_text"] = request.reference_text
-        if request.cached_prompt_path is not None:
-            payload["cached_prompt_path"] = str(request.cached_prompt_path)
+        if request.f5_seed is not None:
+            payload["seed"] = request.f5_seed
+        if request.f5_fix_duration is not None and request.f5_fix_duration > 0:
+            payload["fix_duration"] = request.f5_fix_duration
+        payload.update(_local_model_files(self.spec))
         payload.update(self._device_policy.payload_for(self.spec, request.runtime_target))
         return payload
-
-    def _try_write_cache_meta(self, request: TtsEngineRequest) -> None:
-        if (
-            self._cache is None
-            or request.cached_prompt_path is None
-            or not request.reference_audio_path
-        ):
-            return
-        pkl_path = request.cached_prompt_path / "voice_clone_prompt.pkl"
-        if pkl_path.exists():
-            try:
-                self._cache.write_meta(
-                    request.cached_prompt_path,
-                    request.reference_audio_path,
-                    request.reference_text or "",
-                )
-            except Exception:
-                pass
 
     def _payload(self, request: TtsEngineRequest, output_path: Path) -> dict:
         payload = self._base_payload(request)
@@ -205,18 +192,50 @@ class QwenSubprocessEngine(BaseTtsEngine):
         return payload
 
 
+def _local_model_files(spec: ModelSpec) -> dict[str, str]:
+    files: dict[str, str] = {}
+    ckpt = _local_runtime_file(spec, "f5_ckpt_filename")
+    vocab = _local_runtime_file(spec, "f5_vocab_filename")
+    if ckpt is not None:
+        files["ckpt_file"] = str(ckpt)
+    if vocab is not None:
+        files["vocab_file"] = str(vocab)
+    return files
+
+
+def _local_runtime_file(spec: ModelSpec, key: str) -> Path | None:
+    value = str(spec.runtime.get(key) or "").strip()
+    if not value:
+        return None
+    path = spec.local_path / value
+    return path if path.exists() else None
+
+
+def _runtime_default(runtime: dict, key: str, fallback):
+    value = runtime.get(key)
+    return fallback if value is None else value
+
+
+def _worker_env(python_paths: list[Path]) -> dict[str, str]:
+    env = dict(os.environ)
+    env.update(hf_cache_env())
+    if python_paths:
+        env["PYTHONPATH"] = os.pathsep.join(str(path) for path in python_paths)
+    return env
+
+
 def _clean_worker_error(message: str) -> str:
-    if "No module named 'qwen_tts'" in message:
-        return "Qwen worker thiếu qwen-tts. Chạy install_qwen_worker.bat."
+    if "No module named 'f5_tts'" in message:
+        return "F5-TTS worker thiếu f5-tts. Chạy install_f5_worker.bat."
     if "No module named 'torch'" in message:
-        return "Qwen worker thiếu torch. Chạy install_qwen_worker.bat."
-    if "uu tien clone voice" in message:
-        return "Qwen3-TTS Base cần Profile giọng để clone voice."
+        return "F5-TTS worker thiếu torch. Chạy install_f5_worker.bat."
+    if "ref_text" in message and "transcript" in message.lower():
+        return "F5-TTS cần transcript của giọng mẫu để clone voice ổn định."
     lines = [line.strip() for line in message.splitlines() if line.strip()]
     if not lines:
         return "Không rõ lỗi từ worker."
     for line in reversed(lines):
-        if line.startswith(("Qwen worker loi:", "ImportError:", "ModuleNotFoundError:", "RuntimeError:")):
+        if line.startswith(("F5-TTS worker loi:", "ImportError:", "ModuleNotFoundError:", "RuntimeError:")):
             return line
     return lines[-1]
 

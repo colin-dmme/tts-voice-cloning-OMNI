@@ -34,6 +34,10 @@ class RuntimeStatusService:
             return _worker_status(spec, installed, "qwen_worker", self.detector)
         if spec.provider == "valtec":
             return _worker_status(spec, installed, "valtec_worker", self.detector)
+        if spec.provider == "f5tts":
+            return _worker_status(spec, installed, "f5_worker", self.detector)
+        if spec.provider == "chatterbox":
+            return _worker_status(spec, installed, "chatterbox_worker", self.detector)
         return RuntimeStatus(
             model_id=spec.model_id,
             display_name=spec.display_name,
@@ -163,6 +167,8 @@ def _provider_label(provider: str) -> str:
         "vieneu": "VieNeu",
         "qwen": "Qwen",
         "valtec": "Valtec",
+        "f5tts": "F5-TTS",
+        "chatterbox": "Chatterbox",
     }.get(provider, provider)
 
 
@@ -171,4 +177,6 @@ def _install_hint(provider: str) -> str:
         "vieneu": "install_vieneu_worker.bat hoặc install_vieneu_worker_cuda.bat",
         "qwen": "install_qwen_worker.bat hoặc install_qwen_worker_blackwell.bat nếu dùng RTX 50xx",
         "valtec": "install_valtec_worker.bat",
+        "f5tts": "install_f5_worker.bat hoặc install_f5_worker_cuda.bat",
+        "chatterbox": "install_chatterbox_worker.bat hoặc install_chatterbox_worker_cuda.bat",
     }.get(provider, "script cài tương ứng")

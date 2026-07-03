@@ -22,7 +22,17 @@ class ModelStatus(BaseModel):
     installed: bool
     required: bool = False
     size_mb: float = 0.0
+    cache_size_mb: float = 0.0
+    worker_size_mb: float = 0.0
+    total_size_mb: float = 0.0
     notes: str = ""
+    usage: str = ""
+    category: str = ""
+    storage_kind: str = ""
+    storage_path: Path | None = None
+    cache_path: Path | None = None
+    worker_path: Path | None = None
+    storage_note: str = ""
     worker_installed: bool | None = None  # None = không áp dụng (non-worker model)
     hf_cached: bool | None = None         # None = không áp dụng (non-worker model)
 
@@ -65,6 +75,20 @@ class GenerateSpeechRequest(BaseModel):
     codec_repo: str | None = None
     temperature: float | None = Field(default=None, ge=0.1, le=2.0)
     top_k: int | None = Field(default=None, ge=1, le=200)
+    f5_nfe_step: int | None = Field(default=None, ge=4, le=128)
+    f5_cfg_strength: float | None = Field(default=None, ge=0.0, le=10.0)
+    f5_sway_sampling_coef: float | None = Field(default=None, ge=-5.0, le=5.0)
+    f5_cross_fade_duration: float | None = Field(default=None, ge=0.0, le=2.0)
+    f5_target_rms: float | None = Field(default=None, ge=0.01, le=1.0)
+    f5_remove_silence: bool = False
+    f5_seed: int | None = Field(default=None, ge=0)
+    f5_fix_duration: float | None = Field(default=None, ge=0.0, le=120.0)
+    chatterbox_temperature: float | None = Field(default=None, ge=0.1, le=2.0)
+    chatterbox_top_p: float | None = Field(default=None, ge=0.05, le=1.0)
+    chatterbox_top_k: int | None = Field(default=None, ge=1, le=2000)
+    chatterbox_repetition_penalty: float | None = Field(default=None, ge=1.0, le=3.0)
+    chatterbox_seed: int | None = Field(default=None, ge=0)
+    chatterbox_norm_loudness: bool = True
     sentence_pause_ms: int = Field(default=450, ge=0, le=3000)
     paragraph_pause_ms: int = Field(default=0, ge=0, le=10000)
     srt_file_padding_ms: int = Field(default=0, ge=0, le=10000)

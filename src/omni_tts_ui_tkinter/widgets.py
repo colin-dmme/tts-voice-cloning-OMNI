@@ -5,6 +5,8 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 from pathlib import Path
 
+from omni_tts_ui_tkinter.path_intake import parse_path_text
+
 
 class ScrollableFrame(ttk.Frame):
     def __init__(self, parent, *, padding: int = 0) -> None:
@@ -41,6 +43,64 @@ class ScrollableFrame(ttk.Frame):
 
     def _on_mousewheel(self, event) -> None:
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+
+class ToolTip:
+    def __init__(self, widget, text: str, delay_ms: int = 450) -> None:
+        self.widget = widget
+        self.text = text
+        self.delay_ms = delay_ms
+        self._after_id = None
+        self._window = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule(self, _event=None) -> None:
+        self._cancel()
+        self._after_id = self.widget.after(self.delay_ms, self._show)
+
+    def _cancel(self) -> None:
+        if self._after_id is not None:
+            self.widget.after_cancel(self._after_id)
+            self._after_id = None
+
+    def _show(self) -> None:
+        self._after_id = None
+        if self._window is not None or not self.text:
+            return
+        x = self.widget.winfo_rootx() + 18
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
+        window = tk.Toplevel(self.widget)
+        window.wm_overrideredirect(True)
+        window.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(
+            window,
+            text=self.text,
+            justify="left",
+            background="#1f2937",
+            foreground="#f9fafb",
+            relief="solid",
+            borderwidth=1,
+            padx=8,
+            pady=5,
+            wraplength=320,
+            font=("Segoe UI", 9),
+        )
+        label.pack()
+        self._window = window
+
+    def _hide(self, _event=None) -> None:
+        self._cancel()
+        if self._window is not None:
+            self._window.destroy()
+            self._window = None
+
+
+def attach_tooltip(widget, text: str):
+    tooltip = ToolTip(widget, text)
+    widget._omni_tooltip = tooltip
+    return tooltip
 
 
 def labeled_entry(parent, label: str, textvariable: tk.StringVar, width: int = 40):
@@ -84,7 +144,7 @@ def browse_directory(variable: tk.StringVar) -> None:
 
 
 def split_paths(value: str) -> list[Path]:
-    return [Path(item.strip()) for item in value.splitlines() if item.strip()]
+    return parse_path_text(value)
 
 
 def set_text(widget: tk.Text, value: str) -> None:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
+from typing import Callable
 
+from omni_tts_core.file_queue import FileQueueStatus
 from omni_tts_license.local_signed import LocalSignedLicenseProvider
 from omni_tts_license.models import LicenseStatus
 from omni_tts_core.progress import ProgressCallback, ProgressEvent, check_cancel
@@ -10,7 +13,7 @@ from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES, runtime_target_label
 from omni_tts_core.service import TtsService
 from omni_tts_core.voice_profile_policy import ProfileCompatibility
-from omni_tts_shared.errors import OmniTtsError
+from omni_tts_shared.errors import GenerationCancelled, OmniTtsError
 from omni_tts_shared.schemas import (
     GenerateSpeechResult,
     ModelCapabilities,
@@ -20,6 +23,29 @@ from omni_tts_shared.schemas import (
     VoiceProfile,
 )
 from omni_tts_ui_tkinter.state import UiSettings
+
+
+@dataclass(frozen=True)
+class FileGenerationEvent:
+    item_id: str
+    source_path: Path
+    status: FileQueueStatus
+    progress_percent: float = 0.0
+    message: str = ""
+    result: GenerateSpeechResult | None = None
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class FileGenerationOutcome:
+    item_id: str
+    source_path: Path
+    status: FileQueueStatus
+    result: GenerateSpeechResult | None = None
+    error: str = ""
+
+
+FileEventCallback = Callable[[FileGenerationEvent], None]
 
 
 class TkinterController:
@@ -149,6 +175,18 @@ class TkinterController:
     def default_vieneu_top_k(self, model_id: str) -> int:
         return self.service.default_vieneu_top_k(model_id)
 
+    def model_supports_f5_settings(self, model_id: str) -> bool:
+        return self.service.supports_f5_settings(model_id)
+
+    def default_f5_settings(self, model_id: str) -> dict[str, object]:
+        return self.service.default_f5_settings(model_id)
+
+    def model_supports_chatterbox_settings(self, model_id: str) -> bool:
+        return self.service.supports_chatterbox_settings(model_id)
+
+    def default_chatterbox_settings(self, model_id: str) -> dict[str, object]:
+        return self.service.default_chatterbox_settings(model_id)
+
     def vieneu_codec_choices(self, model_id: str) -> list[tuple[str, str]]:
         return self.service.list_vieneu_codecs(model_id)
 
@@ -199,6 +237,13 @@ class TkinterController:
         names = ", ".join(item.display_name for item in downloaded)
         return f"Đã tải xong model bắt buộc: {names}."
 
+    def model_removal_preview(self, model_id: str) -> str:
+        return self.service.model_removal_preview(model_id)
+
+    def remove_model(self, model_id: str) -> str:
+        status = self.service.remove_model(model_id)
+        return f"Đã gỡ phần lưu trữ riêng của: {status.display_name}"
+
     def install_gpu_for_model(self, model_id: str) -> str:
         return self.service.install_gpu_acceleration(model_id)
 
@@ -219,34 +264,108 @@ class TkinterController:
 
     def generate_files(
         self,
-        source_paths: list[Path],
+        tasks: list[tuple[str, Path]],
         settings: UiSettings,
         progress_callback: ProgressCallback | None = None,
+        file_event_callback: FileEventCallback | None = None,
         cancel_event: Event | None = None,
-    ) -> list[GenerateSpeechResult]:
-        if not source_paths:
+    ) -> list[FileGenerationOutcome]:
+        if not tasks:
             raise OmniTtsError("Bạn chưa chọn file nguồn.")
         self.validate_license_for_model(settings.model_id)
-        results = []
+        outcomes: list[FileGenerationOutcome] = []
         template = settings.to_request("Nội dung sẽ được đọc từ file nguồn.")
-        total_files = len(source_paths)
-        for file_index, source_path in enumerate(source_paths, start=1):
+        total_files = len(tasks)
+        for file_index, (item_id, source_path) in enumerate(tasks, start=1):
             check_cancel(cancel_event)
-            results.append(
-                self.service.generate_from_source_file(
+            _emit_file_event(
+                file_event_callback,
+                FileGenerationEvent(
+                    item_id=item_id,
+                    source_path=source_path,
+                    status=FileQueueStatus.RUNNING,
+                    message="Đang khởi tạo...",
+                ),
+            )
+            try:
+                result = self.service.generate_from_source_file(
                     source_path=source_path,
                     request_template=template,
                     output_dir=settings.output_dir,
                     progress_callback=_file_progress(
                         progress_callback,
+                        file_event_callback,
+                        item_id,
+                        source_path,
                         file_index,
                         total_files,
                         source_path.name,
                     ),
                     cancel_event=cancel_event,
                 )
+            except GenerationCancelled:
+                _emit_file_event(
+                    file_event_callback,
+                    FileGenerationEvent(
+                        item_id=item_id,
+                        source_path=source_path,
+                        status=FileQueueStatus.CANCELLED,
+                        message="Đã hủy khi đang xử lý",
+                    ),
+                )
+                raise
+            except Exception as exc:  # continue remaining files after one failure
+                error = str(exc)
+                outcome = FileGenerationOutcome(
+                    item_id=item_id,
+                    source_path=source_path,
+                    status=FileQueueStatus.FAILED,
+                    error=error,
+                )
+                outcomes.append(outcome)
+                _emit_file_event(
+                    file_event_callback,
+                    FileGenerationEvent(
+                        item_id=item_id,
+                        source_path=source_path,
+                        status=FileQueueStatus.FAILED,
+                        message=error,
+                        error=error,
+                    ),
+                )
+                if progress_callback is not None:
+                    progress_callback(
+                        ProgressEvent(
+                            message=f"File {file_index}/{total_files} ({source_path.name}): Lỗi, chuyển file tiếp theo",
+                            current=file_index,
+                            total=total_files,
+                        )
+                    )
+                continue
+
+            try:
+                self.service.job_store.save_json(result.job_dir / "result.json", result)
+            except OSError:
+                pass
+            outcome = FileGenerationOutcome(
+                item_id=item_id,
+                source_path=source_path,
+                status=FileQueueStatus.DONE,
+                result=result,
             )
-        return results
+            outcomes.append(outcome)
+            _emit_file_event(
+                file_event_callback,
+                FileGenerationEvent(
+                    item_id=item_id,
+                    source_path=source_path,
+                    status=FileQueueStatus.DONE,
+                    progress_percent=100.0,
+                    message=result.message,
+                    result=result,
+                ),
+            )
+        return outcomes
 
     def license_status(self) -> LicenseStatus:
         return self.license_provider.get_status()
@@ -398,24 +517,46 @@ def format_result(result: GenerateSpeechResult) -> str:
 
 def _file_progress(
     callback: ProgressCallback | None,
+    file_event_callback: FileEventCallback | None,
+    item_id: str,
+    source_path: Path,
     file_index: int,
     total_files: int,
     file_name: str,
 ) -> ProgressCallback | None:
-    if callback is None:
+    if callback is None and file_event_callback is None:
         return None
 
     def scaled(event: ProgressEvent) -> None:
         file_progress = event.current / event.total if event.total > 0 else 0.0
-        callback(
-            ProgressEvent(
-                message=f"File {file_index}/{total_files} ({file_name}): {event.message}",
-                current=(file_index - 1) + file_progress,
-                total=total_files,
+        if callback is not None:
+            callback(
+                ProgressEvent(
+                    message=f"File {file_index}/{total_files} ({file_name}): {event.message}",
+                    current=(file_index - 1) + file_progress,
+                    total=total_files,
+                )
+            )
+        _emit_file_event(
+            file_event_callback,
+            FileGenerationEvent(
+                item_id=item_id,
+                source_path=source_path,
+                status=FileQueueStatus.RUNNING,
+                progress_percent=max(0.0, min(100.0, file_progress * 100.0)),
+                message=event.message,
             )
         )
 
     return scaled
+
+
+def _emit_file_event(
+    callback: FileEventCallback | None,
+    event: FileGenerationEvent,
+) -> None:
+    if callback is not None:
+        callback(event)
 
 
 def _required_features_for_model(model_id: str) -> list[str]:
@@ -424,4 +565,6 @@ def _required_features_for_model(model_id: str) -> list[str]:
         features.append("vieneu")
     elif model_id.startswith("qwen"):
         features.append("qwen")
+    elif model_id.startswith("f5tts"):
+        features.append("f5tts")
     return features

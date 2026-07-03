@@ -72,6 +72,10 @@ class RuntimeDeviceDetector:
             return _probe_worker(provider, "qwen_worker")
         if provider == "valtec":
             return _probe_worker(provider, "valtec_worker")
+        if provider == "f5tts":
+            return _probe_worker(provider, "f5_worker")
+        if provider == "chatterbox":
+            return _probe_worker(provider, "chatterbox_worker")
         return ProviderDeviceInfo(provider=provider, installed=False, message="Provider chưa có detector.")
 
 
@@ -86,6 +90,10 @@ class RuntimeDevicePolicy:
         self._ensure_supported(spec, target, mode=mode)
         if spec.provider == "qwen":
             return {"device_map": "cuda:0" if target == "cuda" else "cpu"}
+        if spec.provider == "f5tts":
+            return {"device": "cuda" if target == "cuda" else "cpu"}
+        if spec.provider == "chatterbox":
+            return {"device": "cuda" if target == "cuda" else "cpu"}
         if spec.provider == "valtec":
             return {"device": target}
         if spec.provider == "vieneu":
@@ -130,6 +138,8 @@ class RuntimeDevicePolicy:
                 "vieneu": "Hãy chạy install_vieneu_worker_cuda.bat rồi kiểm tra lại.",
                 "qwen": "Hãy chạy install_qwen_worker.bat; nếu dùng RTX 50xx hãy chạy install_qwen_worker_blackwell.bat hoặc Fix-RTX50-CUDA.bat.",
                 "valtec": "Valtec worker hiện mặc định CPU; cần cài worker có PyTorch CUDA trước.",
+                "f5tts": "Hãy chạy install_f5_worker_cuda.bat rồi kiểm tra lại.",
+                "chatterbox": "Hãy chạy install_chatterbox_worker_cuda.bat rồi kiểm tra lại.",
             }.get(spec.provider, "Hãy kiểm tra CUDA runtime.")
             raise ConfigError(f"CUDA chưa khả dụng cho {spec.provider}. {install_hint}")
         if spec.provider == "vieneu":

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from omni_tts_core.config import load_yaml_config
-from omni_tts_core.paths import project_path
+from omni_tts_core.storage_paths import resolve_model_path
 from omni_tts_shared.errors import ConfigError
 from omni_tts_shared.schemas import ModelCapabilities, RefAudioHints
 
@@ -68,7 +68,7 @@ class ModelRegistry:
             display_name=str(raw["display_name"]),
             provider=str(raw["provider"]),
             model_type=str(raw["model_type"]),
-            local_path=project_path(str(raw["local_path"])),
+            local_path=resolve_model_path(str(raw["local_path"])),
             hf_repo=str(raw["hf_repo"]),
             language_priority=str(raw.get("language_priority", "multilingual")),
             required=bool(raw.get("required", False)),

@@ -16,6 +16,7 @@ Profile trong `user_state/` dùng đường dẫn portable như `voices/samples/
 
 - `models/`
 - `.hf_cache/`
+- `config/storage.local.yaml`
 - `outputs/`
 - `logs/`
 - `.venv/`
@@ -23,6 +24,33 @@ Profile trong `user_state/` dùng đường dẫn portable như `voices/samples/
 - license, private key, token, secret
 
 Những phần này hoặc quá lớn, hoặc phụ thuộc máy, hoặc nhạy cảm.
+
+## Model storage theo từng máy
+
+Git chỉ lưu catalog model trong `config/models.yaml`; model thật và Hugging Face cache luôn là dữ liệu local của từng máy.
+
+Nếu ổ C ít dung lượng, tạo file local không commit:
+
+```text
+config/storage.local.yaml
+```
+
+Mẫu có sẵn ở:
+
+```text
+config/storage.example.yaml
+```
+
+Ví dụ:
+
+```yaml
+storage:
+  models_root: "D:/ColinTTSStorage/models"
+  hf_cache_root: "D:/ColinTTSStorage/hf_cache"
+  outputs_root: "D:/ColinTTSStorage/outputs/jobs"
+```
+
+Sau khi clone sang máy mới, mở tab `Quản lý model` để xem model nào bắt buộc, model nào chỉ để test/legacy, dung lượng đang chiếm và nơi lưu. Chỉ tải những model cần dùng cho máy đó.
 
 ## Trên máy chính
 

@@ -8,7 +8,7 @@ import numpy as np
 
 from omni_tts_core.engines.base import BaseTtsEngine, TtsEngineRequest, TtsEngineResult
 from omni_tts_core.model_registry import ModelSpec
-from omni_tts_core.paths import project_path
+from omni_tts_core.storage_paths import resolve_model_path
 from omni_tts_core.progress import check_cancel
 from omni_tts_shared.errors import EngineDependencyError, GenerationError
 
@@ -145,7 +145,7 @@ def _best_device(torch_module, runtime_target: str = "auto"):
 
 
 def _patch_tokenizer_resolver(omnivoice_module) -> None:
-    tokenizer_path = project_path("models/tokenizer/higgs-audio-v2-tokenizer")
+    tokenizer_path = resolve_model_path("models/tokenizer/higgs-audio-v2-tokenizer")
     if not tokenizer_path.exists() or not any(tokenizer_path.iterdir()):
         return
     original_resolver = omnivoice_module._resolve_model_path

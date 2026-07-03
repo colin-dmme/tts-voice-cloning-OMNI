@@ -7,7 +7,9 @@ from omni_tts_core.audio.wav_tools import concatenate_segments, duration_seconds
 from omni_tts_core.config import AppSettings
 from omni_tts_core.engine_profile_cache import EngineProfileCache
 from omni_tts_core.model_catalog import open_catalog
+from omni_tts_core.engines.chatterbox_engine import ChatterboxSubprocessEngine
 from omni_tts_core.engines.base import TtsEngineRequest, TtsEngineResult
+from omni_tts_core.engines.f5tts_engine import F5TtsSubprocessEngine
 from omni_tts_core.engines.omnivoice_engine import OmniVoiceEngine
 from omni_tts_core.engines.qwen_engine import QwenSubprocessEngine
 from omni_tts_core.engines.valtec_engine import ValtecSubprocessEngine
@@ -58,7 +60,12 @@ class TtsService:
         self.job_store = JobStore(self.settings.outputs_root)
         self._engines: dict[
             str,
-            OmniVoiceEngine | VieneuSubprocessEngine | QwenSubprocessEngine | ValtecSubprocessEngine,
+            OmniVoiceEngine
+            | ChatterboxSubprocessEngine
+            | VieneuSubprocessEngine
+            | QwenSubprocessEngine
+            | ValtecSubprocessEngine
+            | F5TtsSubprocessEngine,
         ] = {}
 
     def list_voice_profiles(self) -> list[VoiceProfile]:
@@ -136,6 +143,40 @@ class TtsService:
     def supports_vieneu_sampling(self, model_id: str) -> bool:
         return self.registry.get(model_id).provider == "vieneu"
 
+    def supports_f5_settings(self, model_id: str) -> bool:
+        return self.registry.get(model_id).provider == "f5tts"
+
+    def default_f5_settings(self, model_id: str) -> dict[str, object]:
+        spec = self.registry.get(model_id)
+        runtime = spec.runtime if spec.provider == "f5tts" else {}
+        return {
+            "f5_nfe_step": int(_runtime_default(runtime, "f5_nfe_step", 32)),
+            "f5_cfg_strength": float(_runtime_default(runtime, "f5_cfg_strength", 2.0)),
+            "f5_sway_sampling_coef": float(_runtime_default(runtime, "f5_sway_sampling_coef", -1.0)),
+            "f5_cross_fade_duration": float(_runtime_default(runtime, "f5_cross_fade_duration", 0.15)),
+            "f5_target_rms": float(_runtime_default(runtime, "f5_target_rms", 0.1)),
+            "f5_remove_silence": bool(runtime.get("f5_remove_silence", False)),
+            "f5_seed": None,
+            "f5_fix_duration": None,
+        }
+
+    def supports_chatterbox_settings(self, model_id: str) -> bool:
+        return self.registry.get(model_id).provider == "chatterbox"
+
+    def default_chatterbox_settings(self, model_id: str) -> dict[str, object]:
+        spec = self.registry.get(model_id)
+        runtime = spec.runtime if spec.provider == "chatterbox" else {}
+        return {
+            "chatterbox_temperature": float(_runtime_default(runtime, "chatterbox_temperature", 0.8)),
+            "chatterbox_top_p": float(_runtime_default(runtime, "chatterbox_top_p", 0.95)),
+            "chatterbox_top_k": int(_runtime_default(runtime, "chatterbox_top_k", 1000)),
+            "chatterbox_repetition_penalty": float(
+                _runtime_default(runtime, "chatterbox_repetition_penalty", 1.2)
+            ),
+            "chatterbox_seed": None,
+            "chatterbox_norm_loudness": bool(runtime.get("chatterbox_norm_loudness", True)),
+        }
+
     def default_vieneu_temperature(self, model_id: str) -> float:
         spec = self.registry.get(model_id)
         return float(spec.runtime.get("temperature") or 1.0) if spec.provider == "vieneu" else 1.0
@@ -210,6 +251,9 @@ class TtsService:
 
     def remove_model(self, model_id: str) -> ModelStatus:
         return self.storage.remove(model_id)
+
+    def model_removal_preview(self, model_id: str) -> str:
+        return self.storage.removal_preview(model_id)
 
     def generate_audio(
         self,
@@ -290,6 +334,26 @@ class TtsService:
                 codec_repo=_codec_repo_for_request(request, spec),
                 temperature=request.temperature if spec.provider == "vieneu" else None,
                 top_k=request.top_k if spec.provider == "vieneu" else None,
+                f5_nfe_step=request.f5_nfe_step if spec.provider == "f5tts" else None,
+                f5_cfg_strength=request.f5_cfg_strength if spec.provider == "f5tts" else None,
+                f5_sway_sampling_coef=request.f5_sway_sampling_coef if spec.provider == "f5tts" else None,
+                f5_cross_fade_duration=request.f5_cross_fade_duration if spec.provider == "f5tts" else None,
+                f5_target_rms=request.f5_target_rms if spec.provider == "f5tts" else None,
+                f5_remove_silence=request.f5_remove_silence if spec.provider == "f5tts" else False,
+                f5_seed=request.f5_seed if spec.provider == "f5tts" else None,
+                f5_fix_duration=request.f5_fix_duration if spec.provider == "f5tts" else None,
+                chatterbox_temperature=(
+                    request.chatterbox_temperature if spec.provider == "chatterbox" else None
+                ),
+                chatterbox_top_p=request.chatterbox_top_p if spec.provider == "chatterbox" else None,
+                chatterbox_top_k=request.chatterbox_top_k if spec.provider == "chatterbox" else None,
+                chatterbox_repetition_penalty=(
+                    request.chatterbox_repetition_penalty if spec.provider == "chatterbox" else None
+                ),
+                chatterbox_seed=request.chatterbox_seed if spec.provider == "chatterbox" else None,
+                chatterbox_norm_loudness=(
+                    request.chatterbox_norm_loudness if spec.provider == "chatterbox" else True
+                ),
                 cancel_event=cancel_event,
                 cached_prompt_path=cached_path,
             )
@@ -425,16 +489,27 @@ class TtsService:
     def _engine_for(
         self,
         spec: ModelSpec,
-    ) -> OmniVoiceEngine | VieneuSubprocessEngine | QwenSubprocessEngine | ValtecSubprocessEngine:
+    ) -> (
+        OmniVoiceEngine
+        | ChatterboxSubprocessEngine
+        | VieneuSubprocessEngine
+        | QwenSubprocessEngine
+        | ValtecSubprocessEngine
+        | F5TtsSubprocessEngine
+    ):
         if spec.model_id not in self._engines:
             if spec.provider == "omnivoice":
                 self._engines[spec.model_id] = OmniVoiceEngine(spec, self.engine_cache)
+            elif spec.provider == "chatterbox":
+                self._engines[spec.model_id] = ChatterboxSubprocessEngine(spec)
             elif spec.provider == "vieneu":
                 self._engines[spec.model_id] = VieneuSubprocessEngine(spec, self.engine_cache)
             elif spec.provider == "qwen":
                 self._engines[spec.model_id] = QwenSubprocessEngine(spec, self.engine_cache)
             elif spec.provider == "valtec":
                 self._engines[spec.model_id] = ValtecSubprocessEngine(spec)
+            elif spec.provider == "f5tts":
+                self._engines[spec.model_id] = F5TtsSubprocessEngine(spec)
             else:
                 raise ConfigError(f"Provider chưa được hỗ trợ: {spec.provider}")
         return self._engines[spec.model_id]
@@ -568,6 +643,30 @@ class TtsService:
                         codec_repo=_codec_repo_for_request(request, spec),
                         temperature=request.temperature if spec.provider == "vieneu" else None,
                         top_k=request.top_k if spec.provider == "vieneu" else None,
+                        f5_nfe_step=request.f5_nfe_step if spec.provider == "f5tts" else None,
+                        f5_cfg_strength=request.f5_cfg_strength if spec.provider == "f5tts" else None,
+                        f5_sway_sampling_coef=request.f5_sway_sampling_coef
+                        if spec.provider == "f5tts"
+                        else None,
+                        f5_cross_fade_duration=request.f5_cross_fade_duration
+                        if spec.provider == "f5tts"
+                        else None,
+                        f5_target_rms=request.f5_target_rms if spec.provider == "f5tts" else None,
+                        f5_remove_silence=request.f5_remove_silence if spec.provider == "f5tts" else False,
+                        f5_seed=request.f5_seed if spec.provider == "f5tts" else None,
+                        f5_fix_duration=request.f5_fix_duration if spec.provider == "f5tts" else None,
+                        chatterbox_temperature=(
+                            request.chatterbox_temperature if spec.provider == "chatterbox" else None
+                        ),
+                        chatterbox_top_p=request.chatterbox_top_p if spec.provider == "chatterbox" else None,
+                        chatterbox_top_k=request.chatterbox_top_k if spec.provider == "chatterbox" else None,
+                        chatterbox_repetition_penalty=(
+                            request.chatterbox_repetition_penalty if spec.provider == "chatterbox" else None
+                        ),
+                        chatterbox_seed=request.chatterbox_seed if spec.provider == "chatterbox" else None,
+                        chatterbox_norm_loudness=(
+                            request.chatterbox_norm_loudness if spec.provider == "chatterbox" else True
+                        ),
                         cancel_event=cancel_event,
                         cached_prompt_path=cached_path,
                     )
@@ -887,6 +986,8 @@ def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec)
     if request.speaker_id and request.speaker_id not in spec.voice_presets:
         raise ConfigError(f"Preset giọng không hợp lệ cho {spec.display_name}.")
     _validate_vieneu_codec(request, spec)
+    _validate_f5_request(request, spec)
+    _validate_chatterbox_request(request, spec)
 
 
 def _validate_vieneu_codec(request: GenerateSpeechRequest, spec: ModelSpec) -> None:
@@ -907,6 +1008,25 @@ def _validate_vieneu_codec(request: GenerateSpeechRequest, spec: ModelSpec) -> N
             "NeuCodec ONNX Fast CPU không encode được audio mẫu để clone giọng. "
             "Hãy chọn NeuCodec Standard hoặc NeuCodec Distill khi dùng Profile giọng."
         )
+
+
+def _validate_f5_request(request: GenerateSpeechRequest, spec: ModelSpec) -> None:
+    if spec.provider != "f5tts":
+        return
+    if not _clean_path(request.reference_audio_path):
+        raise ConfigError(f"{spec.display_name} cần chọn Profile giọng để clone voice.")
+    if not (request.reference_text or "").strip():
+        raise ConfigError(
+            f"{spec.display_name} cần transcript của giọng mẫu. "
+            "Hãy điền Transcript trong Profile giọng trước khi tạo audio."
+        )
+
+
+def _validate_chatterbox_request(request: GenerateSpeechRequest, spec: ModelSpec) -> None:
+    if spec.provider != "chatterbox":
+        return
+    if not _clean_path(request.reference_audio_path):
+        raise ConfigError(f"{spec.display_name} cần chọn Profile giọng để clone voice.")
 
 
 def _effective_capabilities(spec: ModelSpec) -> ModelCapabilities:
@@ -937,6 +1057,11 @@ def _codec_repo_for_request(request: GenerateSpeechRequest, spec: ModelSpec) -> 
     if spec.provider != "vieneu" or not spec.runtime.get("codec_repo"):
         return None
     return valid_codec_repo(request.codec_repo) or None
+
+
+def _runtime_default(runtime: dict, key: str, fallback):
+    value = runtime.get(key)
+    return fallback if value is None else value
 
 
 def _safe_stem(value: str) -> str:

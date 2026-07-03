@@ -1,0 +1,11 @@
+storage:
+  # Machine-local model payloads. Keep this on a drive with enough free space.
+  # Example: "D:/ColinTTSStorage/models"
+  models_root: "models"
+
+  # Machine-local Hugging Face cache used by worker providers such as VieNeu.
+  # Example: "D:/ColinTTSStorage/hf_cache"
+  hf_cache_root: ".hf_cache"
+
+  # Optional output folder override for generated jobs.
+  outputs_root: "outputs/jobs"

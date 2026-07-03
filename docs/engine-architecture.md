@@ -59,6 +59,14 @@
 
 **Single source of truth:** `config/models.yaml`
 
+`config/models.yaml` là catalog dùng chung qua Git, không phải nơi lưu đường dẫn ổ đĩa riêng của từng máy. Các path dạng `models/...` được resolve qua storage local:
+
+- mặc định: thư mục `models/` trong project;
+- nếu có `config/storage.local.yaml`: dùng `storage.models_root`;
+- nếu có env `COLIN_TTS_MODELS_ROOT` hoặc `OMNI_TTS_MODELS_ROOT`: env được ưu tiên.
+
+Hugging Face cache tương tự dùng `storage.hf_cache_root` hoặc env `COLIN_TTS_HF_CACHE_ROOT` / `OMNI_TTS_HF_CACHE_ROOT`; mặc định vẫn là `.hf_cache/` trong project.
+
 ```yaml
 tts_models:
   <model_id>:

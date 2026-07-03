@@ -71,12 +71,16 @@ def gpu_installer_for_provider(provider: str) -> Path | None:
             "omnivoice": "install_tts_deps_cuda128.bat" if blackwell else "install_tts_deps_cuda126.bat",
             "vieneu": "install_vieneu_worker_cuda.bat",
             "qwen": "install_qwen_worker_blackwell.bat" if blackwell else "install_qwen_worker.bat",
+            "f5tts": "install_f5_worker_cuda.bat",
+            "chatterbox": "install_chatterbox_worker_cuda.bat",
         }.get(provider)
     else:
         script = {
             "omnivoice": "scripts/install_tts_deps_cuda_linux.sh",
             "vieneu": "scripts/install_vieneu_worker_cuda_linux.sh",
             "qwen": "scripts/install_qwen_worker_cuda_linux.sh",
+            "f5tts": "scripts/install_f5_worker_cuda_linux.sh",
+            "chatterbox": "scripts/install_chatterbox_worker_cuda_linux.sh",
         }.get(provider)
     if not script:
         return None

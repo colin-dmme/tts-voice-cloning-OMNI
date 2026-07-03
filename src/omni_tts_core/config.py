@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from omni_tts_core.paths import PROJECT_ROOT, project_path
+from omni_tts_core.storage_paths import outputs_root
 from omni_tts_shared.errors import ConfigError
 
 
@@ -72,7 +73,7 @@ class AppSettings:
     @property
     def outputs_root(self) -> Path:
         value = self._data.get("paths", {}).get("outputs_root", "outputs/jobs")
-        return project_path(str(value))
+        return outputs_root(str(value))
 
     @property
     def crossfade_ms(self) -> int:

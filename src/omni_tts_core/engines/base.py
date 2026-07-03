@@ -22,6 +22,20 @@ class TtsEngineRequest:
     codec_repo: str | None = None
     temperature: float | None = None
     top_k: int | None = None
+    f5_nfe_step: int | None = None
+    f5_cfg_strength: float | None = None
+    f5_sway_sampling_coef: float | None = None
+    f5_cross_fade_duration: float | None = None
+    f5_target_rms: float | None = None
+    f5_remove_silence: bool = False
+    f5_seed: int | None = None
+    f5_fix_duration: float | None = None
+    chatterbox_temperature: float | None = None
+    chatterbox_top_p: float | None = None
+    chatterbox_top_k: int | None = None
+    chatterbox_repetition_penalty: float | None = None
+    chatterbox_seed: int | None = None
+    chatterbox_norm_loudness: bool = True
     cancel_event: Event | None = None
     cached_prompt_path: Path | None = None  # asset dir for engine-level voice cache
 

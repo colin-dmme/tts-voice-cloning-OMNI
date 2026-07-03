@@ -1,0 +1,27 @@
+[project]
+name = "f5-worker"
+version = "0.1.0"
+description = "Isolated F5-TTS worker for Omni TTS Local."
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "f5-tts>=1.1.9",
+    "soundfile>=0.12.1",
+    "torch>=2.7.1",
+    "torchaudio>=2.7.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchaudio = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

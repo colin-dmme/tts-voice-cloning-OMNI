@@ -31,6 +31,40 @@ def build_app() -> gr.Blocks:
     default_profile = str(preferences.get("voice_profile_id") or "")
     if default_profile not in {value for _label, value in handlers.voice_profile_choices()}:
         default_profile = ""
+    f5_active = handlers.model_supports_f5_settings(default_model)
+    f5_nfe_default = int(preferences.get("f5_nfe_step") or handlers.default_f5_setting(default_model, "f5_nfe_step", 32))
+    f5_cfg_default = float(
+        preferences.get("f5_cfg_strength") or handlers.default_f5_setting(default_model, "f5_cfg_strength", 2.0)
+    )
+    f5_sway_default = float(
+        preferences.get("f5_sway_sampling_coef")
+        if preferences.get("f5_sway_sampling_coef") is not None
+        else handlers.default_f5_setting(default_model, "f5_sway_sampling_coef", -1.0)
+    )
+    f5_crossfade_default = float(
+        preferences.get("f5_cross_fade_duration")
+        or handlers.default_f5_setting(default_model, "f5_cross_fade_duration", 0.15)
+    )
+    f5_rms_default = float(
+        preferences.get("f5_target_rms") or handlers.default_f5_setting(default_model, "f5_target_rms", 0.1)
+    )
+    chatterbox_active = handlers.model_supports_chatterbox_settings(default_model)
+    chatterbox_temperature_default = float(
+        preferences.get("chatterbox_temperature")
+        or handlers.default_chatterbox_setting(default_model, "chatterbox_temperature", 0.8)
+    )
+    chatterbox_top_p_default = float(
+        preferences.get("chatterbox_top_p")
+        or handlers.default_chatterbox_setting(default_model, "chatterbox_top_p", 0.95)
+    )
+    chatterbox_top_k_default = int(
+        preferences.get("chatterbox_top_k")
+        or handlers.default_chatterbox_setting(default_model, "chatterbox_top_k", 1000)
+    )
+    chatterbox_repetition_default = float(
+        preferences.get("chatterbox_repetition_penalty")
+        or handlers.default_chatterbox_setting(default_model, "chatterbox_repetition_penalty", 1.2)
+    )
 
     with gr.Blocks(title=settings.app_name) as app:
         gr.Markdown(f"# {settings.app_name}")
@@ -132,6 +166,120 @@ def build_app() -> gr.Blocks:
                         step=1,
                         interactive=handlers.model_supports_sampling(default_model),
                     )
+                    f5_nfe_step = gr.Slider(
+                        label="F5 NFE step",
+                        minimum=4,
+                        maximum=128,
+                        value=f5_nfe_default,
+                        step=1,
+                        interactive=f5_active,
+                        info="Số bước suy luận. 16 nhanh hơn, 32 cân bằng, 48-64 có thể tốt hơn nhưng chậm hơn.",
+                    )
+                    f5_cfg_strength = gr.Slider(
+                        label="F5 CFG strength",
+                        minimum=0.0,
+                        maximum=10.0,
+                        value=f5_cfg_default,
+                        step=0.1,
+                        interactive=f5_active,
+                        info="Độ bám vào giọng mẫu/prompt. Mặc định 2.0; tăng quá cao dễ mất tự nhiên.",
+                    )
+                    f5_sway_sampling_coef = gr.Slider(
+                        label="F5 Sway sampling coef",
+                        minimum=-5.0,
+                        maximum=5.0,
+                        value=f5_sway_default,
+                        step=0.1,
+                        interactive=f5_active,
+                        info="Hệ số lấy mẫu riêng của F5. Mặc định -1.0; chỉ đổi khi A/B test.",
+                    )
+                    f5_cross_fade_duration = gr.Slider(
+                        label="F5 Cross-fade duration",
+                        minimum=0.0,
+                        maximum=2.0,
+                        value=f5_crossfade_default,
+                        step=0.05,
+                        interactive=f5_active,
+                        info="Số giây cross-fade khi ghép audio. 0.15 thường làm mối nối bớt gắt.",
+                    )
+                    f5_target_rms = gr.Slider(
+                        label="F5 Target RMS",
+                        minimum=0.01,
+                        maximum=1.0,
+                        value=f5_rms_default,
+                        step=0.01,
+                        interactive=f5_active,
+                        info="Mức âm lượng chuẩn hóa reference audio. Mặc định 0.1.",
+                    )
+                    f5_fix_duration = gr.Number(
+                        label="F5 Fix duration",
+                        value=float(preferences.get("f5_fix_duration") or 0.0),
+                        precision=2,
+                        interactive=f5_active,
+                        info="Ép thời lượng đầu ra; để 0 để F5 tự tính.",
+                    )
+                    f5_seed = gr.Number(
+                        label="F5 Seed",
+                        value=preferences.get("f5_seed"),
+                        precision=0,
+                        interactive=f5_active,
+                        info="Để trống để random. Điền số nếu muốn chạy lại gần giống kết quả cũ.",
+                    )
+                    f5_remove_silence = gr.Checkbox(
+                        label="F5 Remove silence",
+                        value=bool(preferences.get("f5_remove_silence", False)),
+                        interactive=f5_active,
+                        info="Cắt khoảng lặng sau khi sinh; gọn hơn nhưng có thể làm mất nhịp nghỉ tự nhiên.",
+                    )
+                    chatterbox_temperature = gr.Slider(
+                        label="Chatterbox Temperature",
+                        minimum=0.1,
+                        maximum=2.0,
+                        value=chatterbox_temperature_default,
+                        step=0.05,
+                        interactive=chatterbox_active,
+                        info="Độ ngẫu nhiên của Chatterbox Turbo. 0.8 là mặc định; tăng thì đa dạng hơn nhưng dễ lệch.",
+                    )
+                    chatterbox_top_p = gr.Slider(
+                        label="Chatterbox Top-P",
+                        minimum=0.05,
+                        maximum=1.0,
+                        value=chatterbox_top_p_default,
+                        step=0.01,
+                        interactive=chatterbox_active,
+                        info="Giữ nhóm token có tổng xác suất cao nhất. Mặc định 0.95; giảm khi audio quá ngẫu nhiên.",
+                    )
+                    chatterbox_top_k = gr.Slider(
+                        label="Chatterbox Top-K",
+                        minimum=1,
+                        maximum=2000,
+                        value=chatterbox_top_k_default,
+                        step=10,
+                        interactive=chatterbox_active,
+                        info="Số token tối đa mỗi bước. Mặc định 1000 theo Turbo; giảm mạnh có thể kém tự nhiên.",
+                    )
+                    chatterbox_repetition_penalty = gr.Slider(
+                        label="Chatterbox Repetition penalty",
+                        minimum=1.0,
+                        maximum=3.0,
+                        value=chatterbox_repetition_default,
+                        step=0.05,
+                        interactive=chatterbox_active,
+                        info="Phạt lặp token. Mặc định 1.2 theo bản Turbo mới; tăng nhẹ nếu nghe bị lặp.",
+                    )
+                    chatterbox_seed = gr.Number(
+                        label="Chatterbox Seed",
+                        value=preferences.get("chatterbox_seed"),
+                        precision=0,
+                        interactive=chatterbox_active,
+                        info="Để trống để random. Điền số nếu muốn chạy lại gần giống kết quả cũ.",
+                    )
+                    chatterbox_norm_loudness = gr.Checkbox(
+                        label="Chatterbox Normalize loudness",
+                        value=bool(preferences.get("chatterbox_norm_loudness", True)),
+                        interactive=chatterbox_active,
+                        info="Chuẩn hóa độ lớn audio mẫu trước khi clone; nên bật nếu mẫu quá nhỏ hoặc quá lớn.",
+                    )
                     sentence_pause_ms = gr.Slider(
                         label="Nghỉ giữa câu/chunk, ms",
                         minimum=0,
@@ -222,6 +370,20 @@ def build_app() -> gr.Blocks:
                     runtime_target,
                     temperature,
                     top_k,
+                    f5_nfe_step,
+                    f5_cfg_strength,
+                    f5_sway_sampling_coef,
+                    f5_cross_fade_duration,
+                    f5_target_rms,
+                    f5_fix_duration,
+                    f5_seed,
+                    f5_remove_silence,
+                    chatterbox_temperature,
+                    chatterbox_top_p,
+                    chatterbox_top_k,
+                    chatterbox_repetition_penalty,
+                    chatterbox_seed,
+                    chatterbox_norm_loudness,
                     sentence_pause_ms,
                     paragraph_pause_ms,
                     max_chunk_chars,
@@ -239,7 +401,31 @@ def build_app() -> gr.Blocks:
             model_id.change(
                 handlers.generation_control_updates,
                 inputs=[model_id, language],
-                outputs=[language, speed, pitch_shift, emotion, voice_profile_id, voice_preset, codec_repo, temperature, top_k],
+                outputs=[
+                    language,
+                    speed,
+                    pitch_shift,
+                    emotion,
+                    voice_profile_id,
+                    voice_preset,
+                    codec_repo,
+                    temperature,
+                    top_k,
+                    f5_nfe_step,
+                    f5_cfg_strength,
+                    f5_sway_sampling_coef,
+                    f5_cross_fade_duration,
+                    f5_target_rms,
+                    f5_fix_duration,
+                    f5_seed,
+                    f5_remove_silence,
+                    chatterbox_temperature,
+                    chatterbox_top_p,
+                    chatterbox_top_k,
+                    chatterbox_repetition_penalty,
+                    chatterbox_seed,
+                    chatterbox_norm_loudness,
+                ],
             )
             voice_profile_id.change(
                 handlers.profile_changed_updates,
@@ -352,11 +538,13 @@ def build_app() -> gr.Blocks:
             model_table = gr.Dataframe(
                 headers=[
                     "Tên",
-                    "Loại",
+                    "Dùng để làm gì",
+                    "Provider",
                     "Bắt buộc",
                     "Trạng thái",
-                    "MB",
-                    "Đường dẫn",
+                    "Dung lượng",
+                    "Kiểu lưu",
+                    "Nơi lưu",
                     "HF repo",
                 ],
                 value=handlers.refresh_model_table(),
@@ -385,6 +573,8 @@ def build_app() -> gr.Blocks:
                 )
                 download_btn = gr.Button("Tải model")
                 download_required_btn = gr.Button("Tải các model bắt buộc còn thiếu")
+                preview_remove_btn = gr.Button("Xem trước gỡ")
+                remove_model_btn = gr.Button("Xác nhận gỡ")
                 install_gpu_btn = gr.Button("Cài tăng tốc GPU cho model")
                 refresh_btn = gr.Button("Làm mới")
                 catalog_btn = gr.Button("Xem catalog model")
@@ -398,6 +588,16 @@ def build_app() -> gr.Blocks:
             )
             download_required_btn.click(
                 handlers.download_required_models,
+                outputs=[model_message, model_table],
+            )
+            preview_remove_btn.click(
+                handlers.preview_remove_model,
+                inputs=[download_model_id],
+                outputs=[model_message, model_table],
+            )
+            remove_model_btn.click(
+                handlers.remove_selected_model,
+                inputs=[download_model_id],
                 outputs=[model_message, model_table],
             )
             install_gpu_btn.click(

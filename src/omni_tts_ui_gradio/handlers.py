@@ -17,6 +17,7 @@ from omni_tts_shared.voice_presets import (
     NO_VOICE_PRESET_ID,
 )
 from omni_tts_shared.vieneu_codecs import NO_CODEC_ID, NO_CODEC_LABEL
+from omni_tts_ui_gradio import chatterbox_settings, f5_settings
 
 
 restore_user_state()
@@ -128,6 +129,9 @@ def model_supports_sampling(model_id: str) -> bool:
     return service.supports_vieneu_sampling(model_id)
 
 
+model_supports_f5_settings = service.supports_f5_settings
+model_supports_chatterbox_settings = service.supports_chatterbox_settings
+
 def model_supports_pitch_shift(model_id: str) -> bool:
     return service.model_capabilities(model_id).supports_pitch_shift
 
@@ -148,6 +152,14 @@ def default_temperature(model_id: str) -> float:
 
 def default_top_k(model_id: str) -> int:
     return service.default_vieneu_top_k(model_id)
+
+
+def default_f5_setting(model_id: str, key: str, fallback):
+    return f5_settings.default_setting(service, model_id, key, fallback)
+
+
+def default_chatterbox_setting(model_id: str, key: str, fallback):
+    return chatterbox_settings.default_setting(service, model_id, key, fallback)
 
 
 def runtime_target_choices() -> list[tuple[str, str]]:
@@ -194,6 +206,8 @@ def generation_control_updates(model_id: str, current_language: str):
         ),
         gr.update(value=default_temperature(model_id), interactive=service.supports_vieneu_sampling(model_id)),
         gr.update(value=default_top_k(model_id), interactive=service.supports_vieneu_sampling(model_id)),
+        *f5_settings.control_updates(service, model_id),
+        *chatterbox_settings.control_updates(service, model_id),
     )
 
 
@@ -300,6 +314,23 @@ def download_required_models() -> tuple[str, list[list[Any]]]:
     return message, refresh_model_table()
 
 
+def preview_remove_model(model_id: str) -> tuple[str, list[list[Any]]]:
+    try:
+        message = service.model_removal_preview(model_id)
+    except OmniTtsError as exc:
+        message = f"Lỗi: {exc}"
+    return message, refresh_model_table()
+
+
+def remove_selected_model(model_id: str) -> tuple[str, list[list[Any]]]:
+    try:
+        status = service.remove_model(model_id)
+        message = f"Đã gỡ phần lưu trữ riêng của: {status.display_name}"
+    except OmniTtsError as exc:
+        message = f"Lỗi: {exc}"
+    return message, refresh_model_table()
+
+
 def install_gpu_for_model(model_id: str) -> tuple[str, list[list[Any]]]:
     try:
         message = service.install_gpu_acceleration(model_id)
@@ -330,6 +361,12 @@ def generate_speech(
     runtime_target: str,
     temperature: float,
     top_k: int,
+    f5_nfe_step: int, f5_cfg_strength: float, f5_sway_sampling_coef: float,
+    f5_cross_fade_duration: float, f5_target_rms: float, f5_fix_duration: float,
+    f5_seed: float | None, f5_remove_silence: bool,
+    chatterbox_temperature: float, chatterbox_top_p: float, chatterbox_top_k: int,
+    chatterbox_repetition_penalty: float, chatterbox_seed: float | None,
+    chatterbox_norm_loudness: bool,
     sentence_pause_ms: int,
     paragraph_pause_ms: int,
     max_chunk_chars: int,
@@ -346,6 +383,20 @@ def generate_speech(
         sources = _source_paths(source_files)
         if not sources and not text.strip():
             return "Bạn chưa nhập nội dung hoặc upload file nguồn.", None, None, None, None
+        f5_kwargs = f5_settings.request_kwargs(
+            service, model_id, f5_nfe_step, f5_cfg_strength, f5_sway_sampling_coef,
+            f5_cross_fade_duration, f5_target_rms, f5_fix_duration, f5_seed, f5_remove_silence,
+        )
+        chatterbox_kwargs = chatterbox_settings.request_kwargs(
+            service,
+            model_id,
+            chatterbox_temperature,
+            chatterbox_top_p,
+            chatterbox_top_k,
+            chatterbox_repetition_penalty,
+            chatterbox_seed,
+            chatterbox_norm_loudness,
+        )
 
         request = _generation_request(
             text=text.strip() or "source file",
@@ -362,6 +413,8 @@ def generate_speech(
             runtime_target=runtime_target or "auto",
             temperature=float(temperature) if service.supports_vieneu_sampling(model_id) else None,
             top_k=int(top_k) if service.supports_vieneu_sampling(model_id) else None,
+            **f5_kwargs,
+            **chatterbox_kwargs,
             sentence_pause_ms=int(sentence_pause_ms),
             paragraph_pause_ms=int(paragraph_pause_ms),
             srt_file_padding_ms=int(paragraph_pause_ms),
@@ -390,6 +443,8 @@ def generate_speech(
                 "codec_repo": service.valid_vieneu_codec_repo(model_id, codec_repo),
                 "temperature": float(temperature) if service.supports_vieneu_sampling(model_id) else None,
                 "top_k": int(top_k) if service.supports_vieneu_sampling(model_id) else None,
+                **f5_kwargs,
+                **chatterbox_kwargs,
                 "sentence_pause_ms": int(sentence_pause_ms),
                 "paragraph_pause_ms": int(paragraph_pause_ms),
                 "srt_file_padding_ms": int(paragraph_pause_ms),
@@ -636,23 +691,41 @@ def _first_srt(results) -> Path | None:
 
 
 def _status_row(item: ModelStatus) -> list[Any]:
-    if item.worker_installed is None:
-        status = "Đã tải" if item.installed else "Chưa tải"
-    elif not item.worker_installed:
+    if item.worker_installed is False:
         status = "Chưa cài worker"
-    elif not item.hf_cached:
-        status = "Worker OK"
+    elif item.hf_cached is False:
+        status = "Thiếu HF cache"
+    elif item.installed:
+        status = "Sẵn sàng" if item.worker_installed is not True else "Worker + model OK"
+    elif item.worker_installed is True:
+        status = "Worker OK, thiếu model"
     else:
-        status = "Sẵn sàng"
+        status = "Chưa tải"
     return [
         item.display_name,
-        item.model_type,
+        _short_text(item.usage, 100),
+        item.provider,
         "Có" if item.required else "Không",
         status,
-        item.size_mb,
-        str(item.local_path),
+        _format_model_size(item),
+        item.storage_kind,
+        str(item.storage_path or item.local_path),
         item.hf_repo,
     ]
+
+
+def _format_model_size(item: ModelStatus) -> str:
+    total = item.total_size_mb if item.total_size_mb else item.size_mb
+    if total >= 1024:
+        return f"{total / 1024:.2f} GB"
+    return f"{total:.0f} MB"
+
+
+def _short_text(value: str, limit: int) -> str:
+    text = " ".join((value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
 
 
 def _audio_path(value: str | None) -> Path | None:

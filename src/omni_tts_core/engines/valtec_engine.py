@@ -15,6 +15,7 @@ from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
 from omni_tts_core.progress import check_cancel
 from omni_tts_core.runtime_devices import RuntimeDevicePolicy
+from omni_tts_core.storage_paths import hf_cache_env, valtec_appdata_root
 from omni_tts_shared.errors import EngineDependencyError, GenerationError
 from omni_tts_shared.valtec_voices import VALTEC_DEFAULT_SPEAKER, VALTEC_SPEAKERS
 
@@ -38,12 +39,8 @@ class ValtecSubprocessEngine(BaseTtsEngine):
             )
             command = [str(runtime.python_path), str(self.worker_script), "--request", str(payload_path)]
             env = dict(os.environ)
-            env.update({
-                "HF_HOME": str(project_path(".hf_cache")),
-                "HF_HUB_CACHE": str(project_path(".hf_cache/hub")),
-                "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
-                "LOCALAPPDATA": str(project_path(".hf_cache/valtec_appdata")),
-            })
+            env.update(hf_cache_env())
+            env["LOCALAPPDATA"] = str(valtec_appdata_root())
             if runtime.python_paths:
                 env["PYTHONPATH"] = os.pathsep.join(str(path) for path in runtime.python_paths)
             try:

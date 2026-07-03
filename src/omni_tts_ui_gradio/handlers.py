@@ -273,6 +273,10 @@ def refresh_runtime_table() -> list[list[Any]]:
     ]
 
 
+def refresh_setup_table(model_id: str | None = None) -> list[list[Any]]:
+    return [_setup_row(item) for item in service.setup_statuses(model_id or None)]
+
+
 def startup_notice() -> str:
     missing = service.missing_required_models()
     if not missing:
@@ -331,12 +335,20 @@ def remove_selected_model(model_id: str) -> tuple[str, list[list[Any]]]:
     return message, refresh_model_table()
 
 
-def install_gpu_for_model(model_id: str) -> tuple[str, list[list[Any]]]:
+def install_gpu_for_model(model_id: str) -> tuple[str, list[list[Any]], list[list[Any]]]:
     try:
         message = service.install_gpu_acceleration(model_id)
     except Exception as exc:
         message = f"Chưa cài được GPU: {exc}"
-    return message, refresh_runtime_table()
+    return message, refresh_setup_table(model_id), refresh_runtime_table()
+
+
+def install_base_for_model(model_id: str) -> tuple[str, list[list[Any]], list[list[Any]]]:
+    try:
+        message = service.install_base_runtime_for_model(model_id)
+    except Exception as exc:
+        message = f"Chưa cài được worker/môi trường: {exc}"
+    return message, refresh_setup_table(model_id), refresh_runtime_table()
 
 
 def get_model_catalog_html() -> dict:
@@ -719,6 +731,40 @@ def _format_model_size(item: ModelStatus) -> str:
     if total >= 1024:
         return f"{total / 1024:.2f} GB"
     return f"{total:.0f} MB"
+
+
+def _setup_row(item) -> list[Any]:
+    action = item.action_label if item.can_run else ""
+    if action and item.script_name:
+        action = f"{action} ({item.script_name})"
+    return [
+        _setup_scope_label(item.scope),
+        item.label,
+        _setup_status_label(item.status),
+        action,
+        item.detail,
+    ]
+
+
+def _setup_scope_label(value: str) -> str:
+    return {
+        "environment": "Máy",
+        "storage": "Storage",
+        "model": "Model",
+        "runtime": "Runtime",
+        "worker": "Worker",
+        "gpu": "GPU",
+    }.get(value, value)
+
+
+def _setup_status_label(value: str) -> str:
+    return {
+        "ok": "OK",
+        "missing": "Thiếu",
+        "warning": "Cảnh báo",
+        "optional": "Tùy chọn",
+        "error": "Lỗi",
+    }.get(value, value)
 
 
 def _short_text(value: str, limit: int) -> str:

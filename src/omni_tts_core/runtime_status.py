@@ -84,7 +84,10 @@ def _worker_status(
             provider=spec.provider,
             installed=False,
             actual_device="not-installed",
-            message=f"{_provider_label(spec.provider)} worker chưa cài. Chạy {_install_hint(spec.provider)}.",
+            message=(
+                f"{_provider_label(spec.provider)} worker chưa cài. "
+                "Mở tab Quản lý model, chọn model này rồi bấm Cài worker/môi trường."
+            ),
         )
     info = detector.info_for_provider(spec.provider)
     configured = configured_runtime_device(spec)
@@ -170,13 +173,3 @@ def _provider_label(provider: str) -> str:
         "f5tts": "F5-TTS",
         "chatterbox": "Chatterbox",
     }.get(provider, provider)
-
-
-def _install_hint(provider: str) -> str:
-    return {
-        "vieneu": "install_vieneu_worker.bat hoặc install_vieneu_worker_cuda.bat",
-        "qwen": "install_qwen_worker.bat hoặc install_qwen_worker_blackwell.bat nếu dùng RTX 50xx",
-        "valtec": "install_valtec_worker.bat",
-        "f5tts": "install_f5_worker.bat hoặc install_f5_worker_cuda.bat",
-        "chatterbox": "install_chatterbox_worker.bat hoặc install_chatterbox_worker_cuda.bat",
-    }.get(provider, "script cài tương ứng")

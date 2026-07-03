@@ -85,7 +85,7 @@ class QwenSubprocessEngine(BaseTtsEngine):
             if candidate.exists():
                 return WorkerRuntime(candidate, [])
         raise EngineDependencyError(
-            "Qwen worker chưa được cài. Hãy chạy install_qwen_worker.bat trước."
+            "Qwen worker chưa được cài. Mở tab Quản lý model, chọn model Qwen rồi bấm Cài worker/môi trường."
         )
 
     def generate_batch(
@@ -207,9 +207,9 @@ class QwenSubprocessEngine(BaseTtsEngine):
 
 def _clean_worker_error(message: str) -> str:
     if "No module named 'qwen_tts'" in message:
-        return "Qwen worker thiếu qwen-tts. Chạy install_qwen_worker.bat."
+        return "Qwen worker thiếu qwen-tts. Mở Quản lý model và bấm Cài worker/môi trường."
     if "No module named 'torch'" in message:
-        return "Qwen worker thiếu torch. Chạy install_qwen_worker.bat."
+        return "Qwen worker thiếu torch. Mở Quản lý model và bấm Cài worker/môi trường."
     if "uu tien clone voice" in message:
         return "Qwen3-TTS Base cần Profile giọng để clone voice."
     lines = [line.strip() for line in message.splitlines() if line.strip()]

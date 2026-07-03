@@ -18,7 +18,7 @@ Chạy 1-click cho máy làm việc hoặc máy thuê:
 Start-ColinTTS.bat
 ```
 
-File này tự chuẩn bị môi trường `uv`, pull source mới nhất nếu có Git, restore `user_state/` vào profile/setting runtime rồi mở giao diện Tkinter.
+Đây là file chính cần bấm sau khi clone repo sang máy khác. File này tự chuẩn bị môi trường `uv`, pull source mới nhất nếu có Git, restore `user_state/` vào profile/setting runtime rồi mở giao diện Tkinter.
 Sau lần chạy đầu, script cũng tạo shortcut `Colin TTS Local` ngoài Desktop để mở lại nhanh.
 
 Nếu máy thuê chưa có source, chạy bootstrap từ GitHub bằng PowerShell:
@@ -37,13 +37,15 @@ bash Start-ColinTTS-Docker-GPU.sh
 
 Sau đó mở URL port `7860` do nhà cung cấp cloud hiển thị. Xem thêm `docs/docker_gpu_webui.md`.
 
-Chạy giao diện web Gradio:
+Chạy giao diện web Gradio bằng cùng launcher chính:
 
 ```bat
-run_app.bat
+Start-ColinTTS.bat -Web
 ```
 
-Chạy giao diện Tkinter:
+Các file `run_app.bat` và `run_tkinter.bat` chỉ giữ lại cho dev/debug. Khi dùng hằng ngày hoặc sang máy mới, ưu tiên `Start-ColinTTS.bat`.
+
+Chạy giao diện Tkinter thủ công trong lúc debug:
 
 ```bat
 run_tkinter.bat
@@ -66,19 +68,13 @@ uv run omni-tts-gradio
 
 ## Cài thêm engine TTS
 
-Bản UI và quản lý model chạy với nhóm thư viện nhẹ. Để sinh audio bằng OmniVoice, cài thêm nhóm TTS:
+Bản UI và quản lý model chạy với nhóm thư viện nhẹ. Khi muốn dùng model nào, mở tab `Quản lý model`, chọn model đó rồi dùng các nút:
 
-```bat
-uv sync --extra tts
-```
+- `Tải model`: tải payload/cache cần cho model.
+- `Cài worker/môi trường`: cài worker riêng hoặc thư viện TTS chính.
+- `Cài GPU/CUDA`: cài bộ tăng tốc CUDA phù hợp với provider/model.
 
-Để dùng VieNeu-TTS-v2, cài worker riêng:
-
-```bat
-install_vieneu_worker.bat
-```
-
-VieNeu chạy trong `engines/vieneu_worker/.venv`, tách khỏi môi trường chính để tránh xung đột dependency với OmniVoice. Sau khi cài, chọn `VieNeu TTS v2 Standard` hoặc `VieNeu TTS v2 Turbo` trong dropdown model.
+Các file `install_*.bat` vẫn tồn tại để core chạy đúng tác vụ trên Windows, nhưng không cần bấm trực tiếp khi dùng app. VieNeu, Qwen, Valtec, F5-TTS và Chatterbox chạy trong worker riêng dưới `engines/`, tách khỏi môi trường chính để tránh xung đột dependency với OmniVoice.
 
 ## Quy ước model local
 
@@ -131,7 +127,7 @@ Nếu dùng GTX 1080 Ti, chạy:
 install_tts_deps_cuda126.bat
 ```
 
-File này sẽ cài nhóm TTS rồi ép cài lại `torch==2.7.1+cu126` và `torchaudio==2.7.1+cu126`, phù hợp hơn với GTX 1080 Ti.
+Thông thường bạn có thể bấm `Cài GPU/CUDA` trong tab `Quản lý model`. Lệnh thủ công này chỉ còn dùng khi debug hoặc cần cài trực tiếp ngoài app; nó cài nhóm TTS rồi ép cài lại `torch==2.7.1+cu126` và `torchaudio==2.7.1+cu126`, phù hợp hơn với GTX 1080 Ti.
 
 Nếu dùng RTX 50xx/5090 Blackwell và gặp lỗi `CUDA capability sm_120` hoặc `no kernel image is available`, chạy:
 

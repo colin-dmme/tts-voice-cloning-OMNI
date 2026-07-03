@@ -19,12 +19,12 @@ from omni_tts_core.model_registry import ModelRegistry, ModelSpec
 from omni_tts_core.model_storage import ModelStorage
 from omni_tts_core.progress import ProgressCallback, check_cancel, emit_progress
 from omni_tts_core.runtime_status import RuntimeStatusService
+from omni_tts_core.setup_tasks import SetupService
 from omni_tts_core.subtitles.srt_builder import write_srt
 from omni_tts_core.text.splitter import split_text
 from omni_tts_core.text.source_reader import read_source_text, read_source_units, text_units_from_blank_lines
 from omni_tts_core.text.vi_normalizer import normalize_vietnamese_text
 from omni_tts_core.voice_profile_policy import ProfileCompatibility, VoiceProfilePolicy
-from omni_tts_core.worker_installation import install_gpu_acceleration
 from omni_tts_core.voice_profiles import VoiceProfileManager
 from omni_tts_shared.errors import ConfigError, ModelMissingError
 from omni_tts_shared.languages import language_label
@@ -35,6 +35,7 @@ from omni_tts_shared.schemas import (
     ModelStatus,
     ProfileSaveWarning,
     RuntimeStatus,
+    SetupTaskStatus,
     SegmentTiming,
     VoiceProfile,
 )
@@ -54,6 +55,7 @@ class TtsService:
         self.registry = registry or ModelRegistry()
         self.storage = storage or ModelStorage(self.registry)
         self.runtime_status = RuntimeStatusService(self.registry, self.storage)
+        self.setup = SetupService(self.registry, self.storage, self.runtime_status)
         self.voice_profiles = voice_profiles or VoiceProfileManager()
         self.engine_cache = EngineProfileCache()
         self.voice_policy = VoiceProfilePolicy(self.registry, self.engine_cache)
@@ -227,14 +229,23 @@ class TtsService:
     def runtime_status_for(self, model_id: str) -> RuntimeStatus:
         return self.runtime_status.status_for(model_id)
 
+    def setup_statuses(self, model_id: str | None = None) -> list[SetupTaskStatus]:
+        return self.setup.setup_statuses(model_id)
+
+    def environment_statuses(self) -> list[SetupTaskStatus]:
+        return self.setup.environment_statuses()
+
+    def model_setup_statuses(self, model_id: str) -> list[SetupTaskStatus]:
+        return self.setup.model_setup_statuses(model_id)
+
     def download_model(self, model_id: str) -> ModelStatus:
         return self.storage.download(model_id)
 
     def install_gpu_acceleration(self, model_id: str) -> str:
-        spec = self.registry.get(model_id)
-        message = install_gpu_acceleration(spec.provider)
-        self.runtime_status.detector.clear()
-        return message
+        return self.setup.install_gpu_for_model(model_id)
+
+    def install_base_runtime_for_model(self, model_id: str) -> str:
+        return self.setup.install_base_for_model(model_id)
 
     def download_missing_required_models(self) -> list[ModelStatus]:
         downloaded: list[ModelStatus] = []

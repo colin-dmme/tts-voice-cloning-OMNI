@@ -166,7 +166,7 @@ class VieneuSubprocessEngine(BaseTtsEngine):
             if candidate.exists():
                 return WorkerRuntime(candidate, [])
         raise EngineDependencyError(
-            "VieNeu worker chưa được cài. Hãy chạy install_vieneu_worker.bat trước."
+            "VieNeu worker chưa được cài. Mở tab Quản lý model, chọn model VieNeu rồi bấm Cài worker/môi trường."
         )
 
     def _base_payload(self, request: TtsEngineRequest, scratch_dir: Path | None = None) -> dict:
@@ -355,9 +355,9 @@ def _clean_worker_error(message: str) -> str:
             "Nếu đang dùng Profile với Standard/GGUF, hãy thử xóa cache profile hoặc encode lại bằng NeuCodec Distill."
         )
     if "No module named 'neucodec'" in message:
-        return "VieNeu Standard cần neucodec để clone giọng. Chạy install_vieneu_worker.bat."
+        return "VieNeu Standard cần neucodec để clone giọng. Mở Quản lý model và bấm Cài worker/môi trường."
     if "No module named 'torch'" in message or "Torch is required" in message:
-        return "VieNeu cần torch trong worker để clone giọng. Chạy install_vieneu_worker.bat."
+        return "VieNeu cần torch trong worker để clone giọng. Mở Quản lý model và bấm Cài worker/môi trường."
     lines = [line.strip() for line in message.splitlines() if line.strip()]
     if not lines:
         return "Không rõ lỗi từ worker."

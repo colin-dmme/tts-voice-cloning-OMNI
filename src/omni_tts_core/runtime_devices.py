@@ -134,12 +134,12 @@ class RuntimeDevicePolicy:
         info = self.detector.info_for_provider(spec.provider)
         if not info.cuda_available:
             install_hint = {
-                "omnivoice": "Hãy cài PyTorch CUDA cho môi trường chính bằng install_tts_deps_cuda126.bat.",
-                "vieneu": "Hãy chạy install_vieneu_worker_cuda.bat rồi kiểm tra lại.",
-                "qwen": "Hãy chạy install_qwen_worker.bat; nếu dùng RTX 50xx hãy chạy install_qwen_worker_blackwell.bat hoặc Fix-RTX50-CUDA.bat.",
+                "omnivoice": "Mở tab Quản lý model và bấm Cài GPU/CUDA cho model OmniVoice.",
+                "vieneu": "Mở tab Quản lý model và bấm Cài GPU/CUDA cho model VieNeu.",
+                "qwen": "Mở tab Quản lý model và bấm Cài GPU/CUDA cho model Qwen.",
                 "valtec": "Valtec worker hiện mặc định CPU; cần cài worker có PyTorch CUDA trước.",
-                "f5tts": "Hãy chạy install_f5_worker_cuda.bat rồi kiểm tra lại.",
-                "chatterbox": "Hãy chạy install_chatterbox_worker_cuda.bat rồi kiểm tra lại.",
+                "f5tts": "Mở tab Quản lý model và bấm Cài GPU/CUDA cho model F5-TTS.",
+                "chatterbox": "Mở tab Quản lý model và bấm Cài GPU/CUDA cho model Chatterbox.",
             }.get(spec.provider, "Hãy kiểm tra CUDA runtime.")
             raise ConfigError(f"CUDA chưa khả dụng cho {spec.provider}. {install_hint}")
         if spec.provider == "vieneu":
@@ -147,7 +147,7 @@ class RuntimeDevicePolicy:
             if active_mode == "turbo" and not info.onnxruntime_cuda:
                 raise ConfigError(
                     "VieNeu Turbo CUDA cần onnxruntime-gpu trong worker. "
-                    "Hãy chạy install_vieneu_worker_cuda.bat."
+                    "Mở tab Quản lý model và bấm Cài GPU/CUDA cho model VieNeu."
                 )
             if active_mode in {"standard", "lora"} and spec.runtime.get("gguf_filename") and not info.llama_gpu_offload:
                 raise ConfigError(
@@ -321,7 +321,7 @@ def _unsupported_arch_message(capability: str, arch_list) -> str:
     if arch == "sm_120":
         return (
             "GPU RTX 50xx/Blackwell cần PyTorch CUDA 12.8+ có sm_120. "
-            "Hãy chạy Fix-RTX50-CUDA.bat trong portable hoặc install_qwen_worker_blackwell.bat trong source checkout."
+            "Mở tab Quản lý model và bấm Cài GPU/CUDA cho model đang dùng."
         )
     return f"PyTorch hiện tại không có kernel cho compute capability {arch}."
 

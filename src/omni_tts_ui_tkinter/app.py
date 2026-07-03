@@ -1304,14 +1304,18 @@ class TkinterApp(GenerationTabsMixin):
                     )
                 runtime_text = self.controller.runtime_status_text(current_model_id)
                 startup_notice = self.controller.startup_notice()
+                setup_rows = [
+                    (item.task_id, _setup_status_values(item))
+                    for item in self.controller.setup_statuses(current_model_id)
+                ]
             except Exception as exc:
                 self.root.after(0, lambda err=exc: self._finish_model_refresh_error(err))
                 return
-            self.root.after(0, lambda: self._apply_model_refresh(rows, runtime_text, startup_notice))
+            self.root.after(0, lambda: self._apply_model_refresh(rows, runtime_text, startup_notice, setup_rows))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _apply_model_refresh(self, rows, runtime_text: str, startup_notice: str) -> None:
+    def _apply_model_refresh(self, rows, runtime_text: str, startup_notice: str, setup_rows) -> None:
         self._model_refresh_running = False
         for row in self.model_table.get_children():
             self.model_table.delete(row)
@@ -1322,6 +1326,7 @@ class TkinterApp(GenerationTabsMixin):
                 iid=model_id,
                 values=values,
             )
+        self._apply_setup_rows(setup_rows)
         self.model_info_var.set(self.controller.model_choice_info(self._current_model_id()))
         self.runtime_var.set(runtime_text)
         self.refresh_license_status()
@@ -1331,6 +1336,44 @@ class TkinterApp(GenerationTabsMixin):
     def _finish_model_refresh_error(self, error: Exception) -> None:
         self._model_refresh_running = False
         self.status_var.set(f"Chưa kiểm tra được model/runtime: {error}")
+
+    def refresh_selected_setup(self) -> None:
+        model_id = self._selected_model_table_id() or self._current_model_id()
+
+        def worker() -> None:
+            try:
+                setup_rows = [
+                    (item.task_id, _setup_status_values(item))
+                    for item in self.controller.setup_statuses(model_id)
+                ]
+            except Exception as exc:
+                setup_rows = [
+                    (
+                        "setup:error",
+                        (
+                            "setup",
+                            "Kiểm tra setup",
+                            "Lỗi",
+                            "",
+                            str(exc),
+                        ),
+                    )
+                ]
+            self.root.after(0, lambda: self._apply_setup_rows(setup_rows))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_setup_rows(self, rows) -> None:
+        if not hasattr(self, "setup_table"):
+            return
+        for row in self.setup_table.get_children():
+            self.setup_table.delete(row)
+        for task_id, values in rows:
+            self.setup_table.insert("", "end", iid=task_id, values=values)
+
+    def _selected_model_table_id(self) -> str | None:
+        selected = self.model_table.selection()
+        return selected[0] if selected else None
 
     def _prepare_initial_model_view(self) -> None:
         model_id = self._current_model_id()
@@ -1366,6 +1409,7 @@ class TkinterApp(GenerationTabsMixin):
         self.update_runtime_label()
         self.apply_model_capabilities(prefer_default_preset=True)
         self._update_profile_compat()
+        self.refresh_selected_setup()
 
     def on_voice_profile_changed(self) -> None:
         if self._selected_profile_id():
@@ -1557,6 +1601,17 @@ class TkinterApp(GenerationTabsMixin):
         self._run_background(
             "Đang cài tăng tốc GPU...",
             lambda _progress, _cancel: self.controller.install_gpu_for_model(selected[0]),
+            lambda result: (self.refresh_models(), messagebox.showinfo("Thông báo", result)),
+        )
+
+    def install_base_for_selected_model(self) -> None:
+        selected = self.model_table.selection()
+        if not selected:
+            messagebox.showinfo("Thông báo", "Hãy chọn một model trong bảng.")
+            return
+        self._run_background(
+            "Đang cài worker/môi trường...",
+            lambda _progress, _cancel: self.controller.install_base_for_model(selected[0]),
             lambda result: (self.refresh_models(), messagebox.showinfo("Thông báo", result)),
         )
 
@@ -1754,6 +1809,40 @@ def _format_model_size(item) -> str:
     if total >= 1024:
         return f"{total / 1024:.2f} GB"
     return f"{total:.0f} MB"
+
+
+def _setup_status_values(item) -> tuple[str, str, str, str, str]:
+    action = item.action_label if item.can_run else ""
+    if item.script_name and action:
+        action = f"{action} ({item.script_name})"
+    return (
+        _setup_scope_label(item.scope),
+        item.label,
+        _setup_status_label(item.status),
+        action,
+        _short_text(item.detail, 150),
+    )
+
+
+def _setup_scope_label(value: str) -> str:
+    return {
+        "environment": "Máy",
+        "storage": "Storage",
+        "model": "Model",
+        "runtime": "Runtime",
+        "worker": "Worker",
+        "gpu": "GPU",
+    }.get(value, value)
+
+
+def _setup_status_label(value: str) -> str:
+    return {
+        "ok": "OK",
+        "missing": "Thiếu",
+        "warning": "Cảnh báo",
+        "optional": "Tùy chọn",
+        "error": "Lỗi",
+    }.get(value, value)
 
 
 def _short_text(value: str, limit: int) -> str:

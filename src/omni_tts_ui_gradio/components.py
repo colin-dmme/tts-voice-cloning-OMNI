@@ -565,6 +565,18 @@ def build_app() -> gr.Blocks:
                 interactive=False,
                 wrap=True,
             )
+            setup_table = gr.Dataframe(
+                headers=[
+                    "Nhóm",
+                    "Mục",
+                    "Trạng thái",
+                    "Có thể bấm",
+                    "Chi tiết",
+                ],
+                value=handlers.refresh_setup_table(default_model),
+                interactive=False,
+                wrap=True,
+            )
             with gr.Row():
                 download_model_id = gr.Dropdown(
                     label="Model cần tải",
@@ -575,7 +587,8 @@ def build_app() -> gr.Blocks:
                 download_required_btn = gr.Button("Tải các model bắt buộc còn thiếu")
                 preview_remove_btn = gr.Button("Xem trước gỡ")
                 remove_model_btn = gr.Button("Xác nhận gỡ")
-                install_gpu_btn = gr.Button("Cài tăng tốc GPU cho model")
+                install_base_btn = gr.Button("Cài worker/môi trường")
+                install_gpu_btn = gr.Button("Cài GPU/CUDA")
                 refresh_btn = gr.Button("Làm mới")
                 catalog_btn = gr.Button("Xem catalog model")
             model_message = gr.Textbox(label="Thông báo", interactive=False)
@@ -603,10 +616,21 @@ def build_app() -> gr.Blocks:
             install_gpu_btn.click(
                 handlers.install_gpu_for_model,
                 inputs=[download_model_id],
-                outputs=[model_message, runtime_table],
+                outputs=[model_message, setup_table, runtime_table],
+            )
+            install_base_btn.click(
+                handlers.install_base_for_model,
+                inputs=[download_model_id],
+                outputs=[model_message, setup_table, runtime_table],
             )
             refresh_btn.click(handlers.refresh_model_table, outputs=[model_table])
             refresh_btn.click(handlers.refresh_runtime_table, outputs=[runtime_table])
+            refresh_btn.click(handlers.refresh_setup_table, inputs=[download_model_id], outputs=[setup_table])
+            download_model_id.change(
+                handlers.refresh_setup_table,
+                inputs=[download_model_id],
+                outputs=[setup_table],
+            )
             catalog_btn.click(handlers.get_model_catalog_html, outputs=[catalog_html])
 
     return app

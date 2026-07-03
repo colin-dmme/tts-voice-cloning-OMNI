@@ -60,6 +60,21 @@ class RuntimeStatus(BaseModel):
     message: str = ""
 
 
+class SetupTaskStatus(BaseModel):
+    task_id: str
+    label: str
+    scope: str
+    status: str
+    detail: str = ""
+    provider: str = ""
+    model_id: str = ""
+    required: bool = False
+    recommended: bool = False
+    can_run: bool = False
+    action_label: str = ""
+    script_name: str = ""
+
+
 class GenerateSpeechRequest(BaseModel):
     text: str = Field(min_length=1)
     language: LanguageCode = "vi"

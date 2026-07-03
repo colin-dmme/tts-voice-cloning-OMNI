@@ -144,8 +144,7 @@ class F5TtsSubprocessEngine(BaseTtsEngine):
             if candidate.exists():
                 return WorkerRuntime(candidate, [])
         raise EngineDependencyError(
-            "F5-TTS worker chưa được cài. Hãy chạy install_f5_worker.bat "
-            "hoặc install_f5_worker_cuda.bat trước."
+            "F5-TTS worker chưa được cài. Mở tab Quản lý model, chọn model F5-TTS rồi bấm Cài worker/môi trường."
         )
 
     def _base_payload(self, request: TtsEngineRequest) -> dict:
@@ -226,9 +225,9 @@ def _worker_env(python_paths: list[Path]) -> dict[str, str]:
 
 def _clean_worker_error(message: str) -> str:
     if "No module named 'f5_tts'" in message:
-        return "F5-TTS worker thiếu f5-tts. Chạy install_f5_worker.bat."
+        return "F5-TTS worker thiếu f5-tts. Mở Quản lý model và bấm Cài worker/môi trường."
     if "No module named 'torch'" in message:
-        return "F5-TTS worker thiếu torch. Chạy install_f5_worker.bat."
+        return "F5-TTS worker thiếu torch. Mở Quản lý model và bấm Cài worker/môi trường."
     if "ref_text" in message and "transcript" in message.lower():
         return "F5-TTS cần transcript của giọng mẫu để clone voice ổn định."
     lines = [line.strip() for line in message.splitlines() if line.strip()]

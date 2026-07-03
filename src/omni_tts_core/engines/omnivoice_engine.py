@@ -74,7 +74,7 @@ class OmniVoiceEngine(BaseTtsEngine):
             import omnivoice.models.omnivoice as omnivoice_module
         except Exception as exc:
             raise EngineDependencyError(
-                "Thiếu thư viện OmniVoice/torch. Chạy install_tts_deps.bat trước."
+                "Thiếu thư viện OmniVoice/torch. Mở tab Quản lý model, chọn OmniVoice rồi bấm Cài worker/môi trường."
             ) from exc
         device, dtype = _best_device(torch, runtime_target)
         cache_key = f"{device}:{getattr(dtype, '__name__', str(dtype))}"

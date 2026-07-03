@@ -13,7 +13,8 @@ from omni_tts_core.storage_paths import (
     models_root,
 )
 from omni_tts_core.worker_installation import (
-    install_worker,
+    PROVIDER_WORKERS,
+    install_base_runtime,
     is_worker_installed,
     worker_install_path,
 )
@@ -21,13 +22,6 @@ from omni_tts_shared.errors import ModelDownloadError, ConfigError
 from omni_tts_shared.schemas import ModelStatus
 
 _HF_CACHE_PROVIDERS = ("vieneu", "valtec")
-_PROVIDER_WORKERS = {
-    "vieneu": "vieneu_worker",
-    "valtec": "valtec_worker",
-    "qwen": "qwen_worker",
-    "f5tts": "f5_worker",
-    "chatterbox": "chatterbox_worker",
-}
 _REPO_RUNTIME_KEYS = (
     "backbone_repo",
     "decoder_repo",
@@ -54,7 +48,7 @@ class ModelStorage:
         worker_installed: bool | None = None
         hf_cached: bool | None = None
         worker_path: Path | None = None
-        worker_name = _PROVIDER_WORKERS.get(spec.provider)
+        worker_name = PROVIDER_WORKERS.get(spec.provider)
         worker_size_mb = 0.0
         if worker_name:
             worker_installed = is_worker_installed(worker_name)
@@ -89,7 +83,7 @@ class ModelStorage:
 
     def is_installed(self, spec: ModelSpec) -> bool:
         if spec.provider in _HF_CACHE_PROVIDERS:
-            worker_name = _PROVIDER_WORKERS.get(spec.provider)
+            worker_name = PROVIDER_WORKERS.get(spec.provider)
             return bool(worker_name and is_worker_installed(worker_name))
         if spec.provider == "omnivoice":
             subfolder = _runtime_text(spec, "omnivoice_subfolder")
@@ -100,7 +94,7 @@ class ModelStorage:
 
     def _status_path(self, spec: ModelSpec) -> Path:
         if spec.provider in _HF_CACHE_PROVIDERS:
-            worker_name = _PROVIDER_WORKERS.get(spec.provider)
+            worker_name = PROVIDER_WORKERS.get(spec.provider)
             if worker_name:
                 return worker_install_path(worker_name)
         return spec.local_path
@@ -165,12 +159,12 @@ class ModelStorage:
     # ------------------------------------------------------------------
 
     def _ensure_worker(self, provider: str) -> None:
-        worker_name = _PROVIDER_WORKERS.get(provider)
+        worker_name = PROVIDER_WORKERS.get(provider)
         if not worker_name:
             raise ConfigError(f"Provider {provider} chưa có worker được khai báo.")
         if not is_worker_installed(worker_name):
             try:
-                install_worker(worker_name)
+                install_base_runtime(provider)
             except RuntimeError as exc:
                 raise ConfigError(str(exc)) from exc
 
@@ -278,7 +272,7 @@ def _usage_for(spec: ModelSpec) -> str:
 def _storage_kind(spec: ModelSpec) -> str:
     if spec.provider in _HF_CACHE_PROVIDERS:
         return "HF cache + worker"
-    if spec.provider in _PROVIDER_WORKERS:
+    if spec.provider in PROVIDER_WORKERS:
         return "Model folder + worker"
     return "Model folder"
 
@@ -294,7 +288,7 @@ def _storage_note_for(spec: ModelSpec) -> str:
         return "Bắt buộc cho cấu hình mặc định."
     if spec.provider in _HF_CACHE_PROVIDERS:
         return "Model nằm trong HF cache; worker cài riêng."
-    if spec.provider in _PROVIDER_WORKERS:
+    if spec.provider in PROVIDER_WORKERS:
         return "Cần cả model payload và worker riêng."
     return "Tải khi cần dùng."
 

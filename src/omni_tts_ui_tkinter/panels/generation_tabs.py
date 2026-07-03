@@ -275,6 +275,7 @@ class GenerationTabsMixin:
         tab = ttk.Frame(notebook, padding=10)
         tab.columnconfigure(0, weight=1)
         tab.rowconfigure(0, weight=1)
+        tab.rowconfigure(2, weight=0)
         notebook.add(tab, text="Quản lý model")
 
         columns = ("name", "usage", "provider", "required", "status", "device", "size", "path")
@@ -303,6 +304,7 @@ class GenerationTabsMixin:
                 width = 110
             self.model_table.column(column, width=width)
         self.model_table.grid(row=0, column=0, sticky="nsew")
+        self.model_table.bind("<<TreeviewSelect>>", lambda _event: self.refresh_selected_setup())
 
         controls = ttk.Frame(tab)
         controls.grid(row=1, column=0, sticky="ew", pady=(10, 0))
@@ -321,7 +323,12 @@ class GenerationTabsMixin:
         ).pack(side="left", padx=(8, 0))
         ttk.Button(
             controls,
-            text="Cài tăng tốc GPU cho model đang chọn",
+            text="Cài worker/môi trường",
+            command=self.install_base_for_selected_model,
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            controls,
+            text="Cài GPU/CUDA",
             command=self.install_gpu_for_selected_model,
         ).pack(side="left", padx=(8, 0))
         ttk.Button(controls, text="Làm mới", command=self.refresh_models).pack(
@@ -332,6 +339,32 @@ class GenerationTabsMixin:
             text="Xem catalog model",
             command=self.controller.open_model_catalog,
         ).pack(side="right")
+
+        setup_frame = ttk.LabelFrame(tab, text="Kiểm tra máy và model đang chọn", padding=8)
+        setup_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        setup_frame.columnconfigure(0, weight=1)
+        setup_columns = ("scope", "item", "status", "action", "detail")
+        self.setup_table = ttk.Treeview(
+            setup_frame,
+            columns=setup_columns,
+            show="headings",
+            height=7,
+        )
+        setup_headings = {
+            "scope": "Nhóm",
+            "item": "Mục",
+            "status": "Trạng thái",
+            "action": "Có thể bấm",
+            "detail": "Chi tiết",
+        }
+        for column, label in setup_headings.items():
+            self.setup_table.heading(column, text=label)
+        self.setup_table.column("scope", width=98, stretch=False)
+        self.setup_table.column("item", width=190, stretch=False)
+        self.setup_table.column("status", width=105, stretch=False)
+        self.setup_table.column("action", width=130, stretch=False)
+        self.setup_table.column("detail", width=620)
+        self.setup_table.grid(row=0, column=0, sticky="ew")
 
     def _build_voice_profile_tab(self, notebook: ttk.Notebook) -> None:
         panel = VoiceProfilePanel(notebook, self.controller, self.refresh_voice_profiles)

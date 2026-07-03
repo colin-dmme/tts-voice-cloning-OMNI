@@ -144,8 +144,7 @@ class ChatterboxSubprocessEngine(BaseTtsEngine):
             if candidate.exists():
                 return WorkerRuntime(candidate, [])
         raise EngineDependencyError(
-            "Chatterbox worker chưa được cài. Hãy chạy install_chatterbox_worker.bat "
-            "hoặc install_chatterbox_worker_cuda.bat trước."
+            "Chatterbox worker chưa được cài. Mở tab Quản lý model, chọn model Chatterbox rồi bấm Cài worker/môi trường."
         )
 
     def _base_payload(self, request: TtsEngineRequest) -> dict:
@@ -197,9 +196,9 @@ def _worker_env(python_paths: list[Path]) -> dict[str, str]:
 
 def _clean_worker_error(message: str) -> str:
     if "No module named 'chatterbox'" in message:
-        return "Chatterbox worker thiếu chatterbox-tts. Chạy install_chatterbox_worker.bat."
+        return "Chatterbox worker thiếu chatterbox-tts. Mở Quản lý model và bấm Cài worker/môi trường."
     if "No module named 'torch'" in message:
-        return "Chatterbox worker thiếu torch. Chạy install_chatterbox_worker.bat."
+        return "Chatterbox worker thiếu torch. Mở Quản lý model và bấm Cài worker/môi trường."
     if "Audio prompt must be longer than 5 seconds" in message:
         return "Chatterbox Turbo cần audio mẫu dài hơn 5 giây để clone voice."
     lines = [line.strip() for line in message.splitlines() if line.strip()]

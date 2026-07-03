@@ -20,6 +20,7 @@ from omni_tts_shared.schemas import (
     ModelStatus,
     ProfileSaveWarning,
     RuntimeStatus,
+    SetupTaskStatus,
     VoiceProfile,
 )
 from omni_tts_ui_tkinter.state import UiSettings
@@ -151,6 +152,9 @@ class TkinterController:
     def runtime_statuses(self) -> list[RuntimeStatus]:
         return self.service.list_runtime_statuses()
 
+    def setup_statuses(self, model_id: str | None = None) -> list[SetupTaskStatus]:
+        return self.service.setup_statuses(model_id)
+
     def runtime_target_choices(self) -> list[tuple[str, str]]:
         return [(label, value) for label, value in RUNTIME_TARGET_CHOICES]
 
@@ -246,6 +250,9 @@ class TkinterController:
 
     def install_gpu_for_model(self, model_id: str) -> str:
         return self.service.install_gpu_acceleration(model_id)
+
+    def install_base_for_model(self, model_id: str) -> str:
+        return self.service.install_base_runtime_for_model(model_id)
 
     def open_model_catalog(self) -> None:
         self.service.open_model_catalog()

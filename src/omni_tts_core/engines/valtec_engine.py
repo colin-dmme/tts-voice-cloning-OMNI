@@ -77,7 +77,7 @@ class ValtecSubprocessEngine(BaseTtsEngine):
             if candidate.exists():
                 return WorkerRuntime(candidate, python_paths)
         raise EngineDependencyError(
-            "Valtec worker chưa được cài. Hãy chạy install_valtec_worker.bat trước."
+            "Valtec worker chưa được cài. Mở tab Quản lý model, chọn model Valtec rồi bấm Cài worker/môi trường."
         )
 
     def _payload(self, request: TtsEngineRequest, output_path: Path) -> dict:
@@ -96,9 +96,9 @@ class ValtecSubprocessEngine(BaseTtsEngine):
 
 def _clean_worker_error(message: str) -> str:
     if "No module named 'valtec_tts'" in message:
-        return "Valtec worker thiếu valtec-tts. Chạy install_valtec_worker.bat."
+        return "Valtec worker thiếu valtec-tts. Mở Quản lý model và bấm Cài worker/môi trường."
     if "No module named 'torch'" in message:
-        return "Valtec worker thiếu torch. Chạy install_valtec_worker.bat."
+        return "Valtec worker thiếu torch. Mở Quản lý model và bấm Cài worker/môi trường."
     lines = [line.strip() for line in message.splitlines() if line.strip()]
     if not lines:
         return "Không rõ lỗi từ worker."

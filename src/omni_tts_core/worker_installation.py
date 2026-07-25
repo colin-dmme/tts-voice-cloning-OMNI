@@ -14,6 +14,7 @@ PROVIDER_WORKERS = {
     "valtec": "valtec_worker",
     "f5tts": "f5_worker",
     "chatterbox": "chatterbox_worker",
+    "piper": "piper_worker",
 }
 
 PROVIDER_LABELS = {
@@ -23,7 +24,12 @@ PROVIDER_LABELS = {
     "valtec": "Valtec",
     "f5tts": "F5-TTS",
     "chatterbox": "Chatterbox",
+    "piper": "Piper ONNX",
 }
+
+# Providers that ship a CUDA installer script. Keep in sync with the script maps
+# inside gpu_installer_for_provider().
+GPU_INSTALL_PROVIDERS = frozenset({"omnivoice", "vieneu", "qwen", "f5tts", "chatterbox"})
 
 _WINDOWS_BASE_INSTALLERS = {
     "omnivoice": "install_tts_deps.bat",
@@ -32,6 +38,7 @@ _WINDOWS_BASE_INSTALLERS = {
     "valtec": "install_valtec_worker.bat",
     "f5tts": "install_f5_worker.bat",
     "chatterbox": "install_chatterbox_worker.bat",
+    "piper": "install_piper_worker.bat",
 }
 
 _LINUX_BASE_INSTALLERS = {
@@ -134,7 +141,22 @@ def install_base_runtime(provider: str) -> str:
     raise RuntimeError(f"Provider {provider} chưa có tác vụ cài môi trường tự động.")
 
 
+def provider_supports_gpu_install(provider: str) -> bool:
+    """Cheap check used to enable/disable the 'Cài GPU/CUDA' action."""
+    return provider in GPU_INSTALL_PROVIDERS
+
+
+def provider_supports_base_install(provider: str) -> bool:
+    """True when 'Cài worker/môi trường' has something to run for this provider."""
+    installers = _WINDOWS_BASE_INSTALLERS if os.name == "nt" else _LINUX_BASE_INSTALLERS
+    return provider in installers or worker_for_provider(provider) is not None
+
+
 def gpu_installer_for_provider(provider: str) -> Path | None:
+    # Checked first so callers never pay for the Blackwell probe on providers
+    # (Piper, Valtec) that have no GPU installer at all.
+    if not provider_supports_gpu_install(provider):
+        return None
     if os.name == "nt":
         blackwell = _host_gpu_is_blackwell()
         script = {

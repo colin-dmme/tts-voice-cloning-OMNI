@@ -14,6 +14,7 @@ SETTINGS_FILE = "settings.json"
 PORTABLE_TKINTER_KEYS = {
     "language",
     "model_id",
+    "voice_source_mode",
     "voice_profile_id",
     "speaker_id",
     "speed",
@@ -23,7 +24,12 @@ PORTABLE_TKINTER_KEYS = {
     "codec_repo",
     "temperature",
     "top_k",
+    "punctuation_pause_enabled",
     "sentence_pause_ms",
+    "comma_pause_ms",
+    "clause_pause_ms",
+    "ellipsis_pause_ms",
+    "chunk_pause_ms",
     "paragraph_pause_ms",
     "srt_file_padding_ms",
     "max_chunk_chars",
@@ -47,7 +53,7 @@ def export_user_state(project_root: Path | None = None) -> dict[str, Any]:
 
     copied_profiles = _export_profiles(src_profiles, dst_profiles, root)
     copied_samples = _copy_files(src_samples, dst_samples, overwrite=True)
-    settings = _export_settings(root / "config" / "ui_tkinter.json", state_root / SETTINGS_FILE)
+    settings = _export_settings(root / "config", state_root / SETTINGS_FILE)
 
     return {
         "profiles": copied_profiles,
@@ -75,7 +81,7 @@ def restore_user_state(
     restored_profiles = _restore_profiles(src_profiles, dst_profiles, root, overwrite=overwrite)
     restored_settings = _restore_settings(
         state_root / SETTINGS_FILE,
-        root / "config" / "ui_tkinter.json",
+        root / "config",
         overwrite=overwrite_settings,
     )
 
@@ -136,32 +142,51 @@ def _restore_profiles(source_dir: Path, target_dir: Path, project_root: Path, *,
     return count
 
 
-def _export_settings(source_path: Path, target_path: Path) -> dict[str, Any]:
-    if not source_path.exists():
-        return {}
-    data = _read_json(source_path)
-    shared = {key: data[key] for key in PORTABLE_TKINTER_KEYS if key in data}
-    payload = {
-        "schema_version": 1,
-        "ui_tkinter": shared,
-    }
-    _write_json(target_path, payload)
-    return shared
+# UI settings files that share the same portable generation keys.
+_PORTABLE_UI_FILES = {
+    "ui_tkinter": "ui_tkinter.json",
+    "ui_qt": "ui_qt.json",
+}
 
 
-def _restore_settings(source_path: Path, target_path: Path, *, overwrite: bool) -> bool:
+def _export_settings(config_dir: Path, target_path: Path) -> dict[str, Any]:
+    payload: dict[str, Any] = {"schema_version": 1}
+    exported: dict[str, Any] = {}
+    for key, filename in _PORTABLE_UI_FILES.items():
+        source_path = config_dir / filename
+        if not source_path.exists():
+            continue
+        data = _read_json(source_path)
+        shared = {name: data[name] for name in PORTABLE_TKINTER_KEYS if name in data}
+        if shared:
+            payload[key] = shared
+            exported.update(shared)
+    if len(payload) > 1:
+        _write_json(target_path, payload)
+    return exported
+
+
+def _restore_settings(source_path: Path, config_dir: Path, *, overwrite: bool) -> bool:
     if not source_path.exists():
         return False
     payload = _read_json(source_path)
-    shared = payload.get("ui_tkinter", payload)
-    if not isinstance(shared, dict):
-        return False
-    portable = {key: shared[key] for key in PORTABLE_TKINTER_KEYS if key in shared}
-    if not portable:
-        return False
+    restored_any = False
+    for key, filename in _PORTABLE_UI_FILES.items():
+        # Legacy payloads had the tkinter block at the top level.
+        shared = payload.get(key, payload if key == "ui_tkinter" else None)
+        if not isinstance(shared, dict):
+            continue
+        portable = {name: shared[name] for name in PORTABLE_TKINTER_KEYS if name in shared}
+        if not portable:
+            continue
+        if _restore_settings_file(config_dir / filename, portable, overwrite=overwrite):
+            restored_any = True
+    return restored_any
+
+
+def _restore_settings_file(target_path: Path, portable: dict[str, Any], *, overwrite: bool) -> bool:
     if target_path.exists() and not overwrite:
         return False
-
     current: dict[str, Any] = {}
     if target_path.exists():
         try:

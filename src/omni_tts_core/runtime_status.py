@@ -38,6 +38,22 @@ class RuntimeStatusService:
             return _worker_status(spec, installed, "f5_worker", self.detector)
         if spec.provider == "chatterbox":
             return _worker_status(spec, installed, "chatterbox_worker", self.detector)
+        if spec.provider == "piper":
+            worker_ready = is_worker_installed("piper_worker")
+            return RuntimeStatus(
+                model_id=spec.model_id,
+                display_name=spec.display_name,
+                provider=spec.provider,
+                installed=installed,
+                gpu_available=False,
+                actual_device="cpu" if worker_ready else "not-installed",
+                device_name="CPU / ONNX Runtime" if worker_ready else "",
+                message=(
+                    "Piper worker đã cài; tối ưu cho sinh nhanh trên CPU."
+                    if worker_ready
+                    else "Piper worker chưa cài. Bấm Cài worker/môi trường."
+                ),
+            )
         return RuntimeStatus(
             model_id=spec.model_id,
             display_name=spec.display_name,
@@ -157,6 +173,8 @@ def _cuda_runtime_warning(spec: ModelSpec, info) -> str:
 def _auto_cuda_ready(spec: ModelSpec, info) -> bool:
     if spec.provider != "vieneu" or not info.cuda_available:
         return False
+    if bool(spec.runtime.get("prefer_cpu_auto")):
+        return False
     mode = str(spec.runtime.get("vieneu_mode") or "").lower()
     if mode == "turbo":
         return bool(info.onnxruntime_cuda)
@@ -172,4 +190,5 @@ def _provider_label(provider: str) -> str:
         "valtec": "Valtec",
         "f5tts": "F5-TTS",
         "chatterbox": "Chatterbox",
+        "piper": "Piper ONNX",
     }.get(provider, provider)

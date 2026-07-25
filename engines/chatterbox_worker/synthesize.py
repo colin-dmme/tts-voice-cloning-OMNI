@@ -32,10 +32,23 @@ def _run_batch(payload: dict) -> None:
     for index, chunk in enumerate(payload["chunks"]):
         output_path = Path(chunk["output_path"])
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        if _valid_checkpoint(output_path):
+            continue
         chunk_payload = dict(payload)
         if seed is not None:
             chunk_payload["seed"] = int(seed) + index
         _infer_to_file(model, chunk_payload, chunk["text"], output_path, conditionals_ready=True)
+
+
+def _valid_checkpoint(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        import soundfile as sf
+
+        return sf.info(str(path)).frames > 0
+    except Exception:
+        return False
 
 
 def _load_model(payload: dict):

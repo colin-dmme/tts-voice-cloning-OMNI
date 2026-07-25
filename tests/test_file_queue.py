@@ -11,6 +11,7 @@ from omni_tts_core.file_queue import (
     settings_fingerprint,
 )
 from omni_tts_core.progress import ProgressEvent
+from omni_tts_shared.errors import GpuSafetyError
 from omni_tts_shared.schemas import GenerateSpeechResult
 from omni_tts_ui_tkinter.app import _result_output_manifest
 from omni_tts_ui_tkinter.controller import TkinterController
@@ -37,6 +38,8 @@ class _FakeService:
         progress_callback=None,
         cancel_event=None,
     ) -> GenerateSpeechResult:
+        if "gpu-fatal" in source_path.name:
+            raise GpuSafetyError("CUDA device lost")
         if "bad" in source_path.name:
             raise RuntimeError("worker failed")
         if progress_callback is not None:
@@ -228,6 +231,28 @@ class TestFileQueueStore(unittest.TestCase):
 
 
 class TestFileBatchController(unittest.TestCase):
+    def test_fatal_gpu_error_stops_queue_and_leaves_later_files_unstarted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = root / "good-one.txt"
+            fatal = root / "gpu-fatal.txt"
+            later = root / "good-two.txt"
+            for path in (first, fatal, later):
+                path.write_text(path.stem, encoding="utf-8")
+            controller = TkinterController(service=_FakeService(root))
+            controller.validate_license_for_model = lambda _model_id: None
+            events = []
+
+            outcomes = controller.generate_files(
+                [("one", first), ("fatal", fatal), ("later", later)],
+                UiSettings(),
+                file_event_callback=events.append,
+            )
+
+            self.assertEqual([item.item_id for item in outcomes], ["one", "fatal"])
+            self.assertEqual(outcomes[-1].status, FileQueueStatus.FAILED)
+            self.assertNotIn("later", [event.item_id for event in events])
+
     def test_batch_continues_after_one_file_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

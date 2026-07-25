@@ -50,6 +50,7 @@
 | `vieneu` | `VieneuSubprocessEngine` | Subprocess | `engines/vieneu_worker/.venv` |
 | `qwen` | `QwenSubprocessEngine` | Subprocess | `engines/qwen_worker/.venv` |
 | `valtec` | `ValtecSubprocessEngine` | Subprocess | `engines/valtec_worker/.venv` |
+| `piper` | `PiperSubprocessEngine` | Persistent subprocess | `engines/piper_worker/.venv` |
 
 **Tại sao subprocess?** Mỗi engine có dependency conflicts với nhau (torch version, llama-cpp, etc.). Subprocess với `.venv` riêng cách ly hoàn toàn.
 
@@ -151,6 +152,7 @@ GenerateSpeechRequest (Pydantic)
 | `install_vieneu_worker_cuda.bat` | VieNeu GPU/CUDA worker |
 | `install_qwen_worker.bat` | Qwen worker |
 | `install_valtec_worker.bat` | Valtec worker |
+| `install_piper_worker.bat` | Piper ONNX CPU worker |
 
 ---
 

@@ -22,5 +22,9 @@ class GenerationError(OmniTtsError):
     """Raised when TTS generation fails."""
 
 
+class GpuSafetyError(GenerationError):
+    """Raised when GPU safety protection stops generation or CUDA becomes unusable."""
+
+
 class GenerationCancelled(OmniTtsError):
     """Raised when the user cancels an active generation job."""

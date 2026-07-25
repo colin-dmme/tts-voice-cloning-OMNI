@@ -35,6 +35,7 @@ outputs/
 logs/
 voices/
 config/ui_tkinter.json
+config/ui_qt.json
 config/storage.local.yaml
 config/file_queue.sqlite3
 config/file_queue.sqlite3-shm

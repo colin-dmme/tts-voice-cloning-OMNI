@@ -1,6 +1,225 @@
 models_root: "models"
 
 tts_models:
+  piper_ngoc_huyen:
+    display_name: "Piper Ngọc Huyền v1 (CPU siêu nhanh)"
+    provider: "piper"
+    model_type: "tts"
+    local_path: "models/piper/sannht/ngoc-huyen"
+    hf_repo: "sannht/vi_voice"
+    language_priority: "vi"
+    required: false
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Ngọc Huyền v1"
+      fixed_tooltip: "Bản ngochuyen.onnx phổ biến từ sannht/vi_voice; không dùng Profile giọng."
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: false
+      supports_voice_presets: false
+      supports_reference_text: false
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      model_file: "tts-model/ngochuyen.onnx"
+      config_file: "tts-model/ngochuyen.onnx.json"
+      download_allow_patterns:
+        - "tts-model/ngochuyen.onnx"
+        - "tts-model/ngochuyen.onnx.json"
+    notes: "Giọng cố định Piper 22.05 kHz, ưu tiên tốc độ CPU và batch nội dung dài."
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Ngọc Huyền v1 ONNX"
+      variant_badge: "NH v1"
+      source_repo: "sannht/vi_voice"
+      risk: "test"
+      description: "Bản Ngọc Huyền v1 để A/B trực tiếp với Ngọc Huyền NEW."
+      highlight: "Tốc độ CPU rất nhanh"
+      quality_score: 3
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+      recommend_for: "Sinh audio dài thật nhanh, máy không có GPU, đối chiếu với VieNeu chất lượng cao"
+      install_note: "Cài Piper worker một lần, sau đó tải riêng package giọng."
+
+  piper_ngoc_ngan_3701:
+    display_name: "Piper Ngọc Ngạn 3701 (CPU siêu nhanh)"
+    provider: "piper"
+    model_type: "tts"
+    local_path: "models/piper/sannht/ngoc-ngan-3701"
+    hf_repo: "sannht/vi_voice"
+    language_priority: "vi"
+    required: false
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Ngọc Ngạn 3701"
+      fixed_tooltip: "Tên do kho community công bố; nên nghe thử A/B trước khi dùng dài."
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: false
+      supports_voice_presets: false
+      supports_reference_text: false
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      model_file: "tts-model/ngocngan3701.onnx"
+      config_file: "tts-model/ngocngan3701.onnx.json"
+      download_allow_patterns:
+        - "tts-model/ngocngan3701.onnx"
+        - "tts-model/ngocngan3701.onnx.json"
+    notes: "Giọng community có id ngocngan3701; tên model không phải xác nhận danh tính người thật."
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Ngọc Ngạn 3701 ONNX"
+      variant_badge: "Fixed Voice"
+      source_repo: "sannht/vi_voice"
+      risk: "test"
+      description: "Giọng cố định Piper từ kho community; cần nghe A/B để xác nhận chất giọng phù hợp."
+      highlight: "Tốc độ CPU rất nhanh"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+      recommend_for: "Nghiên cứu và A/B test giọng kể chuyện cố định"
+      install_note: "Cài Piper worker một lần, sau đó tải riêng package giọng."
+
+  piper_ban_mai:
+    display_name: "Piper Ban Mai (CPU siêu nhanh)"
+    provider: "piper"
+    model_type: "tts"
+    local_path: "models/piper/sannht/ban-mai"
+    hf_repo: "sannht/vi_voice"
+    language_priority: "vi"
+    required: false
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Ban Mai"
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: false
+      supports_voice_presets: false
+      supports_reference_text: false
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      model_file: "tts-model/banmai.onnx"
+      config_file: "tts-model/banmai.onnx.json"
+      download_allow_patterns:
+        - "tts-model/banmai.onnx"
+        - "tts-model/banmai.onnx.json"
+    notes: "Giọng nữ cố định Piper 22.05 kHz từ kho community."
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Ban Mai ONNX"
+      variant_badge: "Fixed Voice"
+      source_repo: "sannht/vi_voice"
+      risk: "test"
+      description: "Giọng nữ cố định cho đường sinh audio nhanh trên CPU."
+      highlight: "Giọng nữ CPU nhanh"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+      recommend_for: "A/B test narration nữ tốc độ cao"
+      install_note: "Cài Piper worker một lần, sau đó tải riêng package giọng."
+
+  vieneu_v3_turbo:
+    display_name: "VieNeu TTS v3 Turbo 48 kHz"
+    provider: "vieneu"
+    model_type: "tts"
+    local_path: "engines/vieneu_worker/.venv"
+    hf_repo: "pnnbao-ump/VieNeu-TTS-v3-Turbo"
+    language_priority: "vi-en"
+    required: false
+    voice_input:
+      modes: ["fixed", "profile"]
+      default_mode: "fixed"
+      fixed_label: "Giọng dựng sẵn VieNeu v3"
+      fixed_tooltip: "10 giọng 48 kHz tích hợp sẵn, ổn định và không cần audio mẫu."
+      profile_label: "Clone từ Profile (3-5 giây)"
+      profile_tooltip: "Chỉ khi chọn chế độ này app mới đọc audio mẫu trong Profile."
+    capabilities:
+      supported_languages: ["auto", "vi", "en"]
+      supports_voice_profile: true
+      supports_reference_text: false
+      supports_voice_presets: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    runtime:
+      vieneu_mode: "v3turbo"
+      backbone_repo: "pnnbao-ump/VieNeu-TTS-v3-Turbo"
+      moss_tokenizer: "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano"
+      backend: "auto"
+      device: "cpu"
+      prefer_cpu_auto: true
+      precision: "int8"
+      model_subfolder: "update"
+      threads: 8
+      max_batch_size: 16
+      temperature: 0.8
+      top_k: 25
+      download_allow_patterns:
+        - "update/*"
+        - "onnx_int8/*"
+        - "config.json"
+        - "tokenizer.json"
+        - "tokenizer_config.json"
+        - "special_tokens_map.json"
+        - "denoiser.onnx"
+        - "speaker_encoder.onnx"
+    default_voice_preset: "Phạm Tuyên"
+    voice_presets:
+      "Minh Đức": "Minh Đức - Nam Bắc, tin tức"
+      "Phạm Tuyên": "Phạm Tuyên - Nam Bắc, tự nhiên (mặc định)"
+      "Thái Sơn": "Thái Sơn - Nam miền Nam, kể chuyện"
+      "Xuân Vĩnh": "Xuân Vĩnh - Nam miền Nam, tự nhiên"
+      "Thanh Bình": "Thanh Bình - Nam Bắc, kể chuyện"
+      "Trúc Ly": "Trúc Ly - Nữ Bắc, tự nhiên"
+      "Ngọc Linh": "Ngọc Linh - Nữ Bắc, kể chuyện"
+      "Đoan Trang": "Đoan Trang - Nữ Bắc, tự nhiên"
+      "Mai Anh": "Mai Anh - Nữ Bắc, tin tức"
+      "Thục Đoan": "Thục Đoan - Nữ miền Nam, kể chuyện"
+      "Minh Triết": "Minh Triết - Nam miền Nam, tin tức"
+      "Thùy Dung": "Thùy Dung - Nữ miền Nam, tin tức"
+      "Quang Sơn": "Quang Sơn - Nam miền Trung, tự nhiên"
+      "Ngọc Trân": "Ngọc Trân - Nữ miền Trung, tự nhiên"
+    notes: "VieNeu v3 Turbo 0.1B, 48 kHz; ONNX CPU hoặc PyTorch GPU tự động, batch tối đa 16 trong app."
+    ref_audio_hints:
+      min_seconds: 3.0
+      max_seconds: 8.0
+      optimal_min_seconds: 3.0
+      optimal_max_seconds: 5.0
+      needs_transcript: false
+    catalog_info:
+      category: "official-gpu"
+      origin: "official"
+      family: "VieNeu"
+      variant: "v3 Turbo 48 kHz"
+      variant_badge: "v3 48k"
+      source_repo: "pnnbao-ump/VieNeu-TTS-v3-Turbo"
+      risk: "test"
+      description: "Model 0.1B 48 kHz có 10 giọng dựng sẵn, clone tức thời và batch generation."
+      highlight: "Ưu tiên chất lượng/tốc độ cân bằng"
+      quality_score: 5
+      speed_score: 5
+      vram_mb: 5000
+      ram_mb: 6000
+      recommend_for: "Narration chất lượng cao, podcast nhiều chunk, A/B với Piper CPU"
+      install_note: "Cài/cập nhật VieNeu worker >=3.2.3 rồi tải model."
+
   omnivoice_vietnamese:
     display_name: "OmniVoice Vietnamese (splendor1811)"
     provider: "omnivoice"
@@ -281,6 +500,21 @@ tts_models:
       chatterbox_top_k: 1000
       chatterbox_repetition_penalty: 1.2
       chatterbox_norm_loudness: true
+      gpu_safety_enabled: true
+      gpu_start_temperature_c: 75
+      gpu_abort_temperature_c: 82
+      gpu_abort_temperature_sustain_seconds: 10
+      gpu_emergency_temperature_c: 90
+      gpu_cooldown_initial_wait_seconds: 10
+      gpu_cooldown_max_wait_seconds: 300
+      gpu_resume_temperature_c: 72
+      gpu_minimum_free_vram_mb: 6000
+      gpu_runtime_minimum_free_vram_mb: 700
+      gpu_maximum_utilization_percent: 20
+      gpu_maximum_encoder_utilization_percent: 5
+      gpu_poll_seconds: 2.0
+      gpu_wait_timeout_seconds: 7200
+      gpu_safe_samples_required: 3
       download_allow_patterns:
         - "added_tokens.json"
         - "conds.pt"

@@ -10,6 +10,7 @@ dependencies = [
     "huggingface-hub>=0.24.0",
     "numpy>=1.26.0",
     "pydantic>=2.7.0",
+    "psutil>=5.9.0",
     "pyyaml>=6.0.1",
     "soundfile>=0.12.1",
     "tkinterdnd2>=0.4.2",
@@ -21,10 +22,14 @@ tts = [
     "torch",
     "torchaudio",
 ]
+qt = [
+    "PySide6>=6.6",
+]
 
 [project.scripts]
 omni-tts-gradio = "omni_tts_ui_gradio.main:main"
 omni-tts-tkinter = "omni_tts_ui_tkinter.main:main"
+omni-tts-qt = "omni_tts_ui_qt.main:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -37,4 +42,5 @@ packages = [
     "src/omni_tts_shared",
     "src/omni_tts_ui_gradio",
     "src/omni_tts_ui_tkinter",
+    "src/omni_tts_ui_qt",
 ]

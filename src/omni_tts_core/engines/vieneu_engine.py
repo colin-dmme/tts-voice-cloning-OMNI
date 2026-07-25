@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import tempfile
+import threading
 import time
+import atexit
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -37,6 +40,9 @@ class VieneuSubprocessEngine(BaseTtsEngine):
         self.worker_dir = project_path("engines/vieneu_worker")
         self.worker_script = self.worker_dir / "synthesize.py"
         self.encoder_script = self.worker_dir / "encode_reference.py"
+        self._process: subprocess.Popen | None = None
+        self._process_lock = threading.Lock()
+        atexit.register(self.close)
 
     def generate(self, request: TtsEngineRequest) -> TtsEngineResult:
         runtime = self._worker_runtime()
@@ -53,19 +59,28 @@ class VieneuSubprocessEngine(BaseTtsEngine):
                 ),
                 encoding="utf-8",
             )
-            command = [str(runtime.python_path), str(self.worker_script), "--request", str(payload_path)]
             env = _worker_env(runtime.python_paths)
             try:
-                completed = run_worker_process(
-                    command,
-                    cwd=str(self.worker_dir),
-                    env=env,
-                    timeout=900,
-                    cancel_event=request.cancel_event,
-                )
+                if self._uses_persistent_worker():
+                    self._run_persistent_worker(
+                        runtime,
+                        self._payload(request, output_path, scratch_dir=temp_path),
+                        timeout=900,
+                        cancel_event=request.cancel_event,
+                        env=env,
+                    )
+                    completed = None
+                else:
+                    completed = run_worker_process(
+                        [str(runtime.python_path), str(self.worker_script), "--request", str(payload_path)],
+                        cwd=str(self.worker_dir),
+                        env=env,
+                        timeout=900,
+                        cancel_event=request.cancel_event,
+                    )
             except subprocess.TimeoutExpired as exc:
                 raise GenerationError("VieNeu xử lý quá lâu và đã bị dừng.") from exc
-            if completed.returncode != 0:
+            if completed is not None and completed.returncode != 0:
                 if completed.returncode == -1073741819:
                     raise GenerationError(_native_crash_message(completed.stderr.strip() or completed.stdout.strip()))
                 message = _clean_worker_error(completed.stderr.strip() or completed.stdout.strip())
@@ -123,19 +138,29 @@ class VieneuSubprocessEngine(BaseTtsEngine):
                 _report_ready_chunks(chunks, reported_chunks, progress_callback, chunk_callback)
 
             try:
-                completed = run_worker_process(
-                    command,
-                    cwd=str(self.worker_dir),
-                    env=env,
-                    timeout=900 + 300 * len(requests),
-                    cancel_event=cancel_event,
-                    tick_callback=report_ready_chunks,
-                )
+                if self._uses_persistent_worker():
+                    self._run_persistent_worker(
+                        runtime,
+                        batch_payload,
+                        timeout=900 + 300 * len(requests),
+                        cancel_event=cancel_event,
+                        env=env,
+                    )
+                    completed = None
+                else:
+                    completed = run_worker_process(
+                        command,
+                        cwd=str(self.worker_dir),
+                        env=env,
+                        timeout=900 + 300 * len(requests),
+                        cancel_event=cancel_event,
+                        tick_callback=report_ready_chunks,
+                    )
             except subprocess.TimeoutExpired as exc:
                 raise GenerationError("VieNeu batch xử lý quá lâu và đã bị dừng.") from exc
             report_ready_chunks()
 
-            if completed.returncode != 0:
+            if completed is not None and completed.returncode != 0:
                 if completed.returncode == -1073741819:
                     raise GenerationError(_native_crash_message(completed.stderr.strip() or completed.stdout.strip()))
                 message = _clean_worker_error(completed.stderr.strip() or completed.stdout.strip())
@@ -152,6 +177,87 @@ class VieneuSubprocessEngine(BaseTtsEngine):
                 audio, sample_rate = sf.read(str(out), dtype="float32")
                 results.append(TtsEngineResult(audio=audio, sample_rate=int(sample_rate)))
             return results
+
+    def close(self) -> None:
+        process = self._process
+        self._process = None
+        if process is None or process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except Exception:
+            process.kill()
+
+    def _uses_persistent_worker(self) -> bool:
+        return str(self.spec.runtime.get("vieneu_mode") or "") == "v3turbo"
+
+    def _run_persistent_worker(
+        self,
+        runtime: "WorkerRuntime",
+        payload: dict,
+        *,
+        timeout: float,
+        cancel_event,
+        env: dict,
+    ) -> None:
+        with self._process_lock:
+            process = self._ensure_process(runtime, env)
+            assert process.stdin is not None
+            assert process.stdout is not None
+            process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            process.stdin.flush()
+            response_queue: queue.Queue[str] = queue.Queue(maxsize=1)
+            threading.Thread(
+                target=lambda: response_queue.put(process.stdout.readline()),
+                daemon=True,
+            ).start()
+            deadline = time.monotonic() + timeout
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    self.close()
+                    check_cancel(cancel_event)
+                if time.monotonic() >= deadline:
+                    self.close()
+                    raise GenerationError("VieNeu v3 xử lý quá lâu và đã bị dừng.")
+                try:
+                    line = response_queue.get(timeout=0.1)
+                    break
+                except queue.Empty:
+                    if process.poll() is not None:
+                        stderr = process.stderr.read() if process.stderr is not None else ""
+                        self._process = None
+                        raise GenerationError(
+                            f"VieNeu v3 worker đã thoát: {_clean_worker_error(stderr)}"
+                        )
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError as exc:
+                self.close()
+                raise GenerationError(f"VieNeu v3 worker trả dữ liệu không hợp lệ: {line}") from exc
+            if not response.get("ok"):
+                raise GenerationError(
+                    f"VieNeu v3 không sinh được audio: "
+                    f"{response.get('error') or 'Không rõ lỗi.'}"
+                )
+
+    def _ensure_process(self, runtime: "WorkerRuntime", env: dict) -> subprocess.Popen:
+        if self._process is not None and self._process.poll() is None:
+            return self._process
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        self._process = subprocess.Popen(
+            [str(runtime.python_path), str(self.worker_script), "--serve"],
+            cwd=str(self.worker_dir),
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+            creationflags=creationflags,
+        )
+        return self._process
 
     def _worker_runtime(self) -> "WorkerRuntime":
         portable_python = PROJECT_ROOT / "runtime" / "python" / "python.exe"
@@ -333,6 +439,15 @@ def _runtime_payload(runtime: dict) -> dict:
         "lora_repo",
         "lora_filename",
         "base_repo",
+        # v3 Turbo
+        "model_subfolder",
+        "moss_tokenizer",
+        "backend",
+        "precision",
+        "onnx_subfolder",
+        "threads",
+        "max_batch_size",
+        "style",
     }
     return {key: value for key, value in runtime.items() if key in allowed and value not in ("", None)}
 

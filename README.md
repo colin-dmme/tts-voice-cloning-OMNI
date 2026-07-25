@@ -2,6 +2,12 @@
 
 App TTS local ưu tiên tiếng Việt, có lõi tách khỏi giao diện để sau này đổi Gradio sang CustomTkinter, PyQt6 hoặc giao diện khác mà không phải viết lại logic model.
 
+Tkinter và PySide6 phân biệt rõ **Giọng cố định** và **Clone từ Profile** theo
+contract của từng model. Catalog hiện có 33 model Piper tiếng Việt, tải/gỡ từng
+package; VIVOS x-low còn cho chọn đủ 65 speaker. VieNeu v3 Turbo cung cấp preset
+48 kHz và clone Profile trong hai chế độ tách biệt. Xem
+[quản lý giọng cố định](docs/fixed-voice-packages.md).
+
 ## Mục tiêu thiết kế
 
 - Model nằm trong thư mục dự án tại `models/`.
@@ -76,6 +82,97 @@ Bản UI và quản lý model chạy với nhóm thư viện nhẹ. Khi muốn d
 
 Các file `install_*.bat` vẫn tồn tại để core chạy đúng tác vụ trên Windows, nhưng không cần bấm trực tiếp khi dùng app. VieNeu, Qwen, Valtec, F5-TTS và Chatterbox chạy trong worker riêng dưới `engines/`, tách khỏi môi trường chính để tránh xung đột dependency với OmniVoice.
 
+## Giao diện mới Colin TTS Studio (PySide6)
+
+Giao diện studio mới nằm song song trong `src/omni_tts_ui_qt/`, **không dùng chung
+code với Tkinter** nên có thể xóa `src/omni_tts_ui_tkinter/` sau này mà không ảnh
+hưởng. Chạy bằng file 1-click ở gốc repo:
+
+```bat
+run_qt.bat
+```
+
+File này tự `uv sync --inexact --extra qt` (cài PySide6) rồi mở `omni-tts-qt`.
+
+Điểm khác so với Tkinter:
+
+- Một cửa sổ studio: rail trái chuyển trang **Studio / Model / Giọng / Bản quyền /
+  Liên hệ**; giữa là danh sách giọng + bảng hàng đợi + tab văn bản; phải là panel
+  thiết lập gập/mở theo từng model (dựa trên `generation_form_descriptor` và
+  `provider_registry`, không hardcode logic vào GUI).
+- **Chọn model theo nhà cung cấp**: catalog có hơn 40 model nên cả hai giao diện
+  (Qt và Tkinter) đều có combobox `Nhà cung cấp` kèm số lượng
+  (`VieNeu (19)`, `Piper ONNX (33)`…) đứng trước combobox `Model TTS`; chọn nhà cung
+  cấp trước rồi mới chọn model. Danh sách mở sẵn ở nhà cung cấp của model đang lưu.
+  Tab **Quản lý model** dùng đúng cơ chế đó: có bộ lọc `Nhà cung cấp` + ô tìm kiếm,
+  bảng luôn **nhóm theo nhà cung cấp** (thứ tự khai báo trong provider registry) rồi
+  xếp theo tên, cột Provider hiện nhãn thân thiện (`Piper ONNX` thay cho `piper`).
+  Logic nhóm nằm ở `omni_tts_core/ui_presenters/model_groups.py` để hai giao diện
+  dùng chung.
+- **Tìm kiếm không dấu**: mọi ô tìm kiếm (model, hàng đợi file, danh sách giọng) đi
+  qua `omni_tts_core/ui_presenters/search.py`, nên gõ `ngoc` vẫn ra `Piper Ngọc
+  Huyền` và `dat` vẫn ra `Đạt Phi`.
+- **Chọn nhiều model + nút tự khoá đúng ngữ cảnh**: bảng model cho chọn nhiều dòng
+  (Ctrl/Shift click) ở cả hai giao diện. `omni_tts_core/ui_presenters/model_actions.py`
+  quyết định nút nào bật/tắt và **chạy trên đúng những model nào**:
+  - `Cài GPU/CUDA` tắt với Piper/Valtec vì không có script CUDA (trước đây bấm vào
+    là lỗi `ConfigError`).
+  - `Gỡ model` bỏ qua model bắt buộc và model chưa tải.
+  - `Tải model` chỉ chạy cho các model còn thiếu trong nhóm đang chọn.
+  - Tác vụ cấp provider (`Cài worker`, `Cài GPU/CUDA`) chỉ chạy **một lần cho mỗi
+    nhà cung cấp** — chọn 33 giọng Piper vẫn chỉ cài worker Piper một lần.
+  - `Mở nơi lưu` chỉ bật khi chọn đúng một model.
+  Nút bị tắt luôn kèm tooltip nói rõ lý do.
+- Thanh phần cứng trên cùng (GPU/VRAM/CPU/RAM) + biểu đồ nhiệt độ có đường cảnh báo
+  đứt nét, học theo cách hiển thị của S3Voice, và **theo dõi toàn cục** chứ không gắn
+  vào một model.
+- **Thông số bám theo model, không có nút "ảo"**: mỗi model khai báo khả năng trong
+  `capabilities` của `config/models.yaml`, còn runtime cho biết CUDA có thật hay
+  không. `omni_tts_core/ui_presenters/control_policy.py` gộp hai nguồn đó thành một
+  policy dùng chung cho cả hai giao diện:
+  - Ngôn ngữ chỉ liệt kê thứ model hỗ trợ (Piper chỉ `vi`, Chatterbox chỉ `en`).
+  - Thiết bị chỉ hiện những gì chạy được — model không có CUDA thì mất luôn mục
+    `GPU CUDA` (trước đây chọn vào sẽ lỗi `ConfigError` lúc chạy).
+  - `Tốc độ đọc` / `Pitch shift` bị ẩn hoặc khoá kèm lý do khi model không hỗ trợ,
+    và request luôn gửi giá trị trung tính (1.00 / 0.0) thay vì giá trị rác.
+  - Thông số riêng của provider gom vào **một** section động
+    `Tinh chỉnh riêng · <Provider>`, chỉ hiện đúng những dòng model hỗ trợ (ví dụ
+    VieNeu v3 Turbo có temperature/top-k nhưng không có codec và cảm xúc). Tắt
+    `ACTIVE` ở section này sẽ gửi mặc định của model thay vì giá trị đang nhập.
+    Provider không có thông số riêng (OmniVoice, Piper, Qwen, Valtec) thì section
+    biến mất và app nói rõ lý do thay vì để trống.
+  - Giá trị đang tinh chỉnh **chỉ bị nạp lại mặc định khi đổi model**; đổi
+    `Giọng cố định ↔ Clone từ Profile` không còn xóa seed/temperature đang nhập,
+    và các giá trị này được nhớ lại cho lần mở app sau.
+  - `Ký tự tối đa mỗi đoạn nhỏ` là **chia ở tầng app, không phải model tự cắt**:
+    ưu tiên cắt hết câu → dấu phẩy → theo từ, không bao giờ cắt giữa từ (xem
+    `omni_tts_core/text/splitter.py`). Tooltip giải thích ngay trên cả hai giao diện.
+- **Bảo vệ GPU toàn cục**: mọi model chạy CUDA đều được chặn/chờ trước khi chạy khi
+  GPU nóng hoặc thiếu VRAM (không chỉ Chatterbox). Chatterbox vẫn tự bảo vệ trong
+  worker như cũ nên được bỏ qua ở lớp gate ngoài để tránh chờ đôi. Vì ngưỡng dùng
+  chung nên **cả hai giao diện đặt phần này thành mục riêng** (Tkinter: tab
+  `Bảo vệ GPU`; Qt: section `Bảo vệ GPU (toàn cục)`), không còn nằm trong nhóm
+  Chatterbox, và chỉ khoá lại khi model đang chạy CPU. Mỗi model hiển thị một dòng
+  cho biết ai đang thực thi bảo vệ.
+
+Toàn bộ logic dùng chung nằm trong core (`omni_tts_core.app_controller`,
+`omni_tts_core.ui_presenters`, `omni_tts_core.hardware_monitor`,
+`omni_tts_core.safety_coordinator`); GUI chỉ hiển thị.
+
+Hai thứ dưới đây được rút hẳn vào core để hai giao diện không thể lệch nhau:
+
+- `ui_presenters/field_limits.py`: dải min/max/bước nhảy của mọi ô số **đọc trực
+  tiếp từ `GenerateSpeechRequest`**. GUI không tự đặt dải nữa, nên không còn nhập
+  được giá trị mà core sẽ từ chối lúc chạy (ví dụ Top-K 5000 hay 100 °C).
+- `ui_presenters/tooltips.py`: một bộ tooltip tiếng Việt duy nhất cho mọi thiết
+  lập, kể cả nhóm Bảo vệ GPU và nhóm Đầu ra. Thiết lập được hỗ trợ có tooltip
+  hướng dẫn; thiết lập bị khoá hiện đúng lý do model không dùng được.
+
+Thiết lập được nhớ trong
+`config/ui_qt.json` (Tkinter vẫn dùng `config/ui_tkinter.json` riêng). Cả hai giao
+diện dùng chung `config/file_queue.sqlite3`, nên **chỉ mở một giao diện tại một thời
+điểm** để tránh ghi đè hàng đợi.
+
 ## Quy ước model local
 
 Model được khai báo trong `config/models.yaml` và tải về `models/`:
@@ -110,6 +207,16 @@ Khi bật chế độ tách file, `.srt` sẽ xuất mỗi cue/dòng subtitle th
 Profile giọng được lưu trong `voices/profiles/`, còn file audio mẫu được copy vào `voices/samples/`. Các giao diện chỉ chọn `profile_id`; core sẽ tự lấy file giọng mẫu và transcript khi tạo audio.
 
 Cache Hugging Face cũng được trỏ về `.hf_cache/` khi chạy qua các file `.bat`, để dữ liệu không bị rải sang cache hệ thống.
+
+## Bảo vệ GPU
+
+Bảo vệ GPU áp dụng cho **mọi model chạy CUDA**. App kiểm tra `nvidia-smi` trước mỗi lần tạo và trước mỗi file trong hàng đợi, chỉ bắt đầu sau khi GPU an toàn qua nhiều mẫu liên tiếp. Mặc định app sẽ chờ nếu GPU nóng hơn `75°C`, còn dưới `6000 MB` VRAM trống, GPU đang bận trên `20%`, hoặc NVENC đang dùng trên `5%`. Riêng Chatterbox tự bảo vệ ngay trong worker (chờ trước khi chạy và tạm nghỉ giữa chừng) nên được bỏ qua ở lớp gate ngoài để tránh chờ đôi.
+
+Các ngưỡng nằm ở mục riêng của từng giao diện: Tkinter là tab `Bảo vệ GPU`, Qt là section `Bảo vệ GPU (toàn cục)`. Model đang chạy CPU thì phần này bị khóa kèm lý do. Di chuột lên từng tên/ô nhập để xem tooltip về đơn vị, cách dùng và mức khuyến nghị. Giao diện đọc các mốc target/giảm xung/tự tắt từ `nvidia-smi`; với GTX 1080 Ti, mức max NVIDIA công bố là `91°C`. Mốc `82°C` chỉ bắt đầu đếm và mặc định phải nóng liên tục `10 giây` mới chuyển sang cooldown; nếu nhiệt độ hạ dưới ngưỡng thì bộ đếm được xóa. Khi nhiệt độ, VRAM hoặc NVENC vượt ngưỡng runtime, app suspend worker thật sự và kiểm tra lại theo backoff `10s → 20s → 40s → 80s...`. Nếu GPU phục hồi, worker tự resume; mặc định chỉ báo lỗi sau tổng cộng `300 giây`, và thời gian tối đa này chỉnh được từ giao diện. Mốc nguy cấp mặc định `90°C` cũng chỉnh được, nhưng tăng quá vùng giảm xung/tự tắt của card sẽ khiến bảo vệ không kịp can thiệp. Nếu một tiến trình nhẹ luôn giữ VRAM, có thể hạ `VRAM trống trước khi chạy` từ `6000` xuống `5000 MB`; không nên tắt toàn bộ bảo vệ.
+
+Trong lúc sinh giọng, app tiếp tục theo dõi nhiệt độ, NVENC và VRAM. Tác vụ sẽ dừng ở `82°C`, khi một tiến trình encode khác xuất hiện, hoặc khi VRAM trống xuống dưới `700 MB`. Lỗi CUDA toàn cục như `CUFFT_INTERNAL_ERROR`, mất CUDA driver hoặc `torch.cuda` không khả dụng sẽ dừng cả queue; các file chưa chạy vẫn ở trạng thái chờ.
+
+Các chunk Chatterbox hoàn thành được giữ tại `outputs/checkpoints/chatterbox/` và tự động được dùng lại khi chạy đúng nội dung, profile giọng và thiết lập cũ. Chẩn đoán GPU được ghi theo JSON Lines tại `logs/gpu_safety.jsonl`. Thiết lập thủ công được nhớ trong `config/ui_tkinter.json`; giá trị mặc định kỹ thuật nằm ở phần `runtime` của model Chatterbox trong `config/models.yaml`.
 
 ## Đồng bộ máy thuê
 

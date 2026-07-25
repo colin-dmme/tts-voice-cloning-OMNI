@@ -36,8 +36,25 @@ class TtsEngineRequest:
     chatterbox_repetition_penalty: float | None = None
     chatterbox_seed: int | None = None
     chatterbox_norm_loudness: bool = True
+    gpu_safety_enabled: bool = True
+    gpu_start_temperature_c: int | None = None
+    gpu_abort_temperature_c: int | None = None
+    gpu_abort_temperature_sustain_seconds: float | None = None
+    gpu_emergency_temperature_c: int | None = None
+    gpu_cooldown_max_wait_seconds: float | None = None
+    gpu_resume_temperature_c: int | None = None
+    gpu_minimum_free_vram_mb: int | None = None
+    gpu_runtime_minimum_free_vram_mb: int | None = None
+    gpu_maximum_utilization_percent: int | None = None
+    gpu_maximum_encoder_utilization_percent: int | None = None
+    punctuation_pause_enabled: bool = False
+    sentence_pause_ms: int = 0
+    comma_pause_ms: int = 0
+    clause_pause_ms: int = 0
+    ellipsis_pause_ms: int = 0
     cancel_event: Event | None = None
     cached_prompt_path: Path | None = None  # asset dir for engine-level voice cache
+    status_callback: Callable[[str], None] | None = None
 
 
 @dataclass(frozen=True)

@@ -76,6 +76,14 @@ class RuntimeDeviceDetector:
             return _probe_worker(provider, "f5_worker")
         if provider == "chatterbox":
             return _probe_worker(provider, "chatterbox_worker")
+        if provider == "piper":
+            return ProviderDeviceInfo(
+                provider=provider,
+                installed=is_worker_installed("piper_worker"),
+                torch_available=False,
+                cuda_available=False,
+                message="Piper chạy ONNX trên CPU; không cần PyTorch/CUDA.",
+            )
         return ProviderDeviceInfo(provider=provider, installed=False, message="Provider chưa có detector.")
 
 
@@ -112,6 +120,8 @@ class RuntimeDevicePolicy:
         return _vieneu_device_payload(mode or str(spec.runtime.get("vieneu_mode") or ""), "cuda")
 
     def _vieneu_auto_cuda_ready(self, spec: ModelSpec, *, mode: str | None = None) -> bool:
+        if bool(spec.runtime.get("prefer_cpu_auto")):
+            return False
         info = self.detector.info_for_provider(spec.provider)
         if not info.cuda_available:
             return False
@@ -187,7 +197,7 @@ def configured_runtime_device(spec: ModelSpec) -> str:
 
 def _vieneu_device_payload(mode: str, target: RuntimeTarget) -> dict:
     mode = (mode or "").strip().lower()
-    if mode == "turbo":
+    if mode in {"turbo", "v3turbo"}:
         return {"device": target}
     return {
         "backbone_device": target,

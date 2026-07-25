@@ -9,6 +9,7 @@ from omni_tts_core.paths import ensure_dir
 DEFAULT_PREFERENCES = {
     "language": "vi",
     "model_id": "omnivoice_vietnamese",
+    "voice_source_mode": "fixed",
     "voice_profile_id": None,
     "speaker_id": None,
     "output_dir": "",
@@ -34,8 +35,24 @@ DEFAULT_PREFERENCES = {
     "chatterbox_repetition_penalty": None,
     "chatterbox_seed": None,
     "chatterbox_norm_loudness": True,
-    "sentence_pause_ms": 450,
-    "paragraph_pause_ms": 0,
+    "gpu_safety_enabled": True,
+    "gpu_start_temperature_c": 75,
+    "gpu_abort_temperature_c": 82,
+    "gpu_abort_temperature_sustain_seconds": 10.0,
+    "gpu_emergency_temperature_c": 90,
+    "gpu_cooldown_max_wait_seconds": 300.0,
+    "gpu_resume_temperature_c": 72,
+    "gpu_minimum_free_vram_mb": 6000,
+    "gpu_runtime_minimum_free_vram_mb": 700,
+    "gpu_maximum_utilization_percent": 20,
+    "gpu_maximum_encoder_utilization_percent": 5,
+    "punctuation_pause_enabled": True,
+    "sentence_pause_ms": 320,
+    "comma_pause_ms": 90,
+    "clause_pause_ms": 180,
+    "ellipsis_pause_ms": 450,
+    "chunk_pause_ms": 120,
+    "paragraph_pause_ms": 600,
     "srt_file_padding_ms": 0,
     "max_chunk_chars": 220,
     "overwrite": False,
@@ -64,8 +81,14 @@ class TkinterPreferences:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return dict(DEFAULT_PREFERENCES)
+        if "voice_source_mode" not in data:
+            data["voice_source_mode"] = (
+                "profile" if data.get("voice_profile_id") else "fixed"
+            )
         if "paragraph_pause_ms" not in data and "srt_file_padding_ms" in data:
             data["paragraph_pause_ms"] = data["srt_file_padding_ms"]
+        if "chunk_pause_ms" not in data and "sentence_pause_ms" in data:
+            data["chunk_pause_ms"] = data["sentence_pause_ms"]
         merged = dict(DEFAULT_PREFERENCES)
         merged.update(data)
         return merged

@@ -17,8 +17,13 @@ paths:
 generation:
   default_language: "vi"
   default_model_id: "omnivoice_vietnamese"
-  sentence_pause_ms: 450
-  paragraph_pause_ms: 0
+  punctuation_pause_enabled: true
+  sentence_pause_ms: 320
+  comma_pause_ms: 90
+  clause_pause_ms: 180
+  ellipsis_pause_ms: 450
+  chunk_pause_ms: 120
+  paragraph_pause_ms: 600
   srt_file_padding_ms: 0
   output_audio_format: "wav"
   mp3_bitrate_kbps: 192

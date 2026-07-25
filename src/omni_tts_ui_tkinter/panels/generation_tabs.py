@@ -3,6 +3,13 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+from omni_tts_core.ui_presenters import field_limits, model_actions
+from omni_tts_core.ui_presenters.control_policy import (
+    TUNING_CHATTERBOX,
+    TUNING_F5,
+    TUNING_VIENEU,
+)
+from omni_tts_core.ui_presenters.tooltips import tooltip
 from omni_tts_shared.languages import language_choices
 from omni_tts_ui_tkinter.dnd import enable_file_drop
 from omni_tts_ui_tkinter.panels.contact_panel import ContactPanel
@@ -274,12 +281,40 @@ class GenerationTabsMixin:
     def _build_model_tab(self, notebook: ttk.Notebook) -> None:
         tab = ttk.Frame(notebook, padding=10)
         tab.columnconfigure(0, weight=1)
-        tab.rowconfigure(0, weight=1)
-        tab.rowconfigure(2, weight=0)
+        tab.rowconfigure(1, weight=1)
+        tab.rowconfigure(3, weight=0)
         notebook.add(tab, text="Quản lý model")
 
+        # Provider-first classification, same logic as the generation form.
+        filter_row = ttk.Frame(tab)
+        filter_row.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        ttk.Label(filter_row, text="Nhà cung cấp:").pack(side="left")
+        self.model_filter_combo = ttk.Combobox(
+            filter_row,
+            textvariable=self.model_filter_var,
+            values=list(self.model_filter_map.keys()),
+            state="readonly",
+            width=24,
+        )
+        self.model_filter_combo.pack(side="left", padx=(6, 12))
+        self.model_filter_combo.bind("<<ComboboxSelected>>", lambda _event: self.refresh_model_table())
+        attach_tooltip(
+            self.model_filter_combo,
+            "Lọc bảng theo nhà cung cấp. Bảng luôn nhóm theo nhà cung cấp rồi xếp theo tên.",
+        )
+        ttk.Label(filter_row, text="Tìm:").pack(side="left")
+        search_entry = ttk.Entry(filter_row, textvariable=self.model_search_var, width=28)
+        search_entry.pack(side="left", padx=(6, 12))
+        self.model_search_var.trace_add("write", lambda *_: self.refresh_model_table())
+        ttk.Label(filter_row, textvariable=self.model_summary_var, foreground="#555555").pack(
+            side="left"
+        )
+
         columns = ("name", "usage", "provider", "required", "status", "device", "size", "path")
-        self.model_table = ttk.Treeview(tab, columns=columns, show="headings", height=12)
+        # extended: Ctrl/Shift click to act on several models at once.
+        self.model_table = ttk.Treeview(
+            tab, columns=columns, show="headings", height=12, selectmode="extended"
+        )
         headings = {
             "name": "Tên",
             "usage": "Dùng để làm gì",
@@ -303,45 +338,37 @@ class GenerationTabsMixin:
             else:
                 width = 110
             self.model_table.column(column, width=width)
-        self.model_table.grid(row=0, column=0, sticky="nsew")
-        self.model_table.bind("<<TreeviewSelect>>", lambda _event: self.refresh_selected_setup())
+        self.model_table.grid(row=1, column=0, sticky="nsew")
+        self.model_table.bind("<<TreeviewSelect>>", lambda _event: self._on_model_selection())
 
         controls = ttk.Frame(tab)
-        controls.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        ttk.Button(controls, text="Tải model đang chọn", command=self.download_selected_model).pack(
-            side="left"
-        )
-        ttk.Button(
-            controls,
-            text="Tải model bắt buộc còn thiếu",
-            command=self.download_required_models,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Button(
-            controls,
-            text="Gỡ model đang chọn",
-            command=self.remove_selected_model,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Button(
-            controls,
-            text="Cài worker/môi trường",
-            command=self.install_base_for_selected_model,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Button(
-            controls,
-            text="Cài GPU/CUDA",
-            command=self.install_gpu_for_selected_model,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Button(controls, text="Làm mới", command=self.refresh_models).pack(
-            side="left", padx=(8, 0)
-        )
-        ttk.Button(
+        controls.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        button_specs = [
+            (model_actions.DOWNLOAD, "Tải model đang chọn", self.download_selected_model),
+            (model_actions.DOWNLOAD_REQUIRED, "Tải model bắt buộc còn thiếu",
+             self.download_required_models),
+            (model_actions.REMOVE, "Gỡ model đang chọn", self.remove_selected_model),
+            (model_actions.INSTALL_WORKER, "Cài worker/môi trường",
+             self.install_base_for_selected_model),
+            (model_actions.INSTALL_GPU, "Cài GPU/CUDA", self.install_gpu_for_selected_model),
+            (model_actions.OPEN_STORAGE, "Mở nơi lưu", self.open_selected_model_storage),
+            (model_actions.REFRESH, "Làm mới", self.refresh_models),
+        ]
+        for index, (action, label, command) in enumerate(button_specs):
+            button = ttk.Button(controls, text=label, command=command)
+            button.pack(side="left", padx=(0 if index == 0 else 8, 0))
+            self.model_action_buttons[action] = button
+        catalog_button = ttk.Button(
             controls,
             text="Xem catalog model",
             command=self.controller.open_model_catalog,
-        ).pack(side="right")
+        )
+        catalog_button.pack(side="right")
+        self.model_action_buttons[model_actions.CATALOG] = catalog_button
+        self.update_model_action_states()
 
         setup_frame = ttk.LabelFrame(tab, text="Kiểm tra máy và model đang chọn", padding=8)
-        setup_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        setup_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         setup_frame.columnconfigure(0, weight=1)
         setup_columns = ("scope", "item", "status", "action", "detail")
         self.setup_table = ttk.Treeview(
@@ -383,14 +410,45 @@ class GenerationTabsMixin:
 
         basic_tab = ttk.Frame(controls, padding=8)
         advanced_tab = ttk.Frame(controls, padding=8)
+        punctuation_tab = ttk.Frame(controls, padding=8)
         vieneu_tab = ttk.Frame(controls, padding=8)
         f5_tab = ttk.Frame(controls, padding=8)
         chatterbox_tab = ttk.Frame(controls, padding=8)
+        gpu_tab = ttk.Frame(controls, padding=8)
         controls.add(basic_tab, text="Cơ bản")
         controls.add(advanced_tab, text="Nâng cao")
+        controls.add(punctuation_tab, text="Dấu câu")
         controls.add(vieneu_tab, text="VieNeu")
         controls.add(f5_tab, text="F5-TTS")
         controls.add(chatterbox_tab, text="Chatterbox")
+        # Bảo vệ GPU is global (every CUDA provider), so it is its own tab rather
+        # than a page inside Chatterbox as it used to be.
+        controls.add(gpu_tab, text="Bảo vệ GPU")
+        # Provider tabs are hidden for models that do not use them; the app layer
+        # drives this from `policy.tuning_groups`, the GUI only stores the refs.
+        self.tuning_tab_groups.append(
+            (
+                controls,
+                {
+                    TUNING_VIENEU: vieneu_tab,
+                    TUNING_F5: f5_tab,
+                    TUNING_CHATTERBOX: chatterbox_tab,
+                },
+            )
+        )
+        self.punctuation_tab_groups.append((controls, punctuation_tab))
+
+        ttk.Label(basic_tab, text="Nhà cung cấp").pack(anchor="w")
+        provider_combo = ttk.Combobox(
+            basic_tab,
+            textvariable=self.provider_var,
+            values=list(self.provider_map.keys()),
+            state="readonly",
+        )
+        provider_combo.pack(fill="x", pady=(4, 8))
+        provider_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_provider_changed())
+        attach_tooltip(provider_combo, tooltip("provider"))
+        self.provider_combos.append(provider_combo)
 
         ttk.Label(basic_tab, text="Model TTS").pack(anchor="w")
         model_combo = ttk.Combobox(
@@ -401,6 +459,8 @@ class GenerationTabsMixin:
         )
         model_combo.pack(fill="x", pady=(4, 8))
         model_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_model_changed())
+        attach_tooltip(model_combo, tooltip("model"))
+        self.model_combos.append(model_combo)
 
         ttk.Label(basic_tab, textvariable=self.model_info_var, foreground="#333333", wraplength=360).pack(
             anchor="w", pady=(0, 6)
@@ -417,13 +477,44 @@ class GenerationTabsMixin:
             state="readonly",
         )
         language_combo.pack(fill="x", pady=(4, 8))
+        attach_tooltip(language_combo, tooltip("language"))
         self.language_combos.append(language_combo)
 
         ttk.Separator(basic_tab).pack(fill="x", pady=(4, 10))
 
-        ttk.Label(basic_tab, text="Profile giọng").pack(anchor="w")
+        voice_controls = ttk.Frame(basic_tab)
+        voice_controls.pack(fill="x")
+        voice_controls.columnconfigure(0, weight=1)
+
+        voice_mode_frame = ttk.Frame(voice_controls)
+        voice_mode_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        ttk.Label(voice_mode_frame, text="Nguồn giọng").pack(anchor="w")
+        fixed_mode = ttk.Radiobutton(
+            voice_mode_frame,
+            text="Giọng cố định",
+            value="fixed",
+            variable=self.voice_source_mode_var,
+            command=self.on_voice_source_mode_changed,
+        )
+        fixed_mode.pack(side="left", pady=(4, 0))
+        profile_mode = ttk.Radiobutton(
+            voice_mode_frame,
+            text="Clone từ Profile",
+            value="profile",
+            variable=self.voice_source_mode_var,
+            command=self.on_voice_source_mode_changed,
+        )
+        profile_mode.pack(side="left", padx=(14, 0), pady=(4, 0))
+        attach_tooltip(fixed_mode, tooltip("voice_mode_fixed"))
+        attach_tooltip(profile_mode, tooltip("voice_mode_profile"))
+        self.voice_mode_frames.append(voice_mode_frame)
+
+        profile_frame = ttk.Frame(voice_controls)
+        profile_frame.grid(row=1, column=0, sticky="ew")
+        profile_label = ttk.Label(profile_frame, text="Profile giọng")
+        profile_label.pack(anchor="w")
         profile_combo = ttk.Combobox(
-            basic_tab,
+            profile_frame,
             textvariable=self.voice_profile_var,
             values=list(self.voice_profile_map.keys()),
             state="readonly",
@@ -432,14 +523,20 @@ class GenerationTabsMixin:
         profile_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_voice_profile_changed())
         self.voice_profile_combos.append(profile_combo)
         self.profile_combos.append(profile_combo)
+        self.profile_voice_frames.append(profile_frame)
+        self.profile_voice_labels.append(profile_label)
+        attach_tooltip(profile_label, tooltip("voice_profile"))
 
-        compat_label = ttk.Label(basic_tab, textvariable=self.profile_compat_var, foreground="#555555", wraplength=340)
+        compat_label = ttk.Label(profile_frame, textvariable=self.profile_compat_var, foreground="#555555", wraplength=340)
         compat_label.pack(anchor="w", pady=(0, 6))
         self.profile_compat_labels.append(compat_label)
 
-        ttk.Label(basic_tab, text="Preset giọng (khi không clone)").pack(anchor="w")
+        fixed_frame = ttk.Frame(voice_controls)
+        fixed_frame.grid(row=2, column=0, sticky="ew")
+        fixed_label = ttk.Label(fixed_frame, text="Giọng cố định")
+        fixed_label.pack(anchor="w")
         speaker_combo = ttk.Combobox(
-            basic_tab,
+            fixed_frame,
             textvariable=self.speaker_var,
             values=list(self.speaker_map.keys()),
             state="disabled",
@@ -447,6 +544,9 @@ class GenerationTabsMixin:
         speaker_combo.pack(fill="x", pady=(4, 8))
         speaker_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_voice_preset_changed())
         self.speaker_combos.append(speaker_combo)
+        self.fixed_voice_frames.append(fixed_frame)
+        self.fixed_voice_labels.append(fixed_label)
+        attach_tooltip(fixed_label, tooltip("voice_fixed"))
 
         ttk.Label(basic_tab, textvariable=self.voice_source_var, foreground="#444444", wraplength=360).pack(
             anchor="w", pady=(0, 8)
@@ -460,12 +560,16 @@ class GenerationTabsMixin:
             state="disabled",
         )
         codec_combo.pack(fill="x", pady=(4, 8))
+        attach_tooltip(codec_combo, tooltip("vieneu_codec"))
         self.codec_combos.append(codec_combo)
 
         self.sampling_spins.append(
-            self._spin(vieneu_tab, "Temperature VieNeu", self.temperature_var, 0.1, 2.0, 0.1)
+            self._field_spin(vieneu_tab, "Temperature VieNeu", self.temperature_var,
+                             "temperature", "vieneu_temperature")
         )
-        self.sampling_spins.append(self._spin(vieneu_tab, "Top-K VieNeu", self.top_k_var, 1, 200, 1))
+        self.sampling_spins.append(
+            self._field_spin(vieneu_tab, "Top-K VieNeu", self.top_k_var, "top_k", "vieneu_top_k")
+        )
         ttk.Label(vieneu_tab, text="Cảm xúc VieNeu").pack(anchor="w")
         emotion_combo = ttk.Combobox(
             vieneu_tab,
@@ -474,13 +578,20 @@ class GenerationTabsMixin:
             state="readonly",
         )
         emotion_combo.pack(fill="x", pady=(4, 8))
+        attach_tooltip(emotion_combo, tooltip("vieneu_emotion"))
         self.emotion_combos.append(emotion_combo)
 
         self._build_f5_controls(f5_tab)
         self._build_chatterbox_controls(chatterbox_tab)
+        self._build_gpu_safety_controls(gpu_tab)
+        self._build_punctuation_controls(punctuation_tab)
 
-        self.speed_spins.append(self._spin(advanced_tab, "Tốc độ đọc", self.speed_var, 0.5, 1.8, 0.05))
-        self.pitch_spins.append(self._spin(advanced_tab, "Pitch shift", self.pitch_var, -12.0, 12.0, 0.5))
+        self.speed_spins.append(
+            self._field_spin(advanced_tab, "Tốc độ đọc", self.speed_var, "speed", "speed")
+        )
+        self.pitch_spins.append(
+            self._field_spin(advanced_tab, "Pitch shift", self.pitch_var, "pitch_shift", "pitch")
+        )
         ttk.Label(advanced_tab, text="Thiết bị xử lý").pack(anchor="w")
         runtime_combo = ttk.Combobox(
             advanced_tab,
@@ -489,89 +600,78 @@ class GenerationTabsMixin:
             state="readonly",
         )
         runtime_combo.pack(fill="x", pady=(4, 8))
-        self._spin(advanced_tab, "Nghỉ giữa câu/chunk, ms", self.pause_var, 0, 3000, 50)
-        self._spin(advanced_tab, "Nghỉ giữa đoạn trong file tổng, ms", self.paragraph_pause_var, 0, 10000, 50)
-        self._spin(advanced_tab, "Max ký tự mỗi đoạn nhỏ", self.chunk_var, 60, 800, 20)
+        self.runtime_target_combos.append(runtime_combo)
+        attach_tooltip(runtime_combo, tooltip("device"))
+        self._field_spin(advanced_tab, "Nghỉ giữa chunk kỹ thuật, ms",
+                         self.chunk_pause_var, "chunk_pause_ms", "chunk_pause")
+        self._field_spin(advanced_tab, "Nghỉ giữa đoạn trong file tổng, ms",
+                         self.paragraph_pause_var, "paragraph_pause_ms", "paragraph_pause")
+        self._field_spin(advanced_tab, "Max ký tự mỗi đoạn nhỏ", self.chunk_var,
+                         "max_chunk_chars", "max_chunk")
         return controls
 
+    def _build_punctuation_controls(self, parent: ttk.Frame) -> None:
+        note = ttk.Label(
+            parent,
+            text=(
+                "Chỉ hiện với provider đã có implementation kiểm thử. "
+                "Đặt 0 ms để bỏ nghỉ ở một loại dấu."
+            ),
+            wraplength=350,
+            foreground="#555555",
+        )
+        note.pack(anchor="w", pady=(0, 8))
+        attach_tooltip(note, tooltip("punctuation_section"))
+        enabled = ttk.Checkbutton(
+            parent,
+            text="ACTIVE · Áp dụng ngắt nghỉ theo dấu câu",
+            variable=self.punctuation_pause_enabled_var,
+            command=self._sync_punctuation_controls,
+        )
+        enabled.pack(anchor="w", pady=(0, 8))
+        attach_tooltip(enabled, tooltip("punctuation_section"))
+        self.punctuation_enable_checks.append(enabled)
+        for label, variable, field, tooltip_key in (
+            ("Cuối câu · . ? ! (ms)", self.pause_var,
+             "sentence_pause_ms", "sentence_pause"),
+            ("Dấu phẩy · , (ms)", self.comma_pause_var,
+             "comma_pause_ms", "comma_pause"),
+            ("Chấm phẩy / hai chấm · ; : (ms)", self.clause_pause_var,
+             "clause_pause_ms", "clause_pause"),
+            ("Dấu ba chấm · … / ... (ms)", self.ellipsis_pause_var,
+             "ellipsis_pause_ms", "ellipsis_pause"),
+        ):
+            self.punctuation_controls.append(
+                self._field_spin(parent, label, variable, field, tooltip_key)
+            )
+        reset = ttk.Button(
+            parent,
+            text="Đặt lại ngắt nghỉ mặc định",
+            command=self._apply_punctuation_defaults,
+        )
+        reset.pack(fill="x", pady=(2, 0))
+        attach_tooltip(reset, tooltip("punctuation_reset"))
+        self.punctuation_reset_buttons.append(reset)
+
     def _build_f5_controls(self, parent: ttk.Frame) -> None:
-        f5_tooltips = {
-            "nfe": (
-                "Số bước suy luận của F5-TTS. 16 nhanh hơn nhưng dễ kém mượt; "
-                "32 là mặc định cân bằng; 48-64 có thể tốt hơn nhưng chậm hơn."
-            ),
-            "cfg": (
-                "Độ bám vào prompt/giọng mẫu. Mặc định 2.0. Tăng quá cao có thể làm giọng gắt "
-                "hoặc thiếu tự nhiên."
-            ),
-            "sway": (
-                "Hệ số Sway Sampling điều khiển đường lấy mẫu của F5. Mặc định -1.0 theo model; "
-                "chỉ đổi khi đang A/B test chất lượng."
-            ),
-            "crossfade": (
-                "Thời gian cross-fade khi F5 phải ghép nhiều phần audio. 0.15 giây thường đủ để "
-                "mối nối bớt gắt."
-            ),
-            "rms": (
-                "Mức âm lượng chuẩn hóa của reference audio. Mặc định 0.1; đổi sai có thể làm audio "
-                "quá nhỏ hoặc bị nén mạnh."
-            ),
-            "seed": (
-                "Seed cố định giúp chạy lại ra kết quả gần giống. Để trống thì mỗi lần tạo sẽ random."
-            ),
-            "fix_duration": (
-                "Ép tổng thời lượng F5 sinh ra. Để 0 để tự động; chỉ dùng khi cần khớp timing đặc biệt."
-            ),
-            "silence": (
-                "Cắt khoảng lặng sau khi sinh. Có thể gọn file hơn nhưng đôi khi làm mất nhịp nghỉ tự nhiên."
-            ),
-        }
-        self.f5_controls.append(
-            self._spin(parent, "NFE step", self.f5_nfe_step_var, 4, 128, 1, tooltip=f5_tooltips["nfe"])
-        )
-        self.f5_controls.append(
-            self._spin(parent, "CFG strength", self.f5_cfg_strength_var, 0.0, 10.0, 0.1, tooltip=f5_tooltips["cfg"])
-        )
-        self.f5_controls.append(
-            self._spin(
-                parent,
-                "Sway sampling coef",
-                self.f5_sway_sampling_coef_var,
-                -5.0,
-                5.0,
-                0.1,
-                tooltip=f5_tooltips["sway"],
+        for label, variable, field, tooltip_key in (
+            ("NFE step", self.f5_nfe_step_var, "f5_nfe_step", "f5_nfe"),
+            ("CFG strength", self.f5_cfg_strength_var, "f5_cfg_strength", "f5_cfg"),
+            ("Sway sampling coef", self.f5_sway_sampling_coef_var,
+             "f5_sway_sampling_coef", "f5_sway"),
+            ("Cross-fade duration, giây", self.f5_cross_fade_duration_var,
+             "f5_cross_fade_duration", "f5_crossfade"),
+            ("Target RMS", self.f5_target_rms_var, "f5_target_rms", "f5_rms"),
+            ("Fix duration, giây (0 = tự động)", self.f5_fix_duration_var,
+             "f5_fix_duration", "f5_fix_duration"),
+        ):
+            self.f5_controls.append(
+                self._field_spin(parent, label, variable, field, tooltip_key)
             )
-        )
-        self.f5_controls.append(
-            self._spin(
-                parent,
-                "Cross-fade duration, giây",
-                self.f5_cross_fade_duration_var,
-                0.0,
-                2.0,
-                0.05,
-                tooltip=f5_tooltips["crossfade"],
-            )
-        )
-        self.f5_controls.append(
-            self._spin(parent, "Target RMS", self.f5_target_rms_var, 0.01, 1.0, 0.01, tooltip=f5_tooltips["rms"])
-        )
-        self.f5_controls.append(
-            self._spin(
-                parent,
-                "Fix duration, giây (0 = tự động)",
-                self.f5_fix_duration_var,
-                0.0,
-                120.0,
-                0.1,
-                tooltip=f5_tooltips["fix_duration"],
-            )
-        )
         ttk.Label(parent, text="Seed (trống = random)").pack(anchor="w")
         seed_entry = ttk.Entry(parent, textvariable=self.f5_seed_var)
         seed_entry.pack(fill="x", pady=(4, 8))
-        attach_tooltip(seed_entry, f5_tooltips["seed"])
+        attach_tooltip(seed_entry, tooltip("f5_seed"))
         self.f5_controls.append(seed_entry)
         silence_check = ttk.Checkbutton(
             parent,
@@ -580,85 +680,31 @@ class GenerationTabsMixin:
             command=self.save_preferences,
         )
         silence_check.pack(anchor="w", pady=(2, 8))
-        attach_tooltip(silence_check, f5_tooltips["silence"])
+        attach_tooltip(silence_check, tooltip("f5_remove_silence"))
         self.f5_controls.append(silence_check)
 
     def _build_chatterbox_controls(self, parent: ttk.Frame) -> None:
-        chatterbox_tooltips = {
-            "temperature": (
-                "Độ ngẫu nhiên khi Chatterbox chọn token giọng. Mặc định 0.8; tăng thì đa dạng hơn "
-                "nhưng dễ lệch, giảm thì ổn định hơn nhưng có thể đều."
-            ),
-            "top_p": (
-                "Giới hạn nhóm token có tổng xác suất cao nhất. Mặc định 0.95; chỉ giảm khi audio "
-                "bị quá ngẫu nhiên hoặc phát âm lạc."
-            ),
-            "top_k": (
-                "Số lựa chọn token tối đa mỗi bước. Mặc định 1000 theo Turbo; giảm mạnh có thể làm "
-                "giọng kém tự nhiên."
-            ),
-            "repetition": (
-                "Phạt lặp token để tránh nói lặp/kẹt nhịp. Mặc định 1.2 theo bản Turbo mới; tăng nhẹ "
-                "nếu nghe bị lặp từ."
-            ),
-            "seed": (
-                "Seed cố định giúp chạy lại ra kết quả gần giống. Để trống thì mỗi lần tạo sẽ random."
-            ),
-            "loudness": (
-                "Chuẩn hóa độ lớn audio mẫu trước khi clone. Nên bật để giọng mẫu quá nhỏ/quá lớn "
-                "không làm lệch kết quả."
-            ),
-            "tags": (
-                "Turbo hiểu tag trong text như [laugh], [chuckle], [sigh], [gasp], [cough], "
-                "[whisper], [breath]. Chỉ dùng khi cần hiệu ứng biểu cảm."
-            ),
-        }
         ttk.Label(
             parent,
             text="Clone voice tiếng Anh bằng Profile >=5 giây. Có thể dùng tag như [laugh], [chuckle], [sigh].",
             wraplength=340,
             foreground="#444444",
         ).pack(anchor="w", pady=(0, 8))
-        self.chatterbox_controls.append(
-            self._spin(
-                parent,
-                "Temperature",
-                self.chatterbox_temperature_var,
-                0.1,
-                2.0,
-                0.05,
-                tooltip=chatterbox_tooltips["temperature"],
+        for label, variable, field, tooltip_key in (
+            ("Temperature", self.chatterbox_temperature_var,
+             "chatterbox_temperature", "chatterbox_temperature"),
+            ("Top-P", self.chatterbox_top_p_var, "chatterbox_top_p", "chatterbox_top_p"),
+            ("Top-K", self.chatterbox_top_k_var, "chatterbox_top_k", "chatterbox_top_k"),
+            ("Repetition penalty", self.chatterbox_repetition_penalty_var,
+             "chatterbox_repetition_penalty", "chatterbox_repetition"),
+        ):
+            self.chatterbox_controls.append(
+                self._field_spin(parent, label, variable, field, tooltip_key)
             )
-        )
-        self.chatterbox_controls.append(
-            self._spin(
-                parent,
-                "Top-P",
-                self.chatterbox_top_p_var,
-                0.05,
-                1.0,
-                0.01,
-                tooltip=chatterbox_tooltips["top_p"],
-            )
-        )
-        self.chatterbox_controls.append(
-            self._spin(parent, "Top-K", self.chatterbox_top_k_var, 1, 2000, 10, tooltip=chatterbox_tooltips["top_k"])
-        )
-        self.chatterbox_controls.append(
-            self._spin(
-                parent,
-                "Repetition penalty",
-                self.chatterbox_repetition_penalty_var,
-                1.0,
-                3.0,
-                0.05,
-                tooltip=chatterbox_tooltips["repetition"],
-            )
-        )
         ttk.Label(parent, text="Seed (trống = random)").pack(anchor="w")
         seed_entry = ttk.Entry(parent, textvariable=self.chatterbox_seed_var)
         seed_entry.pack(fill="x", pady=(4, 8))
-        attach_tooltip(seed_entry, chatterbox_tooltips["seed"])
+        attach_tooltip(seed_entry, tooltip("chatterbox_seed"))
         self.chatterbox_controls.append(seed_entry)
         loudness_check = ttk.Checkbutton(
             parent,
@@ -667,12 +713,72 @@ class GenerationTabsMixin:
             command=self.save_preferences,
         )
         loudness_check.pack(anchor="w", pady=(2, 8))
-        attach_tooltip(loudness_check, chatterbox_tooltips["loudness"])
+        attach_tooltip(loudness_check, tooltip("chatterbox_norm_loudness"))
         self.chatterbox_controls.append(loudness_check)
         tag_label = ttk.Label(parent, text="Tags: [laugh] [chuckle] [sigh] [gasp] [cough] [whisper] [breath]")
         tag_label.pack(anchor="w", pady=(4, 0))
-        attach_tooltip(tag_label, chatterbox_tooltips["tags"])
+        attach_tooltip(tag_label, tooltip("chatterbox_tags"))
         self.chatterbox_controls.append(tag_label)
+
+    def _build_gpu_safety_controls(self, parent: ttk.Frame) -> None:
+        """GPU protection applies to every CUDA provider, so it is never gated on
+        Chatterbox — only on whether this model actually runs on CUDA."""
+        ttk.Label(parent, textvariable=self.gpu_scope_var, wraplength=340,
+                  foreground="#444444").pack(anchor="w", pady=(0, 8))
+
+        hardware_label = ttk.Label(
+            parent,
+            text=self.controller.gpu_temperature_guidance(),
+            wraplength=340,
+            foreground="#9A4E00",
+        )
+        hardware_label.pack(anchor="w", pady=(0, 8))
+        attach_tooltip(hardware_label, tooltip("gpu_hardware"))
+
+        safety_check = ttk.Checkbutton(
+            parent,
+            text="Bật bảo vệ GPU (khuyến nghị)",
+            variable=self.gpu_safety_enabled_var,
+            command=self.save_preferences,
+        )
+        safety_check.pack(anchor="w", pady=(0, 8))
+        attach_tooltip(safety_check, tooltip("gpu_enabled"))
+        self.gpu_safety_controls.append(safety_check)
+
+        for label, variable, field, tooltip_key in (
+            ("Nhiệt độ bắt đầu tối đa (°C)", self.gpu_start_temperature_var,
+             "gpu_start_temperature_c", "gpu_start_temp"),
+            ("Ngưỡng bắt đầu đếm quá nhiệt (°C)", self.gpu_abort_temperature_var,
+             "gpu_abort_temperature_c", "gpu_abort_temp"),
+            ("Thời gian quá nhiệt liên tục (giây)", self.gpu_abort_temperature_sustain_var,
+             "gpu_abort_temperature_sustain_seconds", "gpu_abort_sustain"),
+            ("Ngưỡng nguy cấp tạm nghỉ ngay (°C)", self.gpu_emergency_temperature_var,
+             "gpu_emergency_temperature_c", "gpu_emergency_temp"),
+            ("Thời gian chờ phục hồi tối đa (giây)", self.gpu_cooldown_max_wait_var,
+             "gpu_cooldown_max_wait_seconds", "gpu_cooldown_max_wait"),
+            ("Nhiệt độ cho phép chạy lại (°C)", self.gpu_resume_temperature_var,
+             "gpu_resume_temperature_c", "gpu_resume_temp"),
+            ("VRAM trống trước khi chạy (MB)", self.gpu_minimum_free_vram_var,
+             "gpu_minimum_free_vram_mb", "gpu_start_vram"),
+            ("VRAM trống tối thiểu khi chạy (MB)", self.gpu_runtime_minimum_free_vram_var,
+             "gpu_runtime_minimum_free_vram_mb", "gpu_runtime_vram"),
+            ("GPU đang dùng tối đa (%)", self.gpu_maximum_utilization_var,
+             "gpu_maximum_utilization_percent", "gpu_usage"),
+            ("NVENC đang dùng tối đa (%)", self.gpu_maximum_encoder_utilization_var,
+             "gpu_maximum_encoder_utilization_percent", "gpu_nvenc"),
+        ):
+            spin = self._field_spin(parent, label, variable, field, tooltip_key)
+            self.gpu_safety_controls.append(spin)
+            self.gpu_safety_threshold_controls.append(spin)
+
+        reset_button = ttk.Button(
+            parent,
+            text="Khôi phục ngưỡng an toàn mặc định",
+            command=self._apply_gpu_safety_defaults,
+        )
+        reset_button.pack(fill="x", pady=(2, 0))
+        attach_tooltip(reset_button, tooltip("gpu_reset"))
+        self.gpu_safety_controls.append(reset_button)
 
     def _build_output_controls(
         self,
@@ -685,33 +791,41 @@ class GenerationTabsMixin:
         frame = ttk.LabelFrame(parent, text="Tùy chọn xuất", padding=8)
         frame.columnconfigure(1, weight=1)
 
-        ttk.Label(frame, text="Thư mục xuất riêng").grid(row=0, column=0, sticky="w", pady=2)
+        dir_label = ttk.Label(frame, text="Thư mục xuất riêng")
+        dir_label.grid(row=0, column=0, sticky="w", pady=2)
+        attach_tooltip(dir_label, tooltip("output_dir"))
         output_row = ttk.Frame(frame)
         output_row.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=2)
         output_row.columnconfigure(0, weight=1)
-        ttk.Entry(output_row, textvariable=self.output_dir_var).grid(row=0, column=0, sticky="ew")
+        output_entry = ttk.Entry(output_row, textvariable=self.output_dir_var)
+        output_entry.grid(row=0, column=0, sticky="ew")
+        attach_tooltip(output_entry, tooltip("output_dir"))
         ttk.Button(output_row, text="Chọn", command=self.choose_output_dir).grid(
             row=0, column=1, padx=(6, 0)
         )
 
         row = 1
         if include_output_stem:
-            ttk.Label(frame, text="Tên file xuất").grid(row=row, column=0, sticky="w", pady=2)
-            ttk.Entry(frame, textvariable=self.output_stem_var).grid(
-                row=row, column=1, sticky="ew", padx=(8, 0), pady=2
-            )
+            stem_label = ttk.Label(frame, text="Tên file xuất")
+            stem_label.grid(row=row, column=0, sticky="w", pady=2)
+            attach_tooltip(stem_label, tooltip("output_stem"))
+            stem_entry = ttk.Entry(frame, textvariable=self.output_stem_var)
+            stem_entry.grid(row=row, column=1, sticky="ew", padx=(8, 0), pady=2)
+            attach_tooltip(stem_entry, tooltip("output_stem"))
             row += 1
 
         ttk.Label(frame, text="Định dạng audio").grid(row=row, column=0, sticky="w", pady=2)
         format_row = ttk.Frame(frame)
         format_row.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=2)
-        ttk.Combobox(
+        format_combo = ttk.Combobox(
             format_row,
             textvariable=self.output_audio_format_var,
             values=list(self.output_audio_format_map.keys()),
             state="readonly",
             width=10,
-        ).pack(side="left")
+        )
+        format_combo.pack(side="left")
+        attach_tooltip(format_combo, tooltip("output_format"))
         ttk.Label(format_row, text="Bitrate MP3").pack(side="left", padx=(12, 4))
         bitrate_combo = ttk.Combobox(
             format_row,
@@ -721,30 +835,37 @@ class GenerationTabsMixin:
             width=8,
         )
         bitrate_combo.pack(side="left")
+        attach_tooltip(bitrate_combo, tooltip("output_bitrate"))
         ttk.Label(format_row, text="kbps").pack(side="left", padx=(4, 0))
         self.mp3_bitrate_combos.append(bitrate_combo)
         row += 1
 
         checks = ttk.Frame(frame)
         checks.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        ttk.Checkbutton(
+        overwrite_check = ttk.Checkbutton(
             checks,
             text="Ghi đè file nếu đã tồn tại",
             variable=self.overwrite_var,
             command=self.save_preferences,
-        ).pack(side="left")
-        ttk.Checkbutton(
+        )
+        overwrite_check.pack(side="left")
+        attach_tooltip(overwrite_check, tooltip("output_overwrite"))
+        split_check = ttk.Checkbutton(
             checks,
             text="Tách dòng SRT/đoạn văn thành file riêng",
             variable=self.split_output_var,
             command=self.on_split_output_changed,
-        ).pack(side="left", padx=(14, 0))
-        ttk.Checkbutton(
+        )
+        split_check.pack(side="left", padx=(14, 0))
+        attach_tooltip(split_check, tooltip("output_split"))
+        srt_check = ttk.Checkbutton(
             checks,
             text="Xuất kèm SRT",
             variable=self.output_srt_var,
             command=self.save_preferences,
-        ).pack(side="left", padx=(14, 0))
+        )
+        srt_check.pack(side="left", padx=(14, 0))
+        attach_tooltip(srt_check, tooltip("output_srt"))
         join_check = ttk.Checkbutton(
             checks,
             text="Tạo thêm file audio tổng",
@@ -752,6 +873,7 @@ class GenerationTabsMixin:
             command=self.save_preferences,
         )
         join_check.pack(side="left", padx=(14, 0))
+        attach_tooltip(join_check, tooltip("output_join"))
         self.join_split_audio_checks.append(join_check)
 
         open_button = ttk.Button(
@@ -764,6 +886,26 @@ class GenerationTabsMixin:
         setattr(self, button_attr, open_button)
         return frame
 
+    def _field_spin(
+        self,
+        parent,
+        label: str,
+        variable: tk.Variable,
+        field: str,
+        tooltip_key: str = "",
+    ):
+        """Spin box whose range comes from the request schema, not from the GUI."""
+        limit = field_limits.limit(field)
+        return self._spin(
+            parent,
+            label,
+            variable,
+            limit.widget_minimum,
+            limit.maximum,
+            limit.step,
+            tooltip_text=tooltip(tooltip_key) if tooltip_key else "",
+        )
+
     def _spin(
         self,
         parent,
@@ -772,13 +914,13 @@ class GenerationTabsMixin:
         from_: float,
         to: float,
         step: float,
-        tooltip: str = "",
+        tooltip_text: str = "",
     ):
         label_widget = ttk.Label(parent, text=label)
         label_widget.pack(anchor="w")
         spin = ttk.Spinbox(parent, textvariable=variable, from_=from_, to=to, increment=step)
         spin.pack(fill="x", pady=(4, 8))
-        if tooltip:
-            attach_tooltip(label_widget, tooltip)
-            attach_tooltip(spin, tooltip)
+        if tooltip_text:
+            attach_tooltip(label_widget, tooltip_text)
+            attach_tooltip(spin, tooltip_text)
         return spin

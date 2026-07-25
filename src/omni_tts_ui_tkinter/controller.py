@@ -1,21 +1,30 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from typing import Callable
 
 from omni_tts_core.file_queue import FileQueueStatus
+from omni_tts_core.gpu_safety import gpu_temperature_guidance
 from omni_tts_license.local_signed import LocalSignedLicenseProvider
 from omni_tts_license.models import LicenseStatus
 from omni_tts_core.progress import ProgressCallback, ProgressEvent, check_cancel
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES, runtime_target_label
 from omni_tts_core.service import TtsService
+from omni_tts_core.ui_presenters import model_groups
+from omni_tts_core.ui_presenters.control_policy import (
+    GenerationControlPolicy,
+    build_policy,
+)
+from omni_tts_core.ui_presenters.model_actions import ModelActionPolicy, build_action_policy
 from omni_tts_core.voice_profile_policy import ProfileCompatibility
-from omni_tts_shared.errors import GenerationCancelled, OmniTtsError
+from omni_tts_shared.errors import GenerationCancelled, GpuSafetyError, OmniTtsError
 from omni_tts_shared.schemas import (
     GenerateSpeechResult,
+    GenerationFormDescriptor,
     ModelCapabilities,
     ModelStatus,
     ProfileSaveWarning,
@@ -58,11 +67,27 @@ class TkinterController:
         self.service = service or TtsService()
         self.license_provider = license_provider or LocalSignedLicenseProvider()
 
-    def model_choices(self) -> list[tuple[str, str]]:
-        return [
-            (_model_choice_label(item), item.model_id)
-            for item in self.service.registry.tts_models()
-        ]
+    def model_choices(self, provider_id: str | None = None) -> list[tuple[str, str]]:
+        """Model choices, optionally limited to one provider."""
+        return model_groups.models_for_provider(self.service.registry.tts_models(), provider_id)
+
+    def provider_choices(self) -> list[tuple[str, str]]:
+        return model_groups.provider_choices(self.service.registry.tts_models())
+
+    def provider_of_model(self, model_id: str | None) -> str:
+        return model_groups.provider_of_model(self.service.registry.tts_models(), model_id)
+
+    def control_policy(self, model_id: str) -> GenerationControlPolicy:
+        """Which generation controls this model actually honours."""
+        return build_policy(
+            spec=self.service.registry.get(model_id),
+            capabilities=self.service.model_capabilities(model_id),
+            runtime_status=self.service.runtime_status_for(model_id),
+            supports_codec=self.service.supports_vieneu_codec(model_id),
+            supports_sampling=self.service.supports_vieneu_sampling(model_id),
+            supports_f5=self.service.supports_f5_settings(model_id),
+            supports_chatterbox=self.service.supports_chatterbox_settings(model_id),
+        )
 
     def model_choice_info(self, model_id: str) -> str:
         spec = self.service.registry.get(model_id)
@@ -146,8 +171,21 @@ class TkinterController:
     def set_voice_profile_default_sample(self, profile_id: str, sample_id: str):
         return self.service.set_voice_profile_default_sample(profile_id, sample_id)
 
-    def all_models(self) -> list[ModelStatus]:
-        return self.service.list_models()
+    def all_models(self, provider_id: str | None = None) -> list[ModelStatus]:
+        """Model statuses grouped by provider, optionally limited to one."""
+        items = model_groups.filter_by_provider(self.service.list_models(), provider_id)
+        return model_groups.sort_by_provider(items)
+
+    def model_provider_choices(self) -> list[tuple[str, str]]:
+        """Provider filter choices counted over the full model catalog."""
+        return model_groups.provider_choices(self.service.list_models())
+
+    def provider_display_label(self, provider_id: str) -> str:
+        return model_groups.provider_label(provider_id)
+
+    def model_action_policy(self, selected: list[ModelStatus]) -> ModelActionPolicy:
+        """Which management buttons apply to the current table selection."""
+        return build_action_policy(selected)
 
     def runtime_statuses(self) -> list[RuntimeStatus]:
         return self.service.list_runtime_statuses()
@@ -170,6 +208,13 @@ class TkinterController:
     def model_supports_codec(self, model_id: str) -> bool:
         return self.service.supports_vieneu_codec(model_id)
 
+    def generation_form_descriptor(
+        self,
+        model_id: str,
+        preferred_mode: str | None = None,
+    ) -> GenerationFormDescriptor:
+        return self.service.generation_form_descriptor(model_id, preferred_mode)
+
     def model_supports_sampling(self, model_id: str) -> bool:
         return self.service.supports_vieneu_sampling(model_id)
 
@@ -190,6 +235,9 @@ class TkinterController:
 
     def default_chatterbox_settings(self, model_id: str) -> dict[str, object]:
         return self.service.default_chatterbox_settings(model_id)
+
+    def gpu_temperature_guidance(self) -> str:
+        return gpu_temperature_guidance()
 
     def vieneu_codec_choices(self, model_id: str) -> list[tuple[str, str]]:
         return self.service.list_vieneu_codecs(model_id)
@@ -246,7 +294,22 @@ class TkinterController:
 
     def remove_model(self, model_id: str) -> str:
         status = self.service.remove_model(model_id)
-        return f"Đã gỡ phần lưu trữ riêng của: {status.display_name}"
+        return (
+            f"Đã gỡ phần lưu trữ riêng của {status.display_name}. "
+            "Worker dùng chung vẫn được giữ; model có thể tải lại khi cần."
+        )
+
+    def open_model_storage(self, model_id: str) -> None:
+        spec = self.service.registry.get(model_id)
+        status = self.service.storage.status_for(spec)
+        path = status.storage_path or spec.local_path
+        path.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            os.startfile(str(path))
+            return
+        import subprocess
+
+        subprocess.Popen(["xdg-open", str(path)])
 
     def install_gpu_for_model(self, model_id: str) -> str:
         return self.service.install_gpu_acceleration(model_id)
@@ -321,6 +384,37 @@ class TkinterController:
                     ),
                 )
                 raise
+            except GpuSafetyError as exc:
+                error = str(exc)
+                outcome = FileGenerationOutcome(
+                    item_id=item_id,
+                    source_path=source_path,
+                    status=FileQueueStatus.FAILED,
+                    error=error,
+                )
+                outcomes.append(outcome)
+                _emit_file_event(
+                    file_event_callback,
+                    FileGenerationEvent(
+                        item_id=item_id,
+                        source_path=source_path,
+                        status=FileQueueStatus.FAILED,
+                        message=error,
+                        error=error,
+                    ),
+                )
+                if progress_callback is not None:
+                    progress_callback(
+                        ProgressEvent(
+                            message=(
+                                f"File {file_index}/{total_files} ({source_path.name}): "
+                                "Đã dừng toàn bộ hàng đợi để bảo vệ GPU"
+                            ),
+                            current=file_index,
+                            total=total_files,
+                        )
+                    )
+                break
             except Exception as exc:  # continue remaining files after one failure
                 error = str(exc)
                 outcome = FileGenerationOutcome(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import tempfile
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from omni_tts_core.model_registry import ModelRegistry, ModelSpec
 from omni_tts_core.model_storage import ModelStorage
 from omni_tts_core.storage_paths import hf_repo_cache_dirs, resolve_model_path
+from omni_tts_shared.errors import ModelDownloadError
 from omni_tts_shared.schemas import ModelCapabilities
 
 
@@ -87,6 +89,105 @@ class StoragePathsTest(unittest.TestCase):
 
                 self.assertTrue(worker_venv.exists())
                 self.assertFalse(cache_dir.exists())
+
+    def test_piper_download_remove_and_redownload_uses_only_temporary_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            model_root = root / "models"
+            model_path = model_root / "piper" / "voice"
+            transient_caches: list[Path] = []
+
+            spec = ModelSpec(
+                model_id="piper_test",
+                display_name="Piper Test",
+                provider="piper",
+                model_type="tts",
+                local_path=model_path,
+                hf_repo="owner/repo",
+                language_priority="vi",
+                runtime={
+                    "model_file": "voice.onnx",
+                    "config_file": "voice.onnx.json",
+                    "download_allow_patterns": ["voice.onnx", "voice.onnx.json"],
+                },
+                capabilities=ModelCapabilities(),
+            )
+
+            def fake_snapshot_download(*, local_dir, cache_dir, **_kwargs):
+                cache_path = Path(cache_dir)
+                self.assertTrue(cache_path.exists())
+                transient_caches.append(cache_path)
+                destination = Path(local_dir)
+                destination.mkdir(parents=True, exist_ok=True)
+                (destination / "voice.onnx").write_bytes(b"model")
+                (destination / "voice.onnx.json").write_text("{}", encoding="utf-8")
+                return str(destination)
+
+            storage = ModelStorage(_Registry(spec))
+            with (
+                patch("omni_tts_core.model_storage.models_root", return_value=model_root),
+                patch(
+                    "omni_tts_core.model_storage.snapshot_download",
+                    side_effect=fake_snapshot_download,
+                ),
+            ):
+                first = storage.download("piper_test")
+                self.assertTrue(first.installed)
+                self.assertTrue(model_path.exists())
+                self.assertTrue(all(not path.exists() for path in transient_caches))
+
+                preview = storage.removal_preview("piper_test")
+                self.assertIn("xóa vĩnh viễn", preview)
+                self.assertIn("tải lại", preview)
+                storage.remove("piper_test")
+                self.assertFalse(model_path.exists())
+                self.assertFalse((model_root / ".trash").exists())
+
+                second = storage.download("piper_test")
+                self.assertTrue(second.installed)
+                self.assertTrue(model_path.exists())
+
+    def test_piper_download_rejects_wrong_configured_model_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            model_root = root / "models"
+            model_path = model_root / "piper" / "voice"
+            expected = hashlib.sha256(b"expected model").hexdigest()
+            spec = ModelSpec(
+                model_id="piper_hash_test",
+                display_name="Piper Hash Test",
+                provider="piper",
+                model_type="tts",
+                local_path=model_path,
+                hf_repo="owner/repo",
+                language_priority="vi",
+                runtime={
+                    "model_file": "voice.onnx",
+                    "config_file": "voice.onnx.json",
+                    "download_allow_patterns": ["voice.onnx", "voice.onnx.json"],
+                    "model_sha256": expected,
+                },
+                capabilities=ModelCapabilities(),
+            )
+
+            def fake_snapshot_download(*, local_dir, **_kwargs):
+                destination = Path(local_dir)
+                destination.mkdir(parents=True, exist_ok=True)
+                (destination / "voice.onnx").write_bytes(b"different model")
+                (destination / "voice.onnx.json").write_text("{}", encoding="utf-8")
+                return str(destination)
+
+            storage = ModelStorage(_Registry(spec))
+            with (
+                patch("omni_tts_core.model_storage.models_root", return_value=model_root),
+                patch(
+                    "omni_tts_core.model_storage.snapshot_download",
+                    side_effect=fake_snapshot_download,
+                ),
+            ):
+                with self.assertRaisesRegex(ModelDownloadError, "Tải model thất bại"):
+                    storage.download("piper_hash_test")
+                self.assertFalse(model_path.exists())
 
 
 if __name__ == "__main__":

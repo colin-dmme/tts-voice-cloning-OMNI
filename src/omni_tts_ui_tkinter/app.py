@@ -18,6 +18,10 @@ from omni_tts_core.file_queue import (
     settings_fingerprint,
 )
 from omni_tts_core.text.source_reader import SUPPORTED_TEXT_EXTENSIONS, count_source_text_chars
+from omni_tts_core.ui_presenters import model_actions
+from omni_tts_core.ui_presenters.model_actions import build_action_policy
+from omni_tts_core.ui_presenters.model_groups import ALL_PROVIDERS
+from omni_tts_core.ui_presenters.search import matches_search
 from omni_tts_core.progress import ProgressCallback, ProgressEvent, check_cancel
 from omni_tts_shared.errors import GenerationCancelled, OmniTtsError
 from omni_tts_shared.languages import LANGUAGE_CODES, LANGUAGE_LABELS, language_choices
@@ -35,6 +39,7 @@ from omni_tts_ui_tkinter.preferences import TkinterPreferences
 from omni_tts_ui_tkinter.state import UiSettings
 from omni_tts_ui_tkinter.widgets import (
     append_log,
+    attach_tooltip,
     browse_directory,
     browse_file,
     clear_log,
@@ -87,7 +92,12 @@ class TkinterApp(GenerationTabsMixin):
         self.preferences = TkinterPreferences()
         self.file_queue_store = FileQueueStore()
         self.preference_data = self.preferences.load()
-        self.model_map = dict(self.controller.model_choices())
+        self.all_model_map = dict(self.controller.model_choices())
+        self.provider_map = dict(self.controller.provider_choices())
+        # Visible model list; narrowed by the provider filter.
+        self.model_map = dict(self.all_model_map)
+        self.provider_combos: list[ttk.Combobox] = []
+        self.model_combos: list[ttk.Combobox] = []
         self.speaker_map: dict[str, str | None] = {NO_VOICE_PRESET_LABEL: None}
         self.codec_map: dict[str, str | None] = {NO_CODEC_LABEL: None}
         self.voice_profile_map: dict[str, str | None] = {}
@@ -106,16 +116,37 @@ class TkinterApp(GenerationTabsMixin):
         self.language_combos: list[ttk.Combobox] = []
         self.profile_combos: list[ttk.Combobox] = []
         self.speaker_combos: list[ttk.Combobox] = []
+        self.voice_mode_frames: list[ttk.Frame] = []
+        self.fixed_voice_frames: list[ttk.Frame] = []
+        self.profile_voice_frames: list[ttk.Frame] = []
+        self.fixed_voice_labels: list[ttk.Label] = []
+        self.profile_voice_labels: list[ttk.Label] = []
         self.codec_combos: list[ttk.Combobox] = []
         self.mp3_bitrate_combos: list[ttk.Combobox] = []
         self.join_split_audio_checks: list[ttk.Checkbutton] = []
         self.output_audio_format_map = {"WAV": "wav", "MP3": "mp3"}
         self.runtime_target_map = dict(self.controller.runtime_target_choices())
+        self.runtime_target_combos: list[ttk.Combobox] = []
+        self.model_filter_map = dict(self.controller.model_provider_choices())
+        # Rows for the model-management table, kept so filtering never re-queries.
+        self._model_rows: list[tuple[str, str, tuple]] = []
+        self._model_status_by_id: dict[str, object] = {}
+        self._model_action_policy = build_action_policy([])
+        self.model_action_buttons: dict[str, ttk.Button] = {}
         self.sampling_spins: list[ttk.Spinbox] = []
         self.speed_spins: list[ttk.Spinbox] = []
         self.pitch_spins: list[ttk.Spinbox] = []
         self.f5_controls: list = []
         self.chatterbox_controls: list = []
+        self.punctuation_controls: list = []
+        self.punctuation_enable_checks: list[ttk.Checkbutton] = []
+        self.punctuation_reset_buttons: list[ttk.Button] = []
+        self.punctuation_tab_groups: list[tuple[ttk.Notebook, ttk.Frame]] = []
+        self.gpu_safety_controls: list = []
+        self.gpu_safety_threshold_controls: list = []
+        # (notebook, {tuning group id: tab frame}) — provider tabs are hidden for
+        # models that do not expose that group, instead of shown greyed out.
+        self.tuning_tab_groups: list[tuple[ttk.Notebook, dict[str, ttk.Frame]]] = []
         self.emotion_combos: list[ttk.Combobox] = []
         self.profile_compat_labels: list[ttk.Label] = []
         self._preference_trace_ready = False
@@ -138,10 +169,20 @@ class TkinterApp(GenerationTabsMixin):
 
     def _init_vars(self) -> None:
         model_label = self._model_label_for_id(self.preference_data.get("model_id"))
-        model_id = self.model_map.get(model_label, "omnivoice_vietnamese")
+        model_id = self.all_model_map.get(model_label, "omnivoice_vietnamese")
+        # Open on the saved model's provider so the list starts short.
+        provider_id = self.controller.provider_of_model(model_id)
+        self.model_map = dict(self.controller.model_choices(provider_id))
         language = str(self.preference_data.get("language") or "vi")
         self.language_var = tk.StringVar(value=LANGUAGE_LABELS.get(language, "Tiếng Việt"))
+        self.provider_var = tk.StringVar(value=self._provider_label_for_id(provider_id))
         self.model_var = tk.StringVar(value=model_label)
+        self.model_filter_var = tk.StringVar(value=next(iter(self.model_filter_map), "Tất cả"))
+        self.model_search_var = tk.StringVar()
+        self.model_summary_var = tk.StringVar(value="")
+        self.voice_source_mode_var = tk.StringVar(
+            value=str(self.preference_data.get("voice_source_mode") or "fixed")
+        )
         self.voice_profile_var = tk.StringVar(value="Không dùng profile")
         self.speaker_var = tk.StringVar(value=self._speaker_label_for_id(model_id, self.preference_data.get("speaker_id")))
         self.codec_var = tk.StringVar(value=self._codec_label_for_repo(model_id, self.preference_data.get("codec_repo")))
@@ -222,13 +263,99 @@ class TkinterApp(GenerationTabsMixin):
                 )
             )
         )
+        self.gpu_safety_enabled_var = tk.BooleanVar(
+            value=bool(self.preference_data.get("gpu_safety_enabled", chatterbox_defaults["gpu_safety_enabled"]))
+        )
+        self.gpu_start_temperature_var = tk.IntVar(
+            value=int(self.preference_data.get("gpu_start_temperature_c", chatterbox_defaults["gpu_start_temperature_c"]))
+        )
+        self.gpu_abort_temperature_var = tk.IntVar(
+            value=int(self.preference_data.get("gpu_abort_temperature_c", chatterbox_defaults["gpu_abort_temperature_c"]))
+        )
+        self.gpu_abort_temperature_sustain_var = tk.DoubleVar(
+            value=float(
+                self.preference_data.get(
+                    "gpu_abort_temperature_sustain_seconds",
+                    chatterbox_defaults["gpu_abort_temperature_sustain_seconds"],
+                )
+            )
+        )
+        self.gpu_emergency_temperature_var = tk.IntVar(
+            value=int(
+                self.preference_data.get(
+                    "gpu_emergency_temperature_c",
+                    chatterbox_defaults["gpu_emergency_temperature_c"],
+                )
+            )
+        )
+        self.gpu_cooldown_max_wait_var = tk.DoubleVar(
+            value=float(
+                self.preference_data.get(
+                    "gpu_cooldown_max_wait_seconds",
+                    chatterbox_defaults["gpu_cooldown_max_wait_seconds"],
+                )
+            )
+        )
+        self.gpu_resume_temperature_var = tk.IntVar(
+            value=int(self.preference_data.get("gpu_resume_temperature_c", chatterbox_defaults["gpu_resume_temperature_c"]))
+        )
+        self.gpu_minimum_free_vram_var = tk.IntVar(
+            value=int(self.preference_data.get("gpu_minimum_free_vram_mb", chatterbox_defaults["gpu_minimum_free_vram_mb"]))
+        )
+        self.gpu_runtime_minimum_free_vram_var = tk.IntVar(
+            value=int(
+                self.preference_data.get(
+                    "gpu_runtime_minimum_free_vram_mb",
+                    chatterbox_defaults["gpu_runtime_minimum_free_vram_mb"],
+                )
+            )
+        )
+        self.gpu_maximum_utilization_var = tk.IntVar(
+            value=int(
+                self.preference_data.get(
+                    "gpu_maximum_utilization_percent",
+                    chatterbox_defaults["gpu_maximum_utilization_percent"],
+                )
+            )
+        )
+        self.gpu_maximum_encoder_utilization_var = tk.IntVar(
+            value=int(
+                self.preference_data.get(
+                    "gpu_maximum_encoder_utilization_percent",
+                    chatterbox_defaults["gpu_maximum_encoder_utilization_percent"],
+                )
+            )
+        )
         self.model_info_var = tk.StringVar(value="")
         self.runtime_var = tk.StringVar(value="")
         self.voice_source_var = tk.StringVar(value="")
-        self.pause_var = tk.IntVar(value=int(self.preference_data.get("sentence_pause_ms", 450)))
+        self.gpu_scope_var = tk.StringVar(value="")
+        self.punctuation_pause_enabled_var = tk.BooleanVar(
+            value=bool(self.preference_data.get("punctuation_pause_enabled", True))
+        )
+        self.pause_var = tk.IntVar(
+            value=int(self.preference_data.get("sentence_pause_ms", 320))
+        )
+        self.comma_pause_var = tk.IntVar(
+            value=int(self.preference_data.get("comma_pause_ms", 90))
+        )
+        self.clause_pause_var = tk.IntVar(
+            value=int(self.preference_data.get("clause_pause_ms", 180))
+        )
+        self.ellipsis_pause_var = tk.IntVar(
+            value=int(self.preference_data.get("ellipsis_pause_ms", 450))
+        )
+        self.chunk_pause_var = tk.IntVar(
+            value=int(
+                self.preference_data.get(
+                    "chunk_pause_ms",
+                    self.preference_data.get("sentence_pause_ms", 120),
+                )
+            )
+        )
         paragraph_pause = self.preference_data.get(
             "paragraph_pause_ms",
-            self.preference_data.get("srt_file_padding_ms", 0),
+            self.preference_data.get("srt_file_padding_ms", 600),
         )
         self.paragraph_pause_var = tk.IntVar(value=int(paragraph_pause))
         self.chunk_var = tk.IntVar(value=int(self.preference_data.get("max_chunk_chars", 220)))
@@ -248,10 +375,27 @@ class TkinterApp(GenerationTabsMixin):
         self.profile_compat_var = tk.StringVar(value="")
 
     def _model_label_for_id(self, model_id: str | None) -> str:
-        for label, item_id in self.model_map.items():
+        for label, item_id in self.all_model_map.items():
             if item_id == model_id:
                 return label
         return "OmniVoice Vietnamese"
+
+    def _provider_label_for_id(self, provider_id: str | None) -> str:
+        for label, item_id in self.provider_map.items():
+            if item_id == provider_id:
+                return label
+        return next(iter(self.provider_map), "Tất cả")
+
+    def on_provider_changed(self) -> None:
+        """Narrow the model list to the chosen provider, keeping a valid model."""
+        provider_id = self.provider_map.get(self.provider_var.get())
+        self.model_map = dict(self.controller.model_choices(provider_id))
+        labels = list(self.model_map.keys())
+        for combo in self.model_combos:
+            combo.configure(values=labels)
+        if self.model_var.get() not in self.model_map and labels:
+            self.model_var.set(labels[0])
+            self.on_model_changed()
 
     def _speaker_label_for_id(self, model_id: str, speaker_id: str | None) -> str:
         if not speaker_id:
@@ -262,7 +406,8 @@ class TkinterApp(GenerationTabsMixin):
         return NO_VOICE_PRESET_LABEL
 
     def _current_model_id(self) -> str:
-        return self.model_map.get(self.model_var.get(), "omnivoice_vietnamese")
+        label = self.model_var.get()
+        return self.model_map.get(label) or self.all_model_map.get(label, "omnivoice_vietnamese")
 
     def _codec_label_for_repo(self, model_id: str, codec_repo: str | None) -> str:
         valid_repo = self.controller.valid_vieneu_codec_repo(model_id, codec_repo)
@@ -335,7 +480,10 @@ class TkinterApp(GenerationTabsMixin):
         for combo in self.speaker_combos:
             combo.configure(values=values)
 
-        if self._selected_profile_id() or not self.controller.has_voice_presets(model_id):
+        if (
+            self.voice_source_mode_var.get() != "fixed"
+            or not self.controller.has_voice_presets(model_id)
+        ):
             self.speaker_var.set(NO_VOICE_PRESET_LABEL)
             return
         valid_current = self.controller.valid_voice_preset_id(model_id, current_id)
@@ -816,10 +964,27 @@ class TkinterApp(GenerationTabsMixin):
         return UiSettings(
             language=LANGUAGE_CODES.get(self.language_var.get(), "vi"),
             model_id=model_id,
-            voice_profile_id=self._selected_profile_id(),
-            reference_audio_path=Path(ref_audio_text) if ref_audio_text else None,
-            reference_text=self.ref_text_var.get().strip(),
-            speaker_id=None if self._selected_profile_id() else self._selected_speaker_id(),
+            voice_source_mode=self.voice_source_mode_var.get(),
+            voice_profile_id=(
+                self._selected_profile_id()
+                if self.voice_source_mode_var.get() == "profile"
+                else None
+            ),
+            reference_audio_path=(
+                Path(ref_audio_text)
+                if ref_audio_text and self.voice_source_mode_var.get() == "profile"
+                else None
+            ),
+            reference_text=(
+                self.ref_text_var.get().strip()
+                if self.voice_source_mode_var.get() == "profile"
+                else ""
+            ),
+            speaker_id=(
+                self._selected_speaker_id()
+                if self.voice_source_mode_var.get() == "fixed"
+                else None
+            ),
             speed=float(self.speed_var.get()),
             pitch_shift=float(self.pitch_var.get()),
             emotion=self.emotion_var.get(),
@@ -847,7 +1012,26 @@ class TkinterApp(GenerationTabsMixin):
             chatterbox_norm_loudness=(
                 bool(self.chatterbox_norm_loudness_var.get()) if supports_chatterbox else True
             ),
+            gpu_safety_enabled=bool(self.gpu_safety_enabled_var.get()),
+            gpu_start_temperature_c=int(self.gpu_start_temperature_var.get()),
+            gpu_abort_temperature_c=int(self.gpu_abort_temperature_var.get()),
+            gpu_abort_temperature_sustain_seconds=float(self.gpu_abort_temperature_sustain_var.get()),
+            gpu_emergency_temperature_c=int(self.gpu_emergency_temperature_var.get()),
+            gpu_cooldown_max_wait_seconds=float(self.gpu_cooldown_max_wait_var.get()),
+            gpu_resume_temperature_c=int(self.gpu_resume_temperature_var.get()),
+            gpu_minimum_free_vram_mb=int(self.gpu_minimum_free_vram_var.get()),
+            gpu_runtime_minimum_free_vram_mb=int(self.gpu_runtime_minimum_free_vram_var.get()),
+            gpu_maximum_utilization_percent=int(self.gpu_maximum_utilization_var.get()),
+            gpu_maximum_encoder_utilization_percent=int(self.gpu_maximum_encoder_utilization_var.get()),
+            punctuation_pause_enabled=(
+                bool(self.punctuation_pause_enabled_var.get())
+                and bool(self.controller.control_policy(model_id).punctuation_pauses)
+            ),
             sentence_pause_ms=int(self.pause_var.get()),
+            comma_pause_ms=int(self.comma_pause_var.get()),
+            clause_pause_ms=int(self.clause_pause_var.get()),
+            ellipsis_pause_ms=int(self.ellipsis_pause_var.get()),
+            chunk_pause_ms=int(self.chunk_pause_var.get()),
             paragraph_pause_ms=int(self.paragraph_pause_var.get()),
             srt_file_padding_ms=int(self.paragraph_pause_var.get()),
             max_chunk_chars=int(self.chunk_var.get()),
@@ -870,8 +1054,17 @@ class TkinterApp(GenerationTabsMixin):
         self.preference_data.update({
             "language": LANGUAGE_CODES.get(self.language_var.get(), "vi"),
             "model_id": model_id,
-            "voice_profile_id": self._selected_profile_id(),
-            "speaker_id": None if self._selected_profile_id() else self._selected_speaker_id(),
+            "voice_source_mode": self.voice_source_mode_var.get(),
+            "voice_profile_id": (
+                self._selected_profile_id()
+                if self.voice_source_mode_var.get() == "profile"
+                else None
+            ),
+            "speaker_id": (
+                self._selected_speaker_id()
+                if self.voice_source_mode_var.get() == "fixed"
+                else None
+            ),
             "output_dir": self.output_dir_var.get().strip(),
             "output_stem": self.output_stem_var.get().strip(),
             "speed": float(self.speed_var.get()),
@@ -945,7 +1138,25 @@ class TkinterApp(GenerationTabsMixin):
                 if supports_chatterbox
                 else self.preference_data.get("chatterbox_norm_loudness", True)
             ),
+            "gpu_safety_enabled": bool(self.gpu_safety_enabled_var.get()),
+            "gpu_start_temperature_c": int(self.gpu_start_temperature_var.get()),
+            "gpu_abort_temperature_c": int(self.gpu_abort_temperature_var.get()),
+            "gpu_abort_temperature_sustain_seconds": float(
+                self.gpu_abort_temperature_sustain_var.get()
+            ),
+            "gpu_emergency_temperature_c": int(self.gpu_emergency_temperature_var.get()),
+            "gpu_cooldown_max_wait_seconds": float(self.gpu_cooldown_max_wait_var.get()),
+            "gpu_resume_temperature_c": int(self.gpu_resume_temperature_var.get()),
+            "gpu_minimum_free_vram_mb": int(self.gpu_minimum_free_vram_var.get()),
+            "gpu_runtime_minimum_free_vram_mb": int(self.gpu_runtime_minimum_free_vram_var.get()),
+            "gpu_maximum_utilization_percent": int(self.gpu_maximum_utilization_var.get()),
+            "gpu_maximum_encoder_utilization_percent": int(self.gpu_maximum_encoder_utilization_var.get()),
+            "punctuation_pause_enabled": bool(self.punctuation_pause_enabled_var.get()),
             "sentence_pause_ms": int(self.pause_var.get()),
+            "comma_pause_ms": int(self.comma_pause_var.get()),
+            "clause_pause_ms": int(self.clause_pause_var.get()),
+            "ellipsis_pause_ms": int(self.ellipsis_pause_var.get()),
+            "chunk_pause_ms": int(self.chunk_pause_var.get()),
             "paragraph_pause_ms": int(self.paragraph_pause_var.get()),
             "srt_file_padding_ms": int(self.paragraph_pause_var.get()),
             "max_chunk_chars": int(self.chunk_var.get()),
@@ -987,7 +1198,23 @@ class TkinterApp(GenerationTabsMixin):
             self.chatterbox_repetition_penalty_var,
             self.chatterbox_seed_var,
             self.chatterbox_norm_loudness_var,
+            self.gpu_safety_enabled_var,
+            self.gpu_start_temperature_var,
+            self.gpu_abort_temperature_var,
+            self.gpu_abort_temperature_sustain_var,
+            self.gpu_emergency_temperature_var,
+            self.gpu_cooldown_max_wait_var,
+            self.gpu_resume_temperature_var,
+            self.gpu_minimum_free_vram_var,
+            self.gpu_runtime_minimum_free_vram_var,
+            self.gpu_maximum_utilization_var,
+            self.gpu_maximum_encoder_utilization_var,
+            self.punctuation_pause_enabled_var,
             self.pause_var,
+            self.comma_pause_var,
+            self.clause_pause_var,
+            self.ellipsis_pause_var,
+            self.chunk_pause_var,
             self.paragraph_pause_var,
             self.chunk_var,
             self.overwrite_var,
@@ -1001,6 +1228,10 @@ class TkinterApp(GenerationTabsMixin):
             variable.trace_add("write", lambda *_args: self.save_preferences())
         self.output_audio_format_var.trace_add("write", lambda *_args: self._sync_mp3_bitrate_state())
         self.split_output_var.trace_add("write", lambda *_args: self._sync_join_split_audio_state())
+        self.gpu_safety_enabled_var.trace_add("write", lambda *_args: self._sync_gpu_safety_controls())
+        self.punctuation_pause_enabled_var.trace_add(
+            "write", lambda *_args: self._sync_punctuation_controls()
+        )
         self._preference_trace_ready = True
         self.save_preferences()
 
@@ -1255,6 +1486,12 @@ class TkinterApp(GenerationTabsMixin):
                 f"Top-P {settings.chatterbox_top_p}; Top-K {settings.chatterbox_top_k}; "
                 f"Repetition penalty {settings.chatterbox_repetition_penalty}; Seed {seed}; "
                 f"Normalize loudness: {'Có' if settings.chatterbox_norm_loudness else 'Không'}"
+                f"\nBảo vệ GPU: {'Bật' if settings.gpu_safety_enabled else 'Tắt'}; "
+                f"đếm từ {settings.gpu_abort_temperature_c}°C/{settings.gpu_abort_temperature_sustain_seconds:g}s; "
+                f"nguy cấp {settings.gpu_emergency_temperature_c}°C; "
+                f"chạy lại ở {settings.gpu_resume_temperature_c}°C; "
+                f"VRAM runtime {settings.gpu_runtime_minimum_free_vram_mb} MB; "
+                f"cooldown tối đa {settings.gpu_cooldown_max_wait_seconds:g}s"
             )
         return (
             f"{source}\n"
@@ -1263,7 +1500,10 @@ class TkinterApp(GenerationTabsMixin):
             f"Codec: {self.codec_var.get()}; Thiết bị xử lý: {self.controller.runtime_target_label(settings.runtime_target)}\n"
             f"Temperature: {settings.temperature or 'mặc định'}; Top-K: {settings.top_k or 'mặc định'}; "
             f"Độ dài đoạn nhỏ: {settings.max_chunk_chars}; "
-            f"Nghỉ giữa câu/chunk: {settings.sentence_pause_ms} ms; "
+            f"Nghỉ chunk: {settings.chunk_pause_ms} ms; "
+            f"Nghỉ dấu câu: .?! {settings.sentence_pause_ms} / "
+            f", {settings.comma_pause_ms} / ;: {settings.clause_pause_ms} / "
+            f"… {settings.ellipsis_pause_ms} ms; "
             f"Nghỉ giữa đoạn trong file tổng: {settings.paragraph_pause_ms} ms"
             f"{f5_line}{chatterbox_line}\n"
             f"Tách file: {'Có' if settings.split_output else 'Không'}; "
@@ -1275,6 +1515,27 @@ class TkinterApp(GenerationTabsMixin):
             f"Thư mục xuất: {output_dir}; Tên file xuất: {output_stem}"
         )
 
+    def refresh_model_table(self) -> None:
+        """Re-render the model table for the current provider filter and search."""
+        provider_id = self.model_filter_map.get(self.model_filter_var.get())
+        needle = self.model_search_var.get()
+        selected = list(self.model_table.selection())
+        for row in self.model_table.get_children():
+            self.model_table.delete(row)
+        shown = 0
+        for model_id, provider, values in self._model_rows:
+            if provider_id and provider_id != ALL_PROVIDERS and provider != provider_id:
+                continue
+            if not matches_search(str(values[0]), needle):
+                continue
+            self.model_table.insert("", "end", iid=model_id, values=values)
+            shown += 1
+        self.model_summary_var.set(f"Hiển thị {shown}/{len(self._model_rows)} model")
+        restored = [item for item in selected if self.model_table.exists(item)]
+        if restored:
+            self.model_table.selection_set(restored)
+        self.update_model_action_states()
+
     def refresh_models(self) -> None:
         if self._model_refresh_running:
             return
@@ -1285,15 +1546,18 @@ class TkinterApp(GenerationTabsMixin):
         def worker() -> None:
             try:
                 rows = []
+                statuses = {}
                 for item in self.controller.all_models():
                     runtime = self.controller.service.runtime_status_for(item.model_id)
+                    statuses[item.model_id] = item
                     rows.append(
                         (
                             item.model_id,
+                            item.provider,
                             (
                                 item.display_name,
                                 _short_text(item.usage, 86),
-                                item.provider,
+                                self.controller.provider_display_label(item.provider),
                                 "Có" if item.required else "Không",
                                 _model_status_label(item),
                                 self.controller.runtime_device_label(runtime.actual_device),
@@ -1311,21 +1575,22 @@ class TkinterApp(GenerationTabsMixin):
             except Exception as exc:
                 self.root.after(0, lambda err=exc: self._finish_model_refresh_error(err))
                 return
-            self.root.after(0, lambda: self._apply_model_refresh(rows, runtime_text, startup_notice, setup_rows))
+            self.root.after(
+                0,
+                lambda: self._apply_model_refresh(
+                    rows, runtime_text, startup_notice, setup_rows, statuses
+                ),
+            )
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _apply_model_refresh(self, rows, runtime_text: str, startup_notice: str, setup_rows) -> None:
+    def _apply_model_refresh(
+        self, rows, runtime_text: str, startup_notice: str, setup_rows, statuses=None
+    ) -> None:
         self._model_refresh_running = False
-        for row in self.model_table.get_children():
-            self.model_table.delete(row)
-        for model_id, values in rows:
-            self.model_table.insert(
-                "",
-                "end",
-                iid=model_id,
-                values=values,
-            )
+        self._model_rows = rows
+        self._model_status_by_id = statuses or {}
+        self.refresh_model_table()
         self._apply_setup_rows(setup_rows)
         self.model_info_var.set(self.controller.model_choice_info(self._current_model_id()))
         self.runtime_var.set(runtime_text)
@@ -1388,6 +1653,11 @@ class TkinterApp(GenerationTabsMixin):
         self.runtime_var.set(self.controller.runtime_status_text(model_id))
 
     def _update_profile_compat(self) -> None:
+        if self.voice_source_mode_var.get() != "profile":
+            self.profile_compat_var.set("")
+            for label in self.profile_compat_labels:
+                label.configure(foreground="#555555")
+            return
         profile_id = self._selected_profile_id()
         model_id = self._current_model_id()
         if not profile_id:
@@ -1412,15 +1682,24 @@ class TkinterApp(GenerationTabsMixin):
         self.refresh_selected_setup()
 
     def on_voice_profile_changed(self) -> None:
-        if self._selected_profile_id():
-            self.speaker_var.set(NO_VOICE_PRESET_LABEL)
         self.apply_model_capabilities()
         self._update_profile_compat()
 
     def on_voice_preset_changed(self) -> None:
-        if self._selected_speaker_id():
-            self.voice_profile_var.set("Không dùng profile")
         self.apply_model_capabilities(allow_empty_preset=True)
+
+    def on_voice_source_mode_changed(self) -> None:
+        descriptor = self.controller.generation_form_descriptor(
+            self._current_model_id(),
+            self.voice_source_mode_var.get(),
+        )
+        self.voice_source_mode_var.set(descriptor.selected_voice_mode)
+        if descriptor.selected_voice_mode == "fixed":
+            self.voice_profile_var.set("Không dùng profile")
+        else:
+            self.speaker_var.set(NO_VOICE_PRESET_LABEL)
+        self.apply_model_capabilities(prefer_default_preset=True)
+        self._update_profile_compat()
 
     def apply_model_capabilities(
         self,
@@ -1429,6 +1708,11 @@ class TkinterApp(GenerationTabsMixin):
     ) -> None:
         model_id = self._current_model_id()
         caps = self.controller.model_capabilities(model_id)
+        descriptor = self.controller.generation_form_descriptor(
+            model_id,
+            self.voice_source_mode_var.get(),
+        )
+        self.voice_source_mode_var.set(descriptor.selected_voice_mode)
         self._refresh_codec_choices(model_id)
         language_values = language_choices(caps.supported_languages)
         current_code = LANGUAGE_CODES.get(self.language_var.get(), "vi")
@@ -1436,6 +1720,15 @@ class TkinterApp(GenerationTabsMixin):
             self.language_var.set(LANGUAGE_LABELS[caps.supported_languages[0]])
         for combo in self.language_combos:
             combo.configure(values=language_values, state="readonly")
+
+        # Only offer devices this model can actually run on; picking CUDA for a
+        # CPU-only model would fail with ConfigError at generation time.
+        policy = self.controller.control_policy(model_id)
+        device_labels = [label for label, _value in policy.device_targets]
+        for combo in self.runtime_target_combos:
+            combo.configure(values=device_labels)
+        if self.runtime_target_var.get() not in device_labels and device_labels:
+            self.runtime_target_var.set(device_labels[0])
 
         _set_widgets_state(self.speed_spins, caps.supports_speed)
         if not caps.supports_speed:
@@ -1460,6 +1753,12 @@ class TkinterApp(GenerationTabsMixin):
 
         supports_chatterbox = self.controller.model_supports_chatterbox_settings(model_id)
         _set_widgets_state(self.chatterbox_controls, supports_chatterbox)
+        # Provider tabs follow the policy so a Piper model does not show VieNeu,
+        # F5-TTS and Chatterbox pages the user can never use.
+        self._sync_tuning_tabs(policy)
+        self._sync_punctuation_tabs(policy)
+        self.gpu_scope_var.set(policy.gpu_scope_note)
+        self._sync_gpu_safety_controls()
         if supports_chatterbox and prefer_default_preset:
             self._apply_chatterbox_defaults(model_id)
 
@@ -1476,27 +1775,36 @@ class TkinterApp(GenerationTabsMixin):
 
         self._refresh_speaker_choices(
             model_id,
-            include_none=caps.supports_voice_profile,
+            include_none=not descriptor.requires_fixed_voice,
             prefer_default=prefer_default_preset,
             allow_empty=allow_empty_preset,
         )
-        speaker_selected = self._selected_speaker_id() is not None
 
-        profile_state = "readonly" if caps.supports_voice_profile and not speaker_selected else "disabled"
+        profile_state = "readonly" if descriptor.show_profile else "disabled"
         for combo in self.profile_combos:
             combo.configure(state=profile_state)
-        if not caps.supports_voice_profile:
+        if not descriptor.show_profile:
             self.voice_profile_var.set("Không dùng profile")
 
-        profile_selected = self._selected_profile_id() is not None
-        speaker_state = "readonly" if self.controller.has_voice_presets(model_id) and not profile_selected else "disabled"
+        speaker_state = "readonly" if descriptor.show_fixed_voice else "disabled"
         for combo in self.speaker_combos:
             combo.configure(state=speaker_state)
         if self.speaker_var.get() not in self.speaker_map:
             self.speaker_var.set(NO_VOICE_PRESET_LABEL)
 
-        self._update_voice_source_label(caps)
-        if caps.requires_voice_profile and self.voice_profile_var.get() == "Không dùng profile":
+        for frame in self.voice_mode_frames:
+            _set_packed(frame, descriptor.show_voice_mode_selector)
+        for frame in self.fixed_voice_frames:
+            _set_packed(frame, descriptor.show_fixed_voice)
+        for frame in self.profile_voice_frames:
+            _set_packed(frame, descriptor.show_profile)
+        for label in self.fixed_voice_labels:
+            label.configure(text=descriptor.fixed_label)
+        for label in self.profile_voice_labels:
+            label.configure(text=descriptor.profile_label)
+
+        self.voice_source_var.set(descriptor.status_text)
+        if descriptor.show_profile and self.voice_profile_var.get() == "Không dùng profile":
             self.status_var.set(f"{self.model_var.get()} cần chọn Profile giọng.")
         self.save_preferences()
 
@@ -1519,24 +1827,79 @@ class TkinterApp(GenerationTabsMixin):
         self.chatterbox_repetition_penalty_var.set(float(defaults["chatterbox_repetition_penalty"]))
         self.chatterbox_seed_var.set("")
         self.chatterbox_norm_loudness_var.set(bool(defaults["chatterbox_norm_loudness"]))
+        self._apply_gpu_safety_defaults(model_id)
 
-    def _update_voice_source_label(self, caps) -> None:
-        profile = self.voice_profile_var.get()
-        preset = self.speaker_var.get()
-        if self._selected_profile_id():
-            self.voice_source_var.set(f"Nguồn giọng đang dùng: Profile - {profile}")
-        elif self._selected_speaker_id():
-            self.voice_source_var.set(f"Nguồn giọng đang dùng: Preset - {preset}")
-        elif caps.requires_voice_profile:
-            self.voice_source_var.set("Nguồn giọng: cần chọn Profile giọng")
-        elif caps.supports_voice_presets and caps.supports_voice_profile:
-            self.voice_source_var.set("Nguồn giọng: chọn Preset hoặc Profile giọng")
-        elif caps.supports_voice_presets:
-            self.voice_source_var.set("Nguồn giọng: cần chọn Preset giọng")
-        elif caps.supports_voice_profile:
-            self.voice_source_var.set("Nguồn giọng: mặc định của model hoặc Profile giọng")
-        else:
-            self.voice_source_var.set("Nguồn giọng: mặc định của model")
+    def _apply_gpu_safety_defaults(self, model_id: str | None = None) -> None:
+        defaults = self.controller.default_chatterbox_settings(model_id or self._current_model_id())
+        self.gpu_safety_enabled_var.set(bool(defaults["gpu_safety_enabled"]))
+        self.gpu_start_temperature_var.set(int(defaults["gpu_start_temperature_c"]))
+        self.gpu_abort_temperature_var.set(int(defaults["gpu_abort_temperature_c"]))
+        self.gpu_abort_temperature_sustain_var.set(
+            float(defaults["gpu_abort_temperature_sustain_seconds"])
+        )
+        self.gpu_emergency_temperature_var.set(int(defaults["gpu_emergency_temperature_c"]))
+        self.gpu_cooldown_max_wait_var.set(float(defaults["gpu_cooldown_max_wait_seconds"]))
+        self.gpu_resume_temperature_var.set(int(defaults["gpu_resume_temperature_c"]))
+        self.gpu_minimum_free_vram_var.set(int(defaults["gpu_minimum_free_vram_mb"]))
+        self.gpu_runtime_minimum_free_vram_var.set(int(defaults["gpu_runtime_minimum_free_vram_mb"]))
+        self.gpu_maximum_utilization_var.set(int(defaults["gpu_maximum_utilization_percent"]))
+        self.gpu_maximum_encoder_utilization_var.set(
+            int(defaults["gpu_maximum_encoder_utilization_percent"])
+        )
+
+    def _apply_punctuation_defaults(self) -> None:
+        self.punctuation_pause_enabled_var.set(True)
+        self.pause_var.set(320)
+        self.comma_pause_var.set(90)
+        self.clause_pause_var.set(180)
+        self.ellipsis_pause_var.set(450)
+        self._sync_punctuation_controls()
+        self.save_preferences()
+
+    def _sync_tuning_tabs(self, policy) -> None:
+        """Show only the provider tuning tabs this model actually exposes."""
+        groups = set(policy.tuning_groups)
+        for notebook, tabs in self.tuning_tab_groups:
+            if not notebook.winfo_exists():
+                continue
+            selected = notebook.select()
+            for group_id, tab in tabs.items():
+                visible = group_id in groups
+                notebook.tab(tab, state="normal" if visible else "hidden")
+                if not visible and selected == str(tab):
+                    notebook.select(0)
+
+    def _sync_punctuation_tabs(self, policy) -> None:
+        """The whole tab disappears when the selected provider cannot honour it."""
+        visible = bool(policy.punctuation_pauses)
+        for notebook, tab in self.punctuation_tab_groups:
+            if not notebook.winfo_exists():
+                continue
+            selected = notebook.select()
+            notebook.tab(tab, state="normal" if visible else "hidden")
+            if not visible and selected == str(tab):
+                notebook.select(0)
+        self._sync_punctuation_controls()
+
+    def _sync_punctuation_controls(self) -> None:
+        try:
+            supported = bool(
+                self.controller.control_policy(self._current_model_id()).punctuation_pauses
+            )
+        except Exception:
+            supported = False
+        enabled = supported and bool(self.punctuation_pause_enabled_var.get())
+        _set_widgets_state(self.punctuation_enable_checks, supported)
+        _set_widgets_state(self.punctuation_controls, enabled)
+        _set_widgets_state(self.punctuation_reset_buttons, supported)
+
+    def _sync_gpu_safety_controls(self) -> None:
+        """GPU thresholds are editable whenever this model can run on CUDA — the
+        gate is global, not Chatterbox-only."""
+        policy = self.controller.control_policy(self._current_model_id())
+        _set_widgets_state(self.gpu_safety_controls, bool(policy.gpu_safety))
+        enabled = bool(policy.gpu_safety) and bool(self.gpu_safety_enabled_var.get())
+        _set_widgets_state(self.gpu_safety_threshold_controls, enabled)
 
     def refresh_voice_profiles(self) -> None:
         current = self.voice_profile_var.get()
@@ -1560,15 +1923,44 @@ class TkinterApp(GenerationTabsMixin):
         self.apply_model_capabilities()
         self._update_profile_compat()
 
-    def download_selected_model(self) -> None:
-        selected = self.model_table.selection()
-        if not selected:
-            messagebox.showinfo("Thông báo", "Hãy chọn một model trong bảng.")
+    def _on_model_selection(self) -> None:
+        self.refresh_selected_setup()
+        self.update_model_action_states()
+
+    def update_model_action_states(self) -> None:
+        """Enable each management button only when it has something valid to do."""
+        selected = [
+            self._model_status_by_id[model_id]
+            for model_id in self.model_table.selection()
+            if model_id in self._model_status_by_id
+        ]
+        self._model_action_policy = self.controller.model_action_policy(selected)
+        for action, button in self.model_action_buttons.items():
+            state = self._model_action_policy.state(action)
+            button.configure(state="normal" if state.enabled else "disabled")
+            attach_tooltip(button, state.tooltip)
+
+    def _action_targets(self, action: str) -> tuple[str, ...]:
+        return self._model_action_policy.state(action).targets
+
+    def _run_model_action(self, action: str, busy_text: str, operation) -> None:
+        """Run one model operation over every target the policy picked."""
+        targets = self._action_targets(action)
+        if not targets:
             return
+
+        def job(_progress, _cancel) -> str:
+            return "\n".join(f"{model_id}: {operation(model_id)}" for model_id in targets)
+
         self._run_background(
-            "Đang tải model...",
-            lambda _progress, _cancel: self.controller.download_model(selected[0]),
+            f"{busy_text} ({len(targets)})...",
+            job,
             lambda result: (self.refresh_models(), messagebox.showinfo("Thông báo", result)),
+        )
+
+    def download_selected_model(self) -> None:
+        self._run_model_action(
+            model_actions.DOWNLOAD, "Đang tải model", self.controller.download_model
         )
 
     def download_required_models(self) -> None:
@@ -1579,41 +1971,35 @@ class TkinterApp(GenerationTabsMixin):
         )
 
     def remove_selected_model(self) -> None:
-        selected = self.model_table.selection()
-        if not selected:
-            messagebox.showinfo("Thông báo", "Hãy chọn một model trong bảng.")
+        targets = self._action_targets(model_actions.REMOVE)
+        if not targets:
             return
-        model_id = selected[0]
-        preview = self.controller.model_removal_preview(model_id)
-        if not messagebox.askyesno("Xác nhận gỡ model", f"{preview}\n\nBạn có muốn tiếp tục?"):
+        preview = "\n\n".join(
+            self.controller.model_removal_preview(model_id) for model_id in targets
+        )
+        question = f"Gỡ {len(targets)} model?\n\n{preview}\n\nBạn có muốn tiếp tục?"
+        if not messagebox.askyesno("Xác nhận gỡ model", question):
             return
-        self._run_background(
-            "Đang gỡ model...",
-            lambda _progress, _cancel: self.controller.remove_model(model_id),
-            lambda result: (self.refresh_models(), messagebox.showinfo("Thông báo", result)),
+        self._run_model_action(
+            model_actions.REMOVE, "Đang gỡ model", self.controller.remove_model
         )
 
     def install_gpu_for_selected_model(self) -> None:
-        selected = self.model_table.selection()
-        if not selected:
-            messagebox.showinfo("Thông báo", "Hãy chọn một model trong bảng.")
-            return
-        self._run_background(
-            "Đang cài tăng tốc GPU...",
-            lambda _progress, _cancel: self.controller.install_gpu_for_model(selected[0]),
-            lambda result: (self.refresh_models(), messagebox.showinfo("Thông báo", result)),
+        self._run_model_action(
+            model_actions.INSTALL_GPU, "Đang cài tăng tốc GPU", self.controller.install_gpu_for_model
         )
 
     def install_base_for_selected_model(self) -> None:
-        selected = self.model_table.selection()
-        if not selected:
-            messagebox.showinfo("Thông báo", "Hãy chọn một model trong bảng.")
-            return
-        self._run_background(
-            "Đang cài worker/môi trường...",
-            lambda _progress, _cancel: self.controller.install_base_for_model(selected[0]),
-            lambda result: (self.refresh_models(), messagebox.showinfo("Thông báo", result)),
+        self._run_model_action(
+            model_actions.INSTALL_WORKER,
+            "Đang cài worker/môi trường",
+            self.controller.install_base_for_model,
         )
+
+    def open_selected_model_storage(self) -> None:
+        targets = self._action_targets(model_actions.OPEN_STORAGE)
+        if targets:
+            self.controller.open_model_storage(targets[0])
 
     def refresh_license_status(self) -> None:
         if self.license_panel is not None:
@@ -1757,6 +2143,14 @@ def _set_widgets_state(widgets: list, enabled: bool) -> None:
     state = "normal" if enabled else "disabled"
     for widget in widgets:
         widget.configure(state=state)
+
+
+def _set_packed(widget, visible: bool) -> None:
+    """Show/hide a voice form row while preserving its grid position."""
+    if visible:
+        widget.grid()
+    else:
+        widget.grid_remove()
 
 
 def _optional_text(value) -> str:

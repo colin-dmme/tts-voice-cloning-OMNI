@@ -55,6 +55,37 @@ def concatenate_segments(
     return np.concatenate(mono)
 
 
+def concatenate_segments_with_pauses(
+    segments: list[np.ndarray],
+    sample_rate: int,
+    pauses_ms: list[int],
+    crossfade_ms: int = 0,
+) -> np.ndarray:
+    """Join segments with one explicit pause for each adjacent pair."""
+    if not segments:
+        return np.array([], dtype=np.float32)
+    if len(segments) == 1:
+        return _to_mono_float32(segments[0])
+    if len(pauses_ms) != len(segments) - 1:
+        raise ValueError("Số khoảng nghỉ phải bằng số đoạn audio trừ một.")
+    normalized = [max(0, int(value)) for value in pauses_ms]
+    if not any(normalized):
+        return concatenate_segments(segments, sample_rate, 0, crossfade_ms)
+
+    mono = [_to_mono_float32(segment) for segment in segments]
+    pieces: list[np.ndarray] = []
+    for index, segment in enumerate(mono):
+        pieces.append(segment)
+        if index >= len(normalized):
+            continue
+        pause_ms = normalized[index]
+        if pause_ms:
+            pieces.append(
+                np.zeros(int(sample_rate * pause_ms / 1000), dtype=np.float32)
+            )
+    return np.concatenate(pieces)
+
+
 def save_wav(path: Path, audio: np.ndarray, sample_rate: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(path), _to_mono_float32(audio), sample_rate, subtype="PCM_16")

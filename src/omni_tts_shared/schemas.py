@@ -10,6 +10,7 @@ LanguageCode = Literal["auto", "vi", "en", "zh", "ja", "ko", "de", "fr", "ru", "
 OutputMode = Literal["merged", "split"]
 OutputAudioFormat = Literal["wav", "mp3"]
 RuntimeTarget = Literal["auto", "cpu", "cuda"]
+VoiceSourceMode = Literal["fixed", "profile"]
 
 
 class ModelStatus(BaseModel):
@@ -49,6 +50,52 @@ class ModelCapabilities(BaseModel):
     emotions: list[str] = Field(default_factory=list)
 
 
+class VoiceInputConfig(BaseModel):
+    """Declarative voice-source contract consumed by services and UI presenters."""
+
+    modes: list[VoiceSourceMode] = Field(default_factory=list)
+    default_mode: VoiceSourceMode = "fixed"
+    fixed_label: str = "Giọng cố định"
+    fixed_tooltip: str = (
+        "Giọng đã được huấn luyện sẵn. Không dùng Profile giọng hoặc audio tham chiếu."
+    )
+    profile_label: str = "Profile giọng"
+    profile_tooltip: str = (
+        "Clone giọng từ Profile đã lưu. Chỉ dùng khi model hỗ trợ audio tham chiếu."
+    )
+
+    @model_validator(mode="after")
+    def validate_modes(self):
+        self.modes = list(dict.fromkeys(self.modes))
+        if not self.modes:
+            self.modes = ["fixed"]
+        if self.default_mode not in self.modes:
+            self.default_mode = self.modes[0]
+        return self
+
+
+class VoiceOption(BaseModel):
+    voice_id: str
+    label: str
+
+
+class GenerationFormDescriptor(BaseModel):
+    model_id: str
+    voice_modes: list[VoiceSourceMode]
+    selected_voice_mode: VoiceSourceMode
+    show_voice_mode_selector: bool
+    fixed_label: str
+    fixed_tooltip: str
+    profile_label: str
+    profile_tooltip: str
+    fixed_voices: list[VoiceOption] = Field(default_factory=list)
+    default_fixed_voice_id: str | None = None
+    requires_fixed_voice: bool = False
+    show_fixed_voice: bool = False
+    show_profile: bool = False
+    status_text: str = ""
+
+
 class RuntimeStatus(BaseModel):
     model_id: str
     display_name: str
@@ -79,6 +126,7 @@ class GenerateSpeechRequest(BaseModel):
     text: str = Field(min_length=1)
     language: LanguageCode = "vi"
     model_id: str = "omnivoice_vietnamese"
+    voice_source_mode: VoiceSourceMode | None = None
     voice_profile_id: str | None = None
     reference_audio_path: Path | None = None
     reference_text: str | None = None
@@ -104,8 +152,24 @@ class GenerateSpeechRequest(BaseModel):
     chatterbox_repetition_penalty: float | None = Field(default=None, ge=1.0, le=3.0)
     chatterbox_seed: int | None = Field(default=None, ge=0)
     chatterbox_norm_loudness: bool = True
-    sentence_pause_ms: int = Field(default=450, ge=0, le=3000)
-    paragraph_pause_ms: int = Field(default=0, ge=0, le=10000)
+    gpu_safety_enabled: bool = True
+    gpu_start_temperature_c: int | None = Field(default=None, ge=50, le=85)
+    gpu_abort_temperature_c: int | None = Field(default=None, ge=60, le=90)
+    gpu_abort_temperature_sustain_seconds: float | None = Field(default=None, ge=0.0, le=120.0)
+    gpu_emergency_temperature_c: int | None = Field(default=None, ge=60, le=120)
+    gpu_cooldown_max_wait_seconds: float | None = Field(default=None, ge=0.0, le=3600.0)
+    gpu_resume_temperature_c: int | None = Field(default=None, ge=45, le=80)
+    gpu_minimum_free_vram_mb: int | None = Field(default=None, ge=256, le=65536)
+    gpu_runtime_minimum_free_vram_mb: int | None = Field(default=None, ge=128, le=16384)
+    gpu_maximum_utilization_percent: int | None = Field(default=None, ge=0, le=100)
+    gpu_maximum_encoder_utilization_percent: int | None = Field(default=None, ge=0, le=100)
+    punctuation_pause_enabled: bool = True
+    sentence_pause_ms: int = Field(default=320, ge=0, le=3000)
+    comma_pause_ms: int = Field(default=90, ge=0, le=3000)
+    clause_pause_ms: int = Field(default=180, ge=0, le=3000)
+    ellipsis_pause_ms: int = Field(default=450, ge=0, le=3000)
+    chunk_pause_ms: int = Field(default=120, ge=0, le=3000)
+    paragraph_pause_ms: int = Field(default=600, ge=0, le=10000)
     srt_file_padding_ms: int = Field(default=0, ge=0, le=10000)
     max_chunk_chars: int = Field(default=220, ge=60, le=800)
     output_dir: Path | None = None
@@ -121,14 +185,64 @@ class GenerateSpeechRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def migrate_legacy_pause_fields(cls, data):
-        if isinstance(data, dict) and "paragraph_pause_ms" not in data and "srt_file_padding_ms" in data:
+        if isinstance(data, dict):
             data = dict(data)
-            data["paragraph_pause_ms"] = data["srt_file_padding_ms"]
+            if "paragraph_pause_ms" not in data and "srt_file_padding_ms" in data:
+                data["paragraph_pause_ms"] = data["srt_file_padding_ms"]
+            # Before punctuation-aware providers existed, sentence_pause_ms was
+            # actually the pause between Core chunks. Preserve old API calls.
+            punctuation_keys = {
+                "punctuation_pause_enabled",
+                "comma_pause_ms",
+                "clause_pause_ms",
+                "ellipsis_pause_ms",
+            }
+            if (
+                "chunk_pause_ms" not in data
+                and "sentence_pause_ms" in data
+                and not punctuation_keys.intersection(data)
+            ):
+                data["chunk_pause_ms"] = data["sentence_pause_ms"]
         return data
 
     @model_validator(mode="after")
     def sync_legacy_pause_field(self):
         self.srt_file_padding_ms = self.paragraph_pause_ms
+        return self
+
+    @model_validator(mode="after")
+    def normalize_voice_source(self):
+        if self.voice_source_mode is None:
+            self.voice_source_mode = (
+                "profile"
+                if self.voice_profile_id or self.reference_audio_path
+                else "fixed"
+            )
+        if self.voice_source_mode == "fixed":
+            self.voice_profile_id = None
+            self.reference_audio_path = None
+            self.reference_text = None
+        else:
+            self.speaker_id = None
+        return self
+
+    @model_validator(mode="after")
+    def validate_gpu_safety_thresholds(self):
+        if self.gpu_resume_temperature_c is not None and self.gpu_start_temperature_c is not None:
+            if self.gpu_resume_temperature_c > self.gpu_start_temperature_c:
+                raise ValueError("Nhiệt độ chạy lại phải nhỏ hơn hoặc bằng nhiệt độ bắt đầu.")
+        if self.gpu_start_temperature_c is not None and self.gpu_abort_temperature_c is not None:
+            if self.gpu_start_temperature_c >= self.gpu_abort_temperature_c:
+                raise ValueError("Nhiệt độ bắt đầu phải thấp hơn nhiệt độ dừng.")
+        if self.gpu_emergency_temperature_c is not None and self.gpu_abort_temperature_c is not None:
+            if self.gpu_emergency_temperature_c < self.gpu_abort_temperature_c:
+                raise ValueError("Ngưỡng nguy cấp không được thấp hơn ngưỡng bắt đầu đếm quá nhiệt.")
+        if (
+            self.gpu_runtime_minimum_free_vram_mb is not None
+            and self.gpu_minimum_free_vram_mb is not None
+            and self.gpu_runtime_minimum_free_vram_mb > self.gpu_minimum_free_vram_mb
+        ):
+            raise ValueError("VRAM tối thiểu khi chạy không được lớn hơn VRAM cần trước khi bắt đầu.")
         return self
 
 

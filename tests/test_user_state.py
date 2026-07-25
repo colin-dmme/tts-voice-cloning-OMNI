@@ -44,6 +44,7 @@ class UserStateTest(unittest.TestCase):
                 json.dumps(
                     {
                         "model_id": "qwen3_tts_17b_base",
+                        "voice_source_mode": "profile",
                         "voice_profile_id": "voice-123",
                         "window_geometry": "1800x900+20+20",
                     },
@@ -80,8 +81,44 @@ class UserStateTest(unittest.TestCase):
                 (shutil_root / "config" / "ui_tkinter.json").read_text(encoding="utf-8")
             )
             self.assertEqual(restored_settings["model_id"], "qwen3_tts_17b_base")
+            self.assertEqual(restored_settings["voice_source_mode"], "profile")
             self.assertEqual(restored_settings["voice_profile_id"], "voice-123")
             self.assertNotIn("window_geometry", restored_settings)
+
+    def test_export_and_restore_covers_ui_qt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config_dir = root / "config"
+            config_dir.mkdir(parents=True)
+            (config_dir / "ui_qt.json").write_text(
+                json.dumps(
+                    {
+                        "model_id": "vieneu_v3_turbo",
+                        "voice_source_mode": "profile",
+                        "speed": 1.1,
+                        "window_geometry_b64": "AAAA",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            export_user_state(root)
+            payload = json.loads(
+                (root / "user_state" / "settings.json").read_text(encoding="utf-8")
+            )
+            self.assertIn("ui_qt", payload)
+            self.assertEqual(payload["ui_qt"]["model_id"], "vieneu_v3_turbo")
+
+            target = root / "new-machine"
+            (target / "user_state").mkdir(parents=True)
+            _copy_tree(root / "user_state", target / "user_state")
+            restore_user_state(target)
+
+            restored = json.loads((target / "config" / "ui_qt.json").read_text(encoding="utf-8"))
+            self.assertEqual(restored["model_id"], "vieneu_v3_turbo")
+            self.assertEqual(restored["speed"], 1.1)
+            self.assertNotIn("window_geometry_b64", restored)
 
     def test_voice_profile_manager_resolves_stale_absolute_sample_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

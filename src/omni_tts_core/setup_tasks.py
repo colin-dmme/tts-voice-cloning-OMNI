@@ -6,6 +6,7 @@ from pathlib import Path
 from omni_tts_core.model_registry import ModelRegistry, ModelSpec
 from omni_tts_core.model_storage import ModelStorage
 from omni_tts_core.paths import PROJECT_ROOT
+from omni_tts_core.provider_registry import provider_descriptor
 from omni_tts_core.runtime_devices import configured_runtime_device
 from omni_tts_core.runtime_status import RuntimeStatusService
 from omni_tts_core.storage_paths import local_storage_config_path, storage_roots
@@ -115,7 +116,8 @@ class SetupService:
 
 
 def _model_payload_status(spec: ModelSpec, model_status) -> SetupTaskStatus:
-    if spec.provider in {"vieneu", "valtec"}:
+    descriptor = provider_descriptor(spec.provider)
+    if descriptor and descriptor.storage_mode == "hf_cache":
         ready = model_status.hf_cached is not False
         label = "HF cache/model"
         detail_ready = "Model đã có trong HF cache dùng chung."

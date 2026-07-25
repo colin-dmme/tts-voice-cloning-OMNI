@@ -1,0 +1,878 @@
+# Catalog riêng cho các giọng Piper tiếng Việt. Tkinter và PySide6 cùng đọc
+# qua ModelRegistry/AppController; không GUI nào chứa danh sách giọng hardcode.
+
+x-piper-fixed: &piper-fixed
+  provider: "piper"
+  model_type: "tts"
+  language_priority: "vi"
+  required: false
+  capabilities:
+    supported_languages: ["vi"]
+    supports_voice_profile: false
+    supports_voice_presets: false
+    supports_reference_text: false
+    supports_speed: true
+    supports_pitch_shift: false
+    supports_emotion: false
+
+x-piper-single: &piper-single
+  <<: *piper-fixed
+  voice_input:
+    modes: ["fixed"]
+    default_mode: "fixed"
+    fixed_label: "Giọng Piper cố định"
+    fixed_tooltip: "Model đã huấn luyện sẵn; không dùng Profile giọng hoặc audio mẫu."
+
+x-piper-nghi: &piper-nghi
+  <<: *piper-single
+  hf_repo: "doof-ferb/nghitts-copy"
+  notes: "Giọng Piper ONNX từ mirror NGHI-TTS, tải và gỡ độc lập."
+
+tts_models:
+  piper_vais1000_medium:
+    <<: *piper-single
+    display_name: "Piper VAIS1000 Medium (nữ, official)"
+    local_path: "models/piper/official/vais1000-medium"
+    hf_repo: "speaches-ai/piper-vi_VN-vais1000-medium"
+    runtime:
+      model_file: "model.onnx"
+      config_file: "config.json"
+      download_allow_patterns: ["model.onnx", "config.json"]
+    notes: "Piper tiếng Việt official, một speaker, quality medium, 22.05 kHz."
+    catalog_info:
+      category: "official-cpu"
+      origin: "official"
+      family: "Piper official"
+      variant: "VAIS1000 medium"
+      variant_badge: "Nữ · Medium"
+      source_repo: "speaches-ai/piper-vi_VN-vais1000-medium"
+      risk: "test"
+      description: "Baseline Piper official chất lượng medium, khác family NGHI-TTS."
+      highlight: "Một speaker · 22.05 kHz"
+      quality_score: 3
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_25hours_single_low:
+    <<: *piper-single
+    display_name: "Piper 25hours Single Low (official)"
+    local_path: "models/piper/official/25hours-single-low"
+    hf_repo: "speaches-ai/piper-vi_VN-25hours_single-low"
+    runtime:
+      model_file: "model.onnx"
+      config_file: "config.json"
+      download_allow_patterns: ["model.onnx", "config.json"]
+    notes: "Piper tiếng Việt official, một speaker, quality low, 16 kHz."
+    catalog_info:
+      category: "official-cpu"
+      origin: "official"
+      family: "Piper official"
+      variant: "25hours single low"
+      variant_badge: "Single · Low"
+      source_repo: "speaches-ai/piper-vi_VN-25hours_single-low"
+      risk: "test"
+      description: "Model official 16 kHz để làm baseline tốc độ/chất lượng."
+      highlight: "Một speaker · 16 kHz"
+      quality_score: 2
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_pretrained_vi_female:
+    <<: *piper-single
+    display_name: "Piper Pretrained VI (nữ)"
+    local_path: "models/piper/datasetsandmodels/pretrained-vi-female"
+    hf_repo: "datasetsANDmodels/vietnamese-tts"
+    runtime:
+      model_file: "pretrained_vi.onnx"
+      config_file: "pretrained_vi.onnx.json"
+      download_allow_patterns: ["pretrained_vi.onnx", "pretrained_vi.onnx.json"]
+    notes: "Repository mô tả đây là giọng nữ Vietnamese ONNX; metadata huấn luyện còn ít."
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper/VITS"
+      variant: "Pretrained VI female"
+      variant_badge: "Nữ"
+      source_repo: "datasetsANDmodels/vietnamese-tts"
+      risk: "test"
+      description: "Giọng nữ độc lập với NGHI-TTS để nghe A/B."
+      highlight: "Nguồn huấn luyện khác"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  # NGHI-TTS — nữ
+  piper_mai_phuong:
+    <<: *piper-nghi
+    display_name: "Piper Mai Phương"
+    local_path: "models/piper/nghitts/mai-phuong"
+    runtime:
+      model_file: "piper-tts/maiphuong.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/maiphuong.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Mai Phương"
+      variant_badge: "Nữ"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nữ Piper cố định để A/B narration."
+      highlight: "Nữ narration"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_minh_thu:
+    <<: *piper-nghi
+    display_name: "Piper Minh Thu"
+    local_path: "models/piper/nghitts/minh-thu"
+    runtime:
+      model_file: "piper-tts/minhthu.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/minhthu.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Minh Thu"
+      variant_badge: "Nữ"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nữ Piper cố định để thử truyện và podcast."
+      highlight: "Nữ narration"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_my_tam_v1:
+    <<: *piper-nghi
+    display_name: "Piper Mỹ Tâm v1"
+    local_path: "models/piper/nghitts/my-tam-v1"
+    runtime:
+      model_file: "piper-tts/mytam2.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/mytam2.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Mỹ Tâm v1"
+      variant_badge: "Nữ · MT v1"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Biến thể Mỹ Tâm thứ nhất để nghe A/B cùng bản 2794."
+      highlight: "Có hai weights"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_my_tam_2794:
+    <<: *piper-nghi
+    display_name: "Piper Mỹ Tâm 2794 (bản 2)"
+    local_path: "models/piper/nghitts/my-tam-2794"
+    runtime:
+      model_file: "piper-tts/mytam2794.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/mytam2794.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Mỹ Tâm 2794"
+      variant_badge: "Nữ · MT v2"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Biến thể Mỹ Tâm thứ hai, weights khác bản v1."
+      highlight: "Có hai weights"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_thanh_phuong_2:
+    <<: *piper-nghi
+    display_name: "Piper Thanh Phương Viettel 2"
+    local_path: "models/piper/nghitts/thanh-phuong-2"
+    runtime:
+      model_file: "piper-tts/thanhphuong2.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/thanhphuong2.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Thanh Phương 2"
+      variant_badge: "Nữ"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng community có tên Thanh Phương Viettel."
+      highlight: "Nữ tổng đài/narration"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  # NGHI-TTS — nam
+  piper_chieu_thanh:
+    <<: *piper-nghi
+    display_name: "Piper Chiếu Thành"
+    local_path: "models/piper/nghitts/chieu-thanh"
+    runtime:
+      model_file: "piper-tts/chieuthanh.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/chieuthanh.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Chiếu Thành"
+      variant_badge: "Nam"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nam Piper cố định từ catalog NGHI-TTS."
+      highlight: "Nam narration"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_duy_oryx_3175:
+    <<: *piper-nghi
+    display_name: "Piper Duy Oryx 3175"
+    local_path: "models/piper/nghitts/duy-oryx-3175"
+    runtime:
+      model_file: "piper-tts/duyoryx3175.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/duyoryx3175.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Duy Oryx 3175"
+      variant_badge: "Nam siêu trầm"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nam rất trầm theo mô tả của repository."
+      highlight: "Nam siêu trầm"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_lac_phi:
+    <<: *piper-nghi
+    display_name: "Piper Lạc Phi"
+    local_path: "models/piper/nghitts/lac-phi"
+    runtime:
+      model_file: "piper-tts/lacphi.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/lacphi.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Lạc Phi"
+      variant_badge: "Nam"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nam Piper cố định để thử narration."
+      highlight: "Nam narration"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_manh_dung:
+    <<: *piper-nghi
+    display_name: "Piper Mạnh Dũng"
+    local_path: "models/piper/nghitts/manh-dung"
+    runtime:
+      model_file: "piper-tts/manhdung.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/manhdung.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Mạnh Dũng"
+      variant_badge: "Nam"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nam Piper cố định để thử truyện và tài liệu."
+      highlight: "Nam narration"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_minh_khang:
+    <<: *piper-nghi
+    display_name: "Piper Minh Khang (Kiến Giải Mã)"
+    local_path: "models/piper/nghitts/minh-khang"
+    runtime:
+      model_file: "piper-tts/minhkhang.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/minhkhang.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Minh Khang"
+      variant_badge: "Nam"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nam community được catalog ghi là Minh Khang/Kiến Giải Mã."
+      highlight: "Nam thuyết minh"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_minh_quang:
+    <<: *piper-nghi
+    display_name: "Piper Minh Quang"
+    local_path: "models/piper/nghitts/minh-quang"
+    runtime:
+      model_file: "piper-tts/minhquang.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/minhquang.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Minh Quang"
+      variant_badge: "Nam"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nam Piper cố định để thử narration."
+      highlight: "Nam narration"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_tai_an_2:
+    <<: *piper-nghi
+    display_name: "Piper Tài An 2 (CD Media)"
+    local_path: "models/piper/nghitts/tai-an-2"
+    runtime:
+      model_file: "piper-tts/taian2.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/taian2.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Tài An 2"
+      variant_badge: "Nam · TA v1"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Biến thể Tài An thứ nhất để nghe A/B."
+      highlight: "Nam · có hai weights"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_tai_an_4:
+    <<: *piper-nghi
+    display_name: "Piper Tài An 4 (CD Media)"
+    local_path: "models/piper/nghitts/tai-an-4"
+    runtime:
+      model_file: "piper-tts/taian4.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/taian4.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Tài An 4"
+      variant_badge: "Nam · TA v2"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Biến thể Tài An thứ hai, weights khác bản 2."
+      highlight: "Nam · có hai weights"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_tran_thanh_3870:
+    <<: *piper-nghi
+    display_name: "Piper Trấn Thành 3870"
+    local_path: "models/piper/nghitts/tran-thanh-3870"
+    runtime:
+      model_file: "piper-tts/tranthanh3870.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/tranthanh3870.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Trấn Thành 3870"
+      variant_badge: "Nam"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Tên giọng do catalog community công bố; cần nghe A/B."
+      highlight: "Nam biểu cảm"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_viet_thao_3886:
+    <<: *piper-nghi
+    display_name: "Piper Việt Thảo 3886"
+    local_path: "models/piper/nghitts/viet-thao-3886"
+    runtime:
+      model_file: "piper-tts/vietthao3886.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/vietthao3886.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Việt Thảo 3886"
+      variant_badge: "Nam"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nam kể chuyện community để nghe A/B."
+      highlight: "Nam kể chuyện"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  # NGHI-TTS — tên file bổ sung chưa có mô tả rõ trên model card
+  piper_adam_1:
+    <<: *piper-nghi
+    display_name: "Piper Adam 1 (nam viral)"
+    local_path: "models/piper/nghitts/adam-1"
+    runtime:
+      model_file: "piper-tts/adam1.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/adam1.onnx", "piper-tts/config.json"]
+      model_sha256: "90e73d171447825fa8442fea8bf39c54bcfb206958f05170361e0fa3ba5c48eb"
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Adam 1"
+      variant_badge: "Nam · Viral"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nam Adam trong bộ NGHI-TTS. File khớp SHA-256 với nguồn Drive chính thức và các mirror; đây không phải model ElevenLabs Adam gốc."
+      highlight: "Nam viral · nghe A/B"
+      quality_score: 3
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_yan_new:
+    <<: *piper-nghi
+    display_name: "Piper Yan NEW"
+    local_path: "models/piper/nghitts/yan-new"
+    runtime:
+      model_file: "piper-tts/yannew.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/yannew.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community"
+      origin: "community"
+      family: "Piper NGHI-TTS"
+      variant: "Yan NEW"
+      variant_badge: "Chưa phân loại"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Model tiếng Việt có trong package NGHI-TTS; model card chưa mô tả rõ tên giọng."
+      highlight: "Cần nghe phân loại"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_ngoc_huyen_new:
+    <<: *piper-fixed
+    display_name: "Piper Ngọc Huyền NEW (bản 2, CPU siêu nhanh)"
+    local_path: "models/piper/nghitts/ngoc-huyen-new"
+    hf_repo: "doof-ferb/nghitts-copy"
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Ngọc Huyền NEW — bản 2"
+      fixed_tooltip: "Weights khác bản Ngọc Huyền hiện có; không dùng Profile giọng."
+    runtime:
+      model_file: "piper-tts/ngochuyennew.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns:
+        - "piper-tts/ngochuyennew.onnx"
+        - "piper-tts/config.json"
+    notes: "Biến thể Ngọc Huyền thứ hai từ mirror NGHI-TTS; hash weights khác bản sannht."
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Ngọc Huyền NEW"
+      variant_badge: "NH v2"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Bản Ngọc Huyền thứ hai để nghe A/B trực tiếp với bản v1."
+      highlight: "Khác weights bản v1"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+      recommend_for: "A/B chất giọng Ngọc Huyền, review phim và narration dài"
+      install_note: "Tải riêng khoảng 64 MB; dùng chung Piper worker."
+
+  piper_calm_woman_3688:
+    <<: *piper-fixed
+    display_name: "Piper Nữ trầm tĩnh 3688 (CPU siêu nhanh)"
+    local_path: "models/piper/nghitts/calm-woman-3688"
+    hf_repo: "doof-ferb/nghitts-copy"
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Nữ trầm tĩnh 3688"
+      fixed_tooltip: "Giọng nữ community thiên về nhịp kể bình tĩnh; không dùng Profile giọng."
+    runtime:
+      model_file: "piper-tts/calmwoman3688.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/calmwoman3688.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Calm Woman 3688"
+      variant_badge: "Nữ kể chậm"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nữ trầm tĩnh để thử nội dung kể chuyện và podcast."
+      highlight: "Nữ trầm tĩnh"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_deep_man_3909:
+    <<: *piper-fixed
+    display_name: "Piper Nam trầm 3909 (CPU siêu nhanh)"
+    local_path: "models/piper/nghitts/deep-man-3909"
+    hf_repo: "doof-ferb/nghitts-copy"
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Nam trầm 3909"
+      fixed_tooltip: "Giọng nam trầm community; không dùng Profile giọng."
+    runtime:
+      model_file: "piper-tts/deepman3909.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/deepman3909.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Deep Man 3909"
+      variant_badge: "Nam trầm"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nam trầm để thử truyện, tài liệu và nội dung nghiêm túc."
+      highlight: "Nam trầm"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_phuong_trang:
+    <<: *piper-fixed
+    display_name: "Piper Phương Trang (CPU siêu nhanh)"
+    local_path: "models/piper/nghitts/phuong-trang"
+    hf_repo: "doof-ferb/nghitts-copy"
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Phương Trang"
+      fixed_tooltip: "Giọng nữ cố định community; không dùng Profile giọng."
+    runtime:
+      model_file: "piper-tts/phuongtrang.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/phuongtrang.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Phương Trang"
+      variant_badge: "Nữ"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nữ cố định để A/B narration."
+      highlight: "Nữ narration"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_thien_tam:
+    <<: *piper-fixed
+    display_name: "Piper Thiện Tâm (CPU siêu nhanh)"
+    local_path: "models/piper/nghitts/thien-tam"
+    hf_repo: "doof-ferb/nghitts-copy"
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Thiện Tâm"
+      fixed_tooltip: "Giọng nam cố định community; không dùng Profile giọng."
+    runtime:
+      model_file: "piper-tts/thientam.onnx"
+      config_file: "piper-tts/config.json"
+      download_allow_patterns: ["piper-tts/thientam.onnx", "piper-tts/config.json"]
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Thiện Tâm"
+      variant_badge: "Nam"
+      source_repo: "doof-ferb/nghitts-copy"
+      risk: "test"
+      description: "Giọng nam cố định để A/B narration."
+      highlight: "Nam narration"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_mai_linh_250626:
+    <<: *piper-fixed
+    display_name: "Piper Mai Linh 250626 (family khác, CPU nhanh)"
+    local_path: "models/piper/beyoru/mai-linh-250626"
+    hf_repo: "beyoru/MaiLinh-TTS-CoreML"
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Mai Linh 250626"
+      fixed_tooltip: "Model Piper/VITS từ nguồn huấn luyện khác nhóm NGHI; không dùng Profile giọng."
+    runtime:
+      model_file: "Mai Linh/mailinh250626.onnx"
+      config_file: "Mai Linh/mailinh250626.onnx.json"
+      download_allow_patterns:
+        - "Mai Linh/mailinh250626.onnx"
+        - "Mai Linh/mailinh250626.onnx.json"
+    notes: "Nguồn độc lập với nhóm NGHI-TTS, phù hợp làm mẫu A/B khác family."
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Mai Linh 250626"
+      variant_badge: "Family khác"
+      source_repo: "beyoru/MaiLinh-TTS-CoreML"
+      risk: "test"
+      description: "Giọng nữ Piper/VITS khác nguồn huấn luyện để so chất lượng với nhóm NGHI."
+      highlight: "Family huấn luyện khác"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_nam_mien_nam_tram:
+    <<: *piper-fixed
+    display_name: "Piper Nam miền Nam trầm (CPU siêu nhanh)"
+    local_path: "models/piper/jimmyvu/deepvoice-man-south"
+    hf_repo: "jimmyvu/viPiper"
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Nam miền Nam trầm"
+      fixed_tooltip: "Giọng nam miền Nam trầm theo mô tả của repository; không dùng Profile giọng."
+    runtime:
+      model_file: "deepvoice-man-south.onnx"
+      config_file: "deepvoice-man-south.onnx.json"
+      download_allow_patterns: ["deepvoice-man-south.onnx", "deepvoice-man-south.onnx.json"]
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Deep Voice Man South"
+      variant_badge: "Nam miền Nam"
+      source_repo: "jimmyvu/viPiper"
+      risk: "test"
+      description: "Giọng nam miền Nam trầm để thử truyện và podcast."
+      highlight: "Nam miền Nam"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_nam_thuyet_phuc:
+    <<: *piper-fixed
+    display_name: "Piper Nam thân thiện thuyết phục (CPU siêu nhanh)"
+    local_path: "models/piper/jimmyvu/friendly-man-persuasive"
+    hf_repo: "jimmyvu/viPiper"
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Nam thân thiện thuyết phục"
+      fixed_tooltip: "Giọng nam thân thiện theo mô tả của repository; không dùng Profile giọng."
+    runtime:
+      model_file: "friendly-man-persuasive.onnx"
+      config_file: "friendly-man-persuasive.onnx.json"
+      download_allow_patterns:
+        - "friendly-man-persuasive.onnx"
+        - "friendly-man-persuasive.onnx.json"
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Friendly Man Persuasive"
+      variant_badge: "Nam thuyết phục"
+      source_repo: "jimmyvu/viPiper"
+      risk: "test"
+      description: "Giọng nam thân thiện để thử quảng bá, giải thích và kể chuyện."
+      highlight: "Nam thân thiện"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_nam_mien_nam_nhanh:
+    <<: *piper-fixed
+    display_name: "Piper Nam miền Nam mạnh/nhanh (CPU siêu nhanh)"
+    local_path: "models/piper/jimmyvu/loud-fast-man-southern"
+    hf_repo: "jimmyvu/viPiper"
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Nam miền Nam mạnh/nhanh"
+      fixed_tooltip: "Giọng nam miền Nam mạnh và nhanh theo mô tả repository; không dùng Profile giọng."
+    runtime:
+      model_file: "loud-fast-man-southern.onnx"
+      config_file: "loud-fast-man-southern.onnx.json"
+      download_allow_patterns:
+        - "loud-fast-man-southern.onnx"
+        - "loud-fast-man-southern.onnx.json"
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "Loud Fast Man Southern"
+      variant_badge: "Nam nhanh"
+      source_repo: "jimmyvu/viPiper"
+      risk: "test"
+      description: "Giọng nam miền Nam cường độ cao để thử video nhịp nhanh."
+      highlight: "Nam mạnh và nhanh"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 500
+
+  piper_vivos_x_low:
+    <<: *piper-fixed
+    display_name: "Piper VIVOS x-low (nhẹ nhất, CPU siêu nhanh)"
+    local_path: "models/piper/speaches/vivos-x-low"
+    hf_repo: "speaches-ai/piper-vi_VN-vivos-x_low"
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "VIVOS x-low"
+      fixed_tooltip: "Chọn một trong 65 speaker có sẵn; không dùng Profile giọng."
+    capabilities:
+      supported_languages: ["vi"]
+      supports_voice_profile: false
+      supports_voice_presets: true
+      supports_reference_text: false
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    voice_presets:
+      "0": "VIVOSSPK13"
+      "1": "VIVOSSPK14"
+      "2": "VIVOSSPK15"
+      "3": "VIVOSSPK16"
+      "4": "VIVOSSPK17"
+      "5": "VIVOSSPK18"
+      "6": "VIVOSSPK19"
+      "7": "VIVOSSPK20"
+      "8": "VIVOSSPK21"
+      "9": "VIVOSSPK22"
+      "10": "VIVOSSPK26"
+      "11": "VIVOSSPK34"
+      "12": "VIVOSSPK40"
+      "13": "VIVOSSPK41"
+      "14": "VIVOSSPK42"
+      "15": "VIVOSSPK43"
+      "16": "VIVOSSPK44"
+      "17": "VIVOSSPK45"
+      "18": "VIVOSSPK46"
+      "19": "VIVOSSPK38"
+      "20": "VIVOSSPK31"
+      "21": "VIVOSSPK35"
+      "22": "VIVOSSPK01"
+      "23": "VIVOSSPK02"
+      "24": "VIVOSSPK03"
+      "25": "VIVOSSPK04"
+      "26": "VIVOSSPK05"
+      "27": "VIVOSSPK06"
+      "28": "VIVOSSPK07"
+      "29": "VIVOSSPK08"
+      "30": "VIVOSSPK09"
+      "31": "VIVOSSPK10"
+      "32": "VIVOSSPK11"
+      "33": "VIVOSSPK12"
+      "34": "VIVOSSPK27"
+      "35": "VIVOSSPK36"
+      "36": "VIVOSSPK33"
+      "37": "VIVOSSPK32"
+      "38": "VIVOSSPK29"
+      "39": "VIVOSSPK39"
+      "40": "VIVOSSPK25"
+      "41": "VIVOSSPK28"
+      "42": "VIVOSSPK30"
+      "43": "VIVOSSPK37"
+      "44": "VIVOSSPK23"
+      "45": "VIVOSSPK24"
+      "46": "VIVOSDEV02"
+      "47": "VIVOSDEV03"
+      "48": "VIVOSDEV01"
+      "49": "VIVOSDEV04"
+      "50": "VIVOSDEV05"
+      "51": "VIVOSDEV06"
+      "52": "VIVOSDEV07"
+      "53": "VIVOSDEV08"
+      "54": "VIVOSDEV09"
+      "55": "VIVOSDEV10"
+      "56": "VIVOSDEV11"
+      "57": "VIVOSDEV12"
+      "58": "VIVOSDEV13"
+      "59": "VIVOSDEV14"
+      "60": "VIVOSDEV15"
+      "61": "VIVOSDEV16"
+      "62": "VIVOSDEV17"
+      "63": "VIVOSDEV18"
+      "64": "VIVOSDEV19"
+    default_voice_preset: "0"
+    runtime:
+      model_file: "model.onnx"
+      config_file: "config.json"
+      download_allow_patterns: ["model.onnx", "config.json"]
+    notes: "Model x-low khoảng 28 MB với 65 speaker; ưu tiên nhẹ và tốc độ."
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Piper"
+      variant: "VIVOS x-low"
+      variant_badge: "28 MB"
+      source_repo: "speaches-ai/piper-vi_VN-vivos-x_low"
+      risk: "test"
+      description: "Piper cực nhẹ, cho phép chọn đủ 65 speaker VIVOS trong cả hai GUI."
+      highlight: "65 speaker · nhẹ nhất"
+      quality_score: 0
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 300

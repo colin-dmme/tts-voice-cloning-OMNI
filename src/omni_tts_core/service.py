@@ -3,25 +3,31 @@ from __future__ import annotations
 from pathlib import Path
 from threading import Event
 
-from omni_tts_core.audio.wav_tools import concatenate_segments, duration_seconds, read_audio_mono, save_audio
+from omni_tts_core.audio.wav_tools import (
+    concatenate_segments,
+    concatenate_segments_with_pauses,
+    duration_seconds,
+    read_audio_mono,
+    save_audio,
+)
 from omni_tts_core.config import AppSettings
 from omni_tts_core.engine_profile_cache import EngineProfileCache
+from omni_tts_core.generation_form import GenerationFormPresenter
 from omni_tts_core.model_catalog import open_catalog
-from omni_tts_core.engines.chatterbox_engine import ChatterboxSubprocessEngine
-from omni_tts_core.engines.base import TtsEngineRequest, TtsEngineResult
-from omni_tts_core.engines.f5tts_engine import F5TtsSubprocessEngine
-from omni_tts_core.engines.omnivoice_engine import OmniVoiceEngine
-from omni_tts_core.engines.qwen_engine import QwenSubprocessEngine
-from omni_tts_core.engines.valtec_engine import ValtecSubprocessEngine
-from omni_tts_core.engines.vieneu_engine import VieneuSubprocessEngine
+from omni_tts_core.engines.base import BaseTtsEngine, TtsEngineRequest, TtsEngineResult
 from omni_tts_core.jobs.store import JobStore
-from omni_tts_core.model_registry import ModelRegistry, ModelSpec
+from omni_tts_core.model_registry import ModelRegistry, ModelSpec, effective_voice_input
 from omni_tts_core.model_storage import ModelStorage
 from omni_tts_core.progress import ProgressCallback, check_cancel, emit_progress
+from omni_tts_core.provider_registry import provider_descriptor
 from omni_tts_core.runtime_status import RuntimeStatusService
 from omni_tts_core.setup_tasks import SetupService
 from omni_tts_core.subtitles.srt_builder import write_srt
 from omni_tts_core.text.splitter import split_text
+from omni_tts_core.text.punctuation_pauses import (
+    PunctuationPauseConfig,
+    pause_after_text,
+)
 from omni_tts_core.text.source_reader import read_source_text, read_source_units, text_units_from_blank_lines
 from omni_tts_core.text.vi_normalizer import normalize_vietnamese_text
 from omni_tts_core.voice_profile_policy import ProfileCompatibility, VoiceProfilePolicy
@@ -31,6 +37,7 @@ from omni_tts_shared.languages import language_label
 from omni_tts_shared.schemas import (
     GenerateSpeechRequest,
     GenerateSpeechResult,
+    GenerationFormDescriptor,
     ModelCapabilities,
     ModelStatus,
     ProfileSaveWarning,
@@ -59,16 +66,9 @@ class TtsService:
         self.voice_profiles = voice_profiles or VoiceProfileManager()
         self.engine_cache = EngineProfileCache()
         self.voice_policy = VoiceProfilePolicy(self.registry, self.engine_cache)
+        self.generation_form = GenerationFormPresenter(self.registry)
         self.job_store = JobStore(self.settings.outputs_root)
-        self._engines: dict[
-            str,
-            OmniVoiceEngine
-            | ChatterboxSubprocessEngine
-            | VieneuSubprocessEngine
-            | QwenSubprocessEngine
-            | ValtecSubprocessEngine
-            | F5TtsSubprocessEngine,
-        ] = {}
+        self._engines: dict[str, BaseTtsEngine] = {}
 
     def list_voice_profiles(self) -> list[VoiceProfile]:
         return self.voice_profiles.list_profiles()
@@ -138,15 +138,32 @@ class TtsService:
     def model_provider(self, model_id: str) -> str:
         return self.registry.get(model_id).provider
 
+    def generation_form_descriptor(
+        self,
+        model_id: str,
+        preferred_mode: str | None = None,
+    ) -> GenerationFormDescriptor:
+        mode = preferred_mode if preferred_mode in ("fixed", "profile") else None
+        return self.generation_form.describe(model_id, mode)
+
     def supports_vieneu_codec(self, model_id: str) -> bool:
         spec = self.registry.get(model_id)
-        return spec.provider == "vieneu" and bool(spec.runtime.get("codec_repo"))
+        descriptor = provider_descriptor(spec.provider)
+        return bool(
+            descriptor
+            and "codec" in descriptor.controls
+            and spec.runtime.get("codec_repo")
+        )
 
     def supports_vieneu_sampling(self, model_id: str) -> bool:
-        return self.registry.get(model_id).provider == "vieneu"
+        spec = self.registry.get(model_id)
+        descriptor = provider_descriptor(spec.provider)
+        return bool(descriptor and "sampling" in descriptor.controls)
 
     def supports_f5_settings(self, model_id: str) -> bool:
-        return self.registry.get(model_id).provider == "f5tts"
+        spec = self.registry.get(model_id)
+        descriptor = provider_descriptor(spec.provider)
+        return bool(descriptor and "f5" in descriptor.controls)
 
     def default_f5_settings(self, model_id: str) -> dict[str, object]:
         spec = self.registry.get(model_id)
@@ -163,7 +180,9 @@ class TtsService:
         }
 
     def supports_chatterbox_settings(self, model_id: str) -> bool:
-        return self.registry.get(model_id).provider == "chatterbox"
+        spec = self.registry.get(model_id)
+        descriptor = provider_descriptor(spec.provider)
+        return bool(descriptor and "chatterbox" in descriptor.controls)
 
     def default_chatterbox_settings(self, model_id: str) -> dict[str, object]:
         spec = self.registry.get(model_id)
@@ -177,6 +196,29 @@ class TtsService:
             ),
             "chatterbox_seed": None,
             "chatterbox_norm_loudness": bool(runtime.get("chatterbox_norm_loudness", True)),
+            "gpu_safety_enabled": bool(runtime.get("gpu_safety_enabled", True)),
+            "gpu_start_temperature_c": int(_runtime_default(runtime, "gpu_start_temperature_c", 75)),
+            "gpu_abort_temperature_c": int(_runtime_default(runtime, "gpu_abort_temperature_c", 82)),
+            "gpu_abort_temperature_sustain_seconds": float(
+                _runtime_default(runtime, "gpu_abort_temperature_sustain_seconds", 10.0)
+            ),
+            "gpu_emergency_temperature_c": int(
+                _runtime_default(runtime, "gpu_emergency_temperature_c", 90)
+            ),
+            "gpu_cooldown_max_wait_seconds": float(
+                _runtime_default(runtime, "gpu_cooldown_max_wait_seconds", 300.0)
+            ),
+            "gpu_resume_temperature_c": int(_runtime_default(runtime, "gpu_resume_temperature_c", 72)),
+            "gpu_minimum_free_vram_mb": int(_runtime_default(runtime, "gpu_minimum_free_vram_mb", 6000)),
+            "gpu_runtime_minimum_free_vram_mb": int(
+                _runtime_default(runtime, "gpu_runtime_minimum_free_vram_mb", 700)
+            ),
+            "gpu_maximum_utilization_percent": int(
+                _runtime_default(runtime, "gpu_maximum_utilization_percent", 20)
+            ),
+            "gpu_maximum_encoder_utilization_percent": int(
+                _runtime_default(runtime, "gpu_maximum_encoder_utilization_percent", 5)
+            ),
         }
 
     def default_vieneu_temperature(self, model_id: str) -> float:
@@ -314,7 +356,12 @@ class TtsService:
             job_dir / "chunks.json",
             {
                 "max_chunk_chars": request.max_chunk_chars,
+                "punctuation_pause_enabled": request.punctuation_pause_enabled,
                 "sentence_pause_ms": request.sentence_pause_ms,
+                "comma_pause_ms": request.comma_pause_ms,
+                "clause_pause_ms": request.clause_pause_ms,
+                "ellipsis_pause_ms": request.ellipsis_pause_ms,
+                "chunk_pause_ms": request.chunk_pause_ms,
                 "paragraph_pause_ms": _paragraph_pause_ms(request),
                 "unit_count": len(units),
                 "chunk_count": len(chunks),
@@ -365,8 +412,33 @@ class TtsService:
                 chatterbox_norm_loudness=(
                     request.chatterbox_norm_loudness if spec.provider == "chatterbox" else True
                 ),
+                gpu_safety_enabled=request.gpu_safety_enabled,
+                gpu_start_temperature_c=request.gpu_start_temperature_c,
+                gpu_abort_temperature_c=request.gpu_abort_temperature_c,
+                gpu_abort_temperature_sustain_seconds=request.gpu_abort_temperature_sustain_seconds,
+                gpu_emergency_temperature_c=request.gpu_emergency_temperature_c,
+                gpu_cooldown_max_wait_seconds=request.gpu_cooldown_max_wait_seconds,
+                gpu_resume_temperature_c=request.gpu_resume_temperature_c,
+                gpu_minimum_free_vram_mb=request.gpu_minimum_free_vram_mb,
+                gpu_runtime_minimum_free_vram_mb=request.gpu_runtime_minimum_free_vram_mb,
+                gpu_maximum_utilization_percent=request.gpu_maximum_utilization_percent,
+                gpu_maximum_encoder_utilization_percent=request.gpu_maximum_encoder_utilization_percent,
+                punctuation_pause_enabled=(
+                    request.punctuation_pause_enabled
+                    and _supports_punctuation_pauses(spec)
+                ),
+                sentence_pause_ms=request.sentence_pause_ms,
+                comma_pause_ms=request.comma_pause_ms,
+                clause_pause_ms=request.clause_pause_ms,
+                ellipsis_pause_ms=request.ellipsis_pause_ms,
                 cancel_event=cancel_event,
                 cached_prompt_path=cached_path,
+                status_callback=lambda message: emit_progress(
+                    progress_callback,
+                    message,
+                    0,
+                    max(1, len(chunks)),
+                ),
             )
             for chunk in chunks
         ]
@@ -391,7 +463,6 @@ class TtsService:
         current_seconds = 0.0
         sample_rate = 24000
         chunk_cursor = 0
-        sentence_pause_seconds = request.sentence_pause_ms / 1000
         paragraph_pause_seconds = _paragraph_pause_ms(request) / 1000
 
         for unit_index, unit in enumerate(units):
@@ -400,6 +471,7 @@ class TtsService:
             chunk_cursor += len(unit_chunks)
             unit_audio_segments = []
             unit_sample_rate = sample_rate
+            unit_pauses_ms = _chunk_pause_values(request, spec, unit_chunks)
 
             for chunk_index, (chunk, result) in enumerate(zip(unit_chunks, unit_results)):
                 unit_sample_rate = result.sample_rate
@@ -414,17 +486,17 @@ class TtsService:
                 )
                 current_seconds += segment_duration
                 if chunk_index < len(unit_chunks) - 1:
-                    current_seconds += sentence_pause_seconds
+                    current_seconds += unit_pauses_ms[chunk_index] / 1000
                 unit_audio_segments.append(result.audio)
 
             if paragraph_audio_segments and unit_sample_rate != sample_rate:
                 raise ConfigError("Không thể nối audio vì sample rate các đoạn không khớp.")
             sample_rate = unit_sample_rate
             paragraph_audio_segments.append(
-                concatenate_segments(
+                concatenate_segments_with_pauses(
                     unit_audio_segments,
                     sample_rate,
-                    request.sentence_pause_ms,
+                    unit_pauses_ms,
                     self.settings.crossfade_ms,
                 )
             )
@@ -500,29 +572,12 @@ class TtsService:
     def _engine_for(
         self,
         spec: ModelSpec,
-    ) -> (
-        OmniVoiceEngine
-        | ChatterboxSubprocessEngine
-        | VieneuSubprocessEngine
-        | QwenSubprocessEngine
-        | ValtecSubprocessEngine
-        | F5TtsSubprocessEngine
-    ):
+    ) -> BaseTtsEngine:
         if spec.model_id not in self._engines:
-            if spec.provider == "omnivoice":
-                self._engines[spec.model_id] = OmniVoiceEngine(spec, self.engine_cache)
-            elif spec.provider == "chatterbox":
-                self._engines[spec.model_id] = ChatterboxSubprocessEngine(spec)
-            elif spec.provider == "vieneu":
-                self._engines[spec.model_id] = VieneuSubprocessEngine(spec, self.engine_cache)
-            elif spec.provider == "qwen":
-                self._engines[spec.model_id] = QwenSubprocessEngine(spec, self.engine_cache)
-            elif spec.provider == "valtec":
-                self._engines[spec.model_id] = ValtecSubprocessEngine(spec)
-            elif spec.provider == "f5tts":
-                self._engines[spec.model_id] = F5TtsSubprocessEngine(spec)
-            else:
+            descriptor = provider_descriptor(spec.provider)
+            if descriptor is None:
                 raise ConfigError(f"Provider chưa được hỗ trợ: {spec.provider}")
+            self._engines[spec.model_id] = descriptor.engine_factory(spec, self.engine_cache)
         return self._engines[spec.model_id]
 
     def _ensure_request_can_generate(self, request: GenerateSpeechRequest, spec: ModelSpec) -> None:
@@ -678,8 +733,33 @@ class TtsService:
                         chatterbox_norm_loudness=(
                             request.chatterbox_norm_loudness if spec.provider == "chatterbox" else True
                         ),
+                        gpu_safety_enabled=request.gpu_safety_enabled,
+                        gpu_start_temperature_c=request.gpu_start_temperature_c,
+                        gpu_abort_temperature_c=request.gpu_abort_temperature_c,
+                        gpu_abort_temperature_sustain_seconds=request.gpu_abort_temperature_sustain_seconds,
+                        gpu_emergency_temperature_c=request.gpu_emergency_temperature_c,
+                        gpu_cooldown_max_wait_seconds=request.gpu_cooldown_max_wait_seconds,
+                        gpu_resume_temperature_c=request.gpu_resume_temperature_c,
+                        gpu_minimum_free_vram_mb=request.gpu_minimum_free_vram_mb,
+                        gpu_runtime_minimum_free_vram_mb=request.gpu_runtime_minimum_free_vram_mb,
+                        gpu_maximum_utilization_percent=request.gpu_maximum_utilization_percent,
+                        gpu_maximum_encoder_utilization_percent=request.gpu_maximum_encoder_utilization_percent,
+                        punctuation_pause_enabled=(
+                            request.punctuation_pause_enabled
+                            and _supports_punctuation_pauses(spec)
+                        ),
+                        sentence_pause_ms=request.sentence_pause_ms,
+                        comma_pause_ms=request.comma_pause_ms,
+                        clause_pause_ms=request.clause_pause_ms,
+                        ellipsis_pause_ms=request.ellipsis_pause_ms,
                         cancel_event=cancel_event,
                         cached_prompt_path=cached_path,
+                        status_callback=lambda message: emit_progress(
+                            progress_callback,
+                            message,
+                            0,
+                            max(1, len(engine_requests)),
+                        ),
                     )
                 )
             split_jobs.append(
@@ -861,10 +941,11 @@ class TtsService:
             sample_rate = result.sample_rate
             audio_segments.append(result.audio)
 
-        combined = concatenate_segments(
+        spec = self.registry.get(request.model_id)
+        combined = concatenate_segments_with_pauses(
             audio_segments,
             sample_rate,
-            request.sentence_pause_ms,
+            _chunk_pause_values(request, spec, chunks),
             self.settings.crossfade_ms,
         )
 
@@ -940,6 +1021,45 @@ def _paragraph_pause_ms(request: GenerateSpeechRequest) -> int:
     return max(0, int(request.paragraph_pause_ms))
 
 
+def _supports_punctuation_pauses(spec: ModelSpec) -> bool:
+    descriptor = provider_descriptor(spec.provider)
+    return bool(descriptor and "punctuation_pauses" in descriptor.controls)
+
+
+def _punctuation_pause_config(
+    request: GenerateSpeechRequest,
+) -> PunctuationPauseConfig:
+    return PunctuationPauseConfig(
+        sentence_ms=request.sentence_pause_ms,
+        comma_ms=request.comma_pause_ms,
+        clause_ms=request.clause_pause_ms,
+        ellipsis_ms=request.ellipsis_pause_ms,
+    )
+
+
+def _chunk_pause_values(
+    request: GenerateSpeechRequest,
+    spec: ModelSpec,
+    chunks: list[str],
+) -> list[int]:
+    """Choose a pause for every Core chunk boundary.
+
+    Punctuation-aware providers use the terminal mark. Other providers retain
+    the explicit technical chunk pause and never receive hidden punctuation
+    controls.
+    """
+    if len(chunks) < 2:
+        return []
+    fallback = max(0, int(request.chunk_pause_ms))
+    if not request.punctuation_pause_enabled or not _supports_punctuation_pauses(spec):
+        return [fallback] * (len(chunks) - 1)
+    config = _punctuation_pause_config(request)
+    return [
+        pause if (pause := pause_after_text(chunk, config)) is not None else fallback
+        for chunk in chunks[:-1]
+    ]
+
+
 def _read_tts_result(path: Path) -> TtsEngineResult:
     audio, sample_rate = read_audio_mono(path)
     return TtsEngineResult(audio=audio, sample_rate=int(sample_rate))
@@ -971,15 +1091,25 @@ def _resolve_output_stem(request: GenerateSpeechRequest) -> str:
 
 def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec) -> None:
     caps = _effective_capabilities(spec)
+    voice_mode = request.voice_source_mode or "fixed"
+    voice_input = effective_voice_input(spec)
+    if voice_mode not in voice_input.modes:
+        supported_modes = ", ".join(voice_input.modes)
+        raise ConfigError(
+            f"{spec.display_name} không hỗ trợ nguồn giọng '{voice_mode}'. "
+            f"Nguồn giọng hợp lệ: {supported_modes}."
+        )
     if request.language not in caps.supported_languages:
         supported = ", ".join(language_label(item) for item in caps.supported_languages)
         raise ConfigError(
             f"{spec.display_name} không hỗ trợ ngôn ngữ {language_label(request.language)}. "
             f"Ngôn ngữ hỗ trợ: {supported}."
         )
-    if caps.requires_voice_profile and not _clean_path(request.reference_audio_path):
+    if voice_mode == "profile" and not _clean_path(request.reference_audio_path):
         raise ConfigError(f"{spec.display_name} cần chọn Profile giọng để clone voice.")
-    if not caps.supports_voice_profile and _clean_path(request.reference_audio_path):
+    if caps.requires_voice_profile and voice_mode != "profile":
+        raise ConfigError(f"{spec.display_name} cần chọn Profile giọng để clone voice.")
+    if not caps.supports_voice_profile and voice_mode == "profile":
         raise ConfigError(f"{spec.display_name} không hỗ trợ Profile giọng.")
     if not caps.supports_speed and abs(request.speed - 1.0) > 0.001:
         raise ConfigError(f"{spec.display_name} chưa hỗ trợ chỉnh Tốc độ đọc.")
@@ -990,9 +1120,7 @@ def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec)
     if caps.supports_emotion and caps.emotions and request.emotion not in caps.emotions:
         options = ", ".join(caps.emotions)
         raise ConfigError(f"Cảm xúc không hợp lệ cho {spec.display_name}: {options}.")
-    if caps.supports_voice_presets and not request.speaker_id and not _clean_path(request.reference_audio_path):
-        if caps.supports_voice_profile:
-            raise ConfigError(f"Hãy chọn Preset giọng hoặc Profile giọng cho {spec.display_name}.")
+    if voice_mode == "fixed" and caps.supports_voice_presets and not request.speaker_id:
         raise ConfigError(f"{spec.display_name} cần chọn Preset giọng.")
     if request.speaker_id and request.speaker_id not in spec.voice_presets:
         raise ConfigError(f"Preset giọng không hợp lệ cho {spec.display_name}.")

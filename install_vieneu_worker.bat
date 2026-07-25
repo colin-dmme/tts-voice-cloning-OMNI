@@ -14,7 +14,7 @@ if not exist "%PY%" (
     echo VieNeu worker Python not found: %PY%
     exit /b 1
 )
-uv pip install --python "%PY%" vieneu --extra-index-url https://pnnbao97.github.io/llama-cpp-python-v0.3.16/cpu/
+uv pip install --python "%PY%" "vieneu>=3.2.3" --extra-index-url https://pnnbao97.github.io/llama-cpp-python-v0.3.16/cpu/
 uv pip install --python "%PY%" torch --index-url https://download.pytorch.org/whl/cpu
 uv pip install --python "%PY%" torchaudio --index-url https://download.pytorch.org/whl/cpu
 uv pip install --python "%PY%" neucodec

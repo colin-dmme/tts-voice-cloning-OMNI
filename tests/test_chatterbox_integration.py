@@ -10,7 +10,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from omni_tts_core.engines.base import TtsEngineResult
+from omni_tts_core.engines.base import TtsEngineRequest, TtsEngineResult
+from omni_tts_core.engines.chatterbox_engine import ChatterboxSubprocessEngine, _checkpoint_dir
 from omni_tts_core.model_registry import ModelRegistry, ModelSpec
 from omni_tts_core.service import TtsService
 from omni_tts_shared.errors import ConfigError
@@ -100,6 +101,69 @@ def _chatterbox_spec(root: Path) -> ModelSpec:
 
 
 class ChatterboxIntegrationTest(unittest.TestCase):
+    def test_engine_applies_manual_gpu_safety_thresholds(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            engine = ChatterboxSubprocessEngine(_chatterbox_spec(Path(temp)))
+            request = TtsEngineRequest(
+                text="Hello.",
+                language="en",
+                reference_audio_path=Path("ref.wav"),
+                reference_text=None,
+                speaker_id=None,
+                speed=1.0,
+                pitch_shift=0.0,
+                runtime_target="cuda",
+                gpu_start_temperature_c=70,
+                gpu_abort_temperature_c=80,
+                gpu_abort_temperature_sustain_seconds=12.0,
+                gpu_emergency_temperature_c=94,
+                gpu_cooldown_max_wait_seconds=420.0,
+                gpu_minimum_free_vram_mb=5000,
+                gpu_maximum_utilization_percent=35,
+            )
+
+            config = engine._gpu_guard_for(request).config
+
+        self.assertEqual(config.start_temperature_c, 70)
+        self.assertEqual(config.abort_temperature_c, 80)
+        self.assertEqual(config.abort_temperature_sustain_seconds, 12.0)
+        self.assertEqual(config.emergency_temperature_c, 94)
+        self.assertEqual(config.cooldown_max_wait_seconds, 420.0)
+        self.assertEqual(config.minimum_free_vram_mb, 5000)
+        self.assertEqual(config.maximum_gpu_utilization_percent, 35)
+
+    def test_checkpoint_identity_is_stable_and_changes_with_voice_or_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            spec = _chatterbox_spec(root)
+            ref_audio = root / "voice.wav"
+            ref_audio.write_bytes(b"voice-one")
+            request = TtsEngineRequest(
+                text="Hello world.",
+                language="en",
+                reference_audio_path=ref_audio,
+                reference_text=None,
+                speaker_id=None,
+                speed=1.0,
+                pitch_shift=0.0,
+                runtime_target="cuda",
+            )
+            payload = {"device": "cuda", "ref_audio": str(ref_audio), "temperature": 0.8}
+
+            first = _checkpoint_dir(spec, payload, [request])
+            repeated = _checkpoint_dir(spec, payload, [request])
+            changed_text = _checkpoint_dir(
+                spec,
+                payload,
+                [TtsEngineRequest(**{**request.__dict__, "text": "Different text."})],
+            )
+            ref_audio.write_bytes(b"voice-two-with-a-different-size")
+            changed_voice = _checkpoint_dir(spec, payload, [request])
+
+        self.assertEqual(first, repeated)
+        self.assertNotEqual(first, changed_text)
+        self.assertNotEqual(first, changed_voice)
+
     def test_chatterbox_turbo_model_is_declared_as_non_default_test_model(self) -> None:
         spec = ModelRegistry().get("chatterbox_turbo_resembleai")
 
@@ -140,6 +204,17 @@ class ChatterboxIntegrationTest(unittest.TestCase):
                 chatterbox_repetition_penalty=1.15,
                 chatterbox_seed=1234,
                 chatterbox_norm_loudness=False,
+                gpu_safety_enabled=True,
+                gpu_start_temperature_c=73,
+                gpu_abort_temperature_c=81,
+                gpu_abort_temperature_sustain_seconds=15.0,
+                gpu_emergency_temperature_c=93,
+                gpu_cooldown_max_wait_seconds=600.0,
+                gpu_resume_temperature_c=69,
+                gpu_minimum_free_vram_mb=5000,
+                gpu_runtime_minimum_free_vram_mb=640,
+                gpu_maximum_utilization_percent=30,
+                gpu_maximum_encoder_utilization_percent=10,
             )
 
             service.generate_audio(request)
@@ -151,6 +226,17 @@ class ChatterboxIntegrationTest(unittest.TestCase):
             self.assertEqual(engine_request.chatterbox_repetition_penalty, 1.15)
             self.assertEqual(engine_request.chatterbox_seed, 1234)
             self.assertFalse(engine_request.chatterbox_norm_loudness)
+            self.assertTrue(engine_request.gpu_safety_enabled)
+            self.assertEqual(engine_request.gpu_start_temperature_c, 73)
+            self.assertEqual(engine_request.gpu_abort_temperature_c, 81)
+            self.assertEqual(engine_request.gpu_abort_temperature_sustain_seconds, 15.0)
+            self.assertEqual(engine_request.gpu_emergency_temperature_c, 93)
+            self.assertEqual(engine_request.gpu_cooldown_max_wait_seconds, 600.0)
+            self.assertEqual(engine_request.gpu_resume_temperature_c, 69)
+            self.assertEqual(engine_request.gpu_minimum_free_vram_mb, 5000)
+            self.assertEqual(engine_request.gpu_runtime_minimum_free_vram_mb, 640)
+            self.assertEqual(engine_request.gpu_maximum_utilization_percent, 30)
+            self.assertEqual(engine_request.gpu_maximum_encoder_utilization_percent, 10)
 
     def test_service_rejects_chatterbox_without_voice_profile_audio(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

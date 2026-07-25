@@ -27,7 +27,7 @@ uv pip install --python "%PY%" --force-reinstall torch torchaudio --index-url ht
 :: VieNeu package. CUDA acceleration is guaranteed for torch/ONNX modes.
 :: GGUF CUDA additionally needs a compatible local llama-cpp-python CUDA wheel.
 echo [2/6] Installing VieNeu package...
-uv pip install --python "%PY%" --force-reinstall vieneu --extra-index-url https://pnnbao97.github.io/llama-cpp-python-v0.3.16/cpu/
+uv pip install --python "%PY%" --force-reinstall "vieneu>=3.2.3" --extra-index-url https://pnnbao97.github.io/llama-cpp-python-v0.3.16/cpu/
 if errorlevel 1 (
     exit /b 1
 )

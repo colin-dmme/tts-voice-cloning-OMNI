@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pydantic import BaseModel
+
 from omni_tts_shared.schemas import GenerateSpeechRequest
 
 # step and decimals per field; decimals 0 means the GUI should use an int widget.
@@ -53,6 +55,16 @@ _PRESENTATION: dict[str, tuple[float, int]] = {
     "gpu_maximum_utilization_percent": (1, 0),
     "gpu_maximum_encoder_utilization_percent": (1, 0),
     "mp3_bitrate_kbps": (32, 0),
+    "connect_timeout_seconds": (1, 0),
+    "request_timeout_seconds": (10, 0),
+    "max_retries": (1, 0),
+    "max_new_tokens": (128, 0),
+    "temperature": (0.05, 2),
+    "top_p": (0.01, 2),
+    "top_k": (10, 0),
+    "seed": (1, 0),
+    "initial_codec_chunk_frames": (1, 0),
+    "concurrency": (1, 0),
 }
 
 # Fields where the GUI needs one extra value below the schema minimum to mean
@@ -60,6 +72,7 @@ _PRESENTATION: dict[str, tuple[float, int]] = {
 _SENTINELS: dict[str, float] = {
     "f5_seed": -1,
     "chatterbox_seed": -1,
+    "seed": -1,
 }
 
 _FALLBACK = (0.0, 1_000_000.0)
@@ -119,6 +132,20 @@ def limit(field: str) -> FieldLimit:
     )
 
 
+def limit_for(model: type[BaseModel], field: str) -> FieldLimit:
+    """Range for a nested provider schema without flattening it into the GUI."""
+    minimum, maximum = _bounds_for(model, field)
+    step, decimals = _PRESENTATION.get(field, (1.0, 2))
+    return FieldLimit(
+        field=field,
+        minimum=minimum,
+        maximum=maximum,
+        step=float(step),
+        decimals=decimals,
+        sentinel=_SENTINELS.get(field),
+    )
+
+
 def default_of(field: str) -> float | None:
     """Schema default, when the field declares one."""
     info = GenerateSpeechRequest.model_fields.get(field)
@@ -129,7 +156,11 @@ def default_of(field: str) -> float | None:
 
 
 def _bounds(field: str) -> tuple[float, float]:
-    info = GenerateSpeechRequest.model_fields.get(field)
+    return _bounds_for(GenerateSpeechRequest, field)
+
+
+def _bounds_for(model: type[BaseModel], field: str) -> tuple[float, float]:
+    info = model.model_fields.get(field)
     if info is None:
         return _FALLBACK
     minimum, maximum = _FALLBACK

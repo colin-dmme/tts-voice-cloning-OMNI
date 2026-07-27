@@ -168,7 +168,7 @@ def model_status_label(item: ModelStatus) -> str:
     if item.hf_cached is False:
         return "Thiếu HF cache"
     if item.installed:
-        return "Sẵn sàng" if item.worker_installed is not True else "Worker + model OK"
+        return "Model đã tải" if item.worker_installed is not True else "Worker + model OK"
     if item.worker_installed is True:
         return "Worker OK, thiếu model"
     return "Chưa tải"

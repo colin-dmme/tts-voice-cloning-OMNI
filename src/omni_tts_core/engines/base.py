@@ -6,6 +6,7 @@ from threading import Event
 from typing import Callable
 
 import numpy as np
+from omni_tts_shared.schemas import HiggsTtsOptions, RemoteEndpointOptions
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,8 @@ class TtsEngineRequest:
     cancel_event: Event | None = None
     cached_prompt_path: Path | None = None  # asset dir for engine-level voice cache
     status_callback: Callable[[str], None] | None = None
+    remote_endpoint: RemoteEndpointOptions | None = None
+    higgs: HiggsTtsOptions | None = None
 
 
 @dataclass(frozen=True)

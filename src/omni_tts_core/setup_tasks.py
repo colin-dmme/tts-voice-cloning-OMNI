@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shutil
+import sys
 from pathlib import Path
 
 from omni_tts_core.model_registry import ModelRegistry, ModelSpec
@@ -117,6 +119,20 @@ class SetupService:
 
 def _model_payload_status(spec: ModelSpec, model_status) -> SetupTaskStatus:
     descriptor = provider_descriptor(spec.provider)
+    if descriptor and descriptor.storage_mode == "remote":
+        return SetupTaskStatus(
+            task_id=f"model:{spec.model_id}:remote",
+            label="Endpoint GPU từ xa",
+            scope="remote",
+            status="ok",
+            detail=(
+                "Không cần model/worker cục bộ. Nhập URL hiện tại và kiểm tra kết nối "
+                "trong Studio trước khi tạo."
+            ),
+            provider=spec.provider,
+            model_id=spec.model_id,
+            can_run=False,
+        )
     if descriptor and descriptor.storage_mode == "hf_cache":
         ready = model_status.hf_cached is not False
         label = "HF cache/model"
@@ -226,17 +242,38 @@ def _main_python_status() -> SetupTaskStatus:
         PROJECT_ROOT / "runtime" / "python" / "bin" / "python",
     ]
     existing = next((path for path in candidates if path.exists()), None)
+    current = Path(sys.executable)
+    current_is_expected = any(
+        _same_path(current, candidate)
+        for candidate in candidates
+        if candidate.exists()
+    )
+    if current_is_expected:
+        status = "ok"
+        detail = f"Python app đang chạy đúng: {current}"
+    elif existing:
+        status = "error"
+        detail = (
+            f"App đang chạy nhầm Python: {current}. "
+            f"Môi trường đúng của dự án là: {existing}. Hãy đóng app và mở lại bằng launcher của dự án."
+        )
+    else:
+        status = "missing"
+        detail = (
+            f"App đang chạy bằng {current}, nhưng chưa thấy .venv/runtime Python của dự án; "
+            "Start-ColinTTS.bat sẽ tạo khi sync."
+        )
     return SetupTaskStatus(
         task_id="env:python",
         label="Python môi trường chính",
         scope="environment",
-        status="ok" if existing else "missing",
-        detail=(
-            f"Đã có Python app: {existing}"
-            if existing
-            else "Chưa thấy .venv/runtime Python; Start-ColinTTS.bat sẽ tạo khi sync."
-        ),
+        status=status,
+        detail=detail,
     )
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return os.path.normcase(os.path.abspath(str(left))) == os.path.normcase(os.path.abspath(str(right)))
 
 
 def _storage_statuses() -> list[SetupTaskStatus]:

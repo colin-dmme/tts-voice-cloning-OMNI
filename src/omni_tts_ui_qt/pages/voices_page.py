@@ -58,6 +58,7 @@ class VoicesPage(QWidget):
         layout = QVBoxLayout(panel)
         self.profile_list = QListWidget()
         self.profile_list.currentItemChanged.connect(self._on_profile_selected)
+        self.profile_list.itemDoubleClicked.connect(self._preview_profile_item)
         refresh = QPushButton("Làm mới")
         refresh.clicked.connect(self.refresh)
         layout.addWidget(self.profile_list, 1)
@@ -75,7 +76,14 @@ class VoicesPage(QWidget):
         self.audio_edit.setReadOnly(True)
         pick = QPushButton("Chọn…")
         pick.clicked.connect(self._pick_audio)
+        self.audio_preview_button = QPushButton("▶ Nghe")
+        self.audio_preview_button.setEnabled(False)
+        self.audio_preview_button.setToolTip(
+            "Mở audio mẫu bằng trình nghe nhạc mặc định của Windows."
+        )
+        self.audio_preview_button.clicked.connect(self._preview_main_sample)
         audio_row.addWidget(self.audio_edit, 1)
+        audio_row.addWidget(self.audio_preview_button)
         audio_row.addWidget(pick)
         self.audio_meta = QLabel("")
         self.audio_meta.setObjectName("hint")
@@ -113,11 +121,15 @@ class VoicesPage(QWidget):
         self.samples_table = QTableWidget(0, 4)
         self.samples_table.setHorizontalHeaderLabels(["Mặc định", "Vai trò", "Thời lượng", "Transcript"])
         self.samples_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.samples_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.samples_table.setMaximumHeight(140)
+        self.samples_table.doubleClicked.connect(self._preview_selected_sample)
         layout.addWidget(self.samples_table)
         sample_row = QHBoxLayout()
         self.role_combo = QComboBox()
         self.role_combo.addItems(_ROLES)
+        preview_sample = QPushButton("▶ Nghe mẫu chọn")
+        preview_sample.clicked.connect(self._preview_selected_sample)
         add_sample = QPushButton("Thêm mẫu phụ")
         remove_sample = QPushButton("Xóa mẫu chọn")
         default_sample = QPushButton("Đặt làm mặc định")
@@ -126,6 +138,7 @@ class VoicesPage(QWidget):
         default_sample.clicked.connect(self._set_default_sample)
         sample_row.addWidget(QLabel("Vai trò:"))
         sample_row.addWidget(self.role_combo)
+        sample_row.addWidget(preview_sample)
         sample_row.addWidget(add_sample)
         sample_row.addWidget(remove_sample)
         sample_row.addWidget(default_sample)
@@ -154,6 +167,7 @@ class VoicesPage(QWidget):
         self.name_edit.setText(profile.name)
         self._audio_path = Path(profile.audio_path) if profile.audio_path else None
         self.audio_edit.setText(str(profile.audio_path or ""))
+        self.audio_preview_button.setEnabled(self._audio_path is not None)
         self.audio_meta.setText(
             f"{profile.duration_seconds:.1f}s · {profile.sample_rate} Hz"
             if profile.duration_seconds else ""
@@ -178,6 +192,35 @@ class VoicesPage(QWidget):
                     cell.setData(Qt.ItemDataRole.UserRole, sample.sample_id)
                 self.samples_table.setItem(row, column, cell)
 
+    # --- Preview ------------------------------------------------------------
+
+    def _play(self, action) -> None:
+        try:
+            path = action()
+        except Exception as error:
+            QMessageBox.warning(self, "Không phát được audio", str(error))
+            return
+        self.context.log(f"Đã mở audio bằng ứng dụng mặc định: {path}")
+
+    def _preview_profile_item(self, item) -> None:
+        profile_id = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if profile_id:
+            self._play(lambda: self.ctrl.play_voice_profile_sample(profile_id))
+
+    def _preview_main_sample(self) -> None:
+        if self._audio_path is None:
+            return
+        self._play(lambda: self.ctrl.play_audio_file(self._audio_path))
+
+    def _preview_selected_sample(self, *_args) -> None:
+        sample_id = self._selected_sample_id()
+        if not self._editing_id or not sample_id:
+            QMessageBox.information(self, "Chưa chọn mẫu", "Hãy chọn một mẫu phụ trong bảng.")
+            return
+        self._play(
+            lambda: self.ctrl.play_voice_profile_sample(self._editing_id, sample_id)
+        )
+
     # --- Editor actions -----------------------------------------------------
 
     def _pick_audio(self) -> None:
@@ -185,12 +228,14 @@ class VoicesPage(QWidget):
         if path:
             self._audio_path = Path(path)
             self.audio_edit.setText(path)
+            self.audio_preview_button.setEnabled(True)
 
     def _clear_editor(self) -> None:
         self._editing_id = None
         self._audio_path = None
         self.name_edit.clear()
         self.audio_edit.clear()
+        self.audio_preview_button.setEnabled(False)
         self.audio_meta.clear()
         self.project_edit.clear()
         self.transcript_edit.clear()

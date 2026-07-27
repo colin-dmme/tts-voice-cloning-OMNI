@@ -20,6 +20,7 @@ from omni_tts_core.engines.base import (
     TtsEngineRequest,
     TtsEngineResult,
 )
+from omni_tts_core.engines.batch_progress import report_ready_chunks
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
 from omni_tts_core.progress import check_cancel
@@ -57,6 +58,7 @@ class _SharedPiperWorker:
         *,
         timeout: float,
         cancel_event,
+        tick_callback=None,
     ) -> None:
         with self._process_lock:
             process = self._ensure_process(runtime)
@@ -82,6 +84,10 @@ class _SharedPiperWorker:
                     line = response_queue.get(timeout=0.1)
                     break
                 except queue.Empty:
+                    # Worker writes each chunk WAV as it finishes; surface that
+                    # progress instead of staying silent until the whole batch ends.
+                    if tick_callback is not None:
+                        tick_callback()
                     if process.poll() is not None:
                         stderr = process.stderr.read() if process.stderr is not None else ""
                         self._process = None
@@ -191,24 +197,29 @@ class PiperSubprocessEngine(BaseTtsEngine):
                 ),
                 "chunks": chunks,
             }
+            reported_chunks: set[int] = set()
+
+            def report(force: bool = False) -> None:
+                report_ready_chunks(
+                    chunks, reported_chunks, progress_callback, chunk_callback, force=force
+                )
+
             _SHARED_PIPER_WORKER.run(
                 runtime,
                 payload,
                 timeout=300 + 60 * len(chunks),
                 cancel_event=requests[0].cancel_event,
+                tick_callback=report,
             )
             check_cancel(requests[0].cancel_event)
+            report(force=True)
             results: list[TtsEngineResult] = []
-            for index, chunk in enumerate(chunks):
+            for chunk in chunks:
                 output_path = Path(chunk["output_path"])
                 if not output_path.exists():
                     raise GenerationError(f"Piper thiếu file đầu ra: {output_path.name}")
                 audio, sample_rate = sf.read(str(output_path), dtype="float32")
                 results.append(TtsEngineResult(audio=audio, sample_rate=int(sample_rate)))
-                if chunk_callback is not None:
-                    chunk_callback(index, output_path)
-                if progress_callback is not None:
-                    progress_callback(index + 1, len(chunks))
             return results
 
 

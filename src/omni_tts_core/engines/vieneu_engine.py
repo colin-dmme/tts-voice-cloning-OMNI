@@ -20,6 +20,7 @@ from omni_tts_core.engines.base import (
     TtsEngineRequest,
     TtsEngineResult,
 )
+from omni_tts_core.engines.batch_progress import report_ready_chunks as report_chunks
 from omni_tts_core.engines.subprocess_tools import run_worker_process
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
@@ -134,8 +135,10 @@ class VieneuSubprocessEngine(BaseTtsEngine):
 
             reported_chunks: set[int] = set()
 
-            def report_ready_chunks() -> None:
-                _report_ready_chunks(chunks, reported_chunks, progress_callback, chunk_callback)
+            def report_ready_chunks(force: bool = False) -> None:
+                report_chunks(
+                    chunks, reported_chunks, progress_callback, chunk_callback, force=force
+                )
 
             try:
                 if self._uses_persistent_worker():
@@ -145,6 +148,7 @@ class VieneuSubprocessEngine(BaseTtsEngine):
                         timeout=900 + 300 * len(requests),
                         cancel_event=cancel_event,
                         env=env,
+                        tick_callback=report_ready_chunks,
                     )
                     completed = None
                 else:
@@ -158,7 +162,7 @@ class VieneuSubprocessEngine(BaseTtsEngine):
                     )
             except subprocess.TimeoutExpired as exc:
                 raise GenerationError("VieNeu batch xử lý quá lâu và đã bị dừng.") from exc
-            report_ready_chunks()
+            report_ready_chunks(force=True)
 
             if completed is not None and completed.returncode != 0:
                 if completed.returncode == -1073741819:
@@ -200,6 +204,7 @@ class VieneuSubprocessEngine(BaseTtsEngine):
         timeout: float,
         cancel_event,
         env: dict,
+        tick_callback=None,
     ) -> None:
         with self._process_lock:
             process = self._ensure_process(runtime, env)
@@ -224,6 +229,10 @@ class VieneuSubprocessEngine(BaseTtsEngine):
                     line = response_queue.get(timeout=0.1)
                     break
                 except queue.Empty:
+                    # Worker writes each chunk WAV as it finishes; surface that
+                    # progress instead of staying silent until the whole batch ends.
+                    if tick_callback is not None:
+                        tick_callback()
                     if process.poll() is not None:
                         stderr = process.stderr.read() if process.stderr is not None else ""
                         self._process = None
@@ -482,37 +491,6 @@ def _clean_worker_error(message: str) -> str:
         if "Standard CPU hiện không hỗ trợ clone" in line:
             return line
     return lines[-1]
-
-
-def _report_ready_chunks(
-    chunks: list[dict],
-    reported_chunks: set[int],
-    progress_callback: BatchProgressCallback | None,
-    chunk_callback: BatchChunkCallback | None,
-) -> None:
-    before = len(reported_chunks)
-    for index, chunk in enumerate(chunks):
-        if index in reported_chunks:
-            continue
-        out = Path(chunk["output_path"])
-        if not _audio_file_ready(out):
-            continue
-        reported_chunks.add(index)
-        if chunk_callback is not None:
-            chunk_callback(index, out)
-    if progress_callback is not None and len(reported_chunks) != before:
-        progress_callback(len(reported_chunks), len(chunks))
-
-
-def _audio_file_ready(path: Path) -> bool:
-    if not path.exists():
-        return False
-    try:
-        if time.time() - path.stat().st_mtime < 0.2:
-            return False
-        return sf.info(str(path)).frames > 0
-    except Exception:
-        return False
 
 
 def _native_crash_message(message: str) -> str:

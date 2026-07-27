@@ -8,6 +8,7 @@ from omni_tts_core.ui_presenters.settings_state import (
     DEFAULT_GENERATION_PREFERENCES,
     GenerationSettings,
 )
+from omni_tts_shared.schemas import ModelStatus
 
 
 class LabelsTest(unittest.TestCase):
@@ -25,6 +26,19 @@ class LabelsTest(unittest.TestCase):
     def test_setup_status_label(self) -> None:
         self.assertEqual(labels.setup_status_label("ok"), "OK")
         self.assertEqual(labels.setup_status_label("missing"), "Thiếu")
+
+    def test_downloaded_non_worker_model_does_not_claim_runtime_ready(self) -> None:
+        item = ModelStatus(
+            model_id="omnivoice_test",
+            display_name="OmniVoice Test",
+            provider="omnivoice",
+            model_type="folder",
+            hf_repo="example/model",
+            local_path=Path("models/example"),
+            installed=True,
+        )
+
+        self.assertEqual(labels.model_status_label(item), "Model đã tải")
 
     def test_runtime_device_detail_strips_cuda_prefix(self) -> None:
         detail = labels.runtime_device_detail("cuda", "CUDA - RTX 5090")

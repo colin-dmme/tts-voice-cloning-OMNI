@@ -708,7 +708,7 @@ def _status_row(item: ModelStatus) -> list[Any]:
     elif item.hf_cached is False:
         status = "Thiếu HF cache"
     elif item.installed:
-        status = "Sẵn sàng" if item.worker_installed is not True else "Worker + model OK"
+        status = "Model đã tải" if item.worker_installed is not True else "Worker + model OK"
     elif item.worker_installed is True:
         status = "Worker OK, thiếu model"
     else:

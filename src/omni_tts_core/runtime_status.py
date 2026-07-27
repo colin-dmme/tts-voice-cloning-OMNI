@@ -26,6 +26,20 @@ class RuntimeStatusService:
     def status_for(self, model_id: str) -> RuntimeStatus:
         spec = self.registry.get(model_id)
         installed = self.storage.is_installed(spec)
+        if spec.provider == "higgs_remote":
+            return RuntimeStatus(
+                model_id=spec.model_id,
+                display_name=spec.display_name,
+                provider=spec.provider,
+                installed=True,
+                gpu_available=False,
+                actual_device="remote",
+                device_name="GPU từ xa / SGLang-Omni",
+                message=(
+                    "Model chạy ngoài máy này. Hãy nhập URL hiện tại và bấm "
+                    "'Kiểm tra kết nối' trong Tinh chỉnh riêng."
+                ),
+            )
         if spec.provider == "omnivoice":
             return _omnivoice_status(spec, installed, self.detector)
         if spec.provider == "vieneu":

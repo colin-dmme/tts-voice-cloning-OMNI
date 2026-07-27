@@ -1555,6 +1555,59 @@ tts_models:
       recommend_for: "Máy yếu, clone giọng nhanh từ mẫu ngắn, cần điều chỉnh tốc độ"
       install_note: "install_valtec_worker.bat"
 
+  higgs_tts3_remote:
+    display_name: "Higgs TTS 3 · Remote GPU"
+    provider: "higgs_remote"
+    model_type: "tts"
+    local_path: "models/remote/higgs-tts-3"
+    hf_repo: "bosonai/higgs-audio-v3-tts-4b"
+    language_priority: "multilingual"
+    required: false
+    capabilities:
+      supported_languages: ["auto", "vi", "en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"]
+      supports_voice_profile: true
+      requires_voice_profile: false
+      supports_voice_presets: true
+      supports_reference_text: true
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    voice_input:
+      modes: ["fixed", "profile"]
+      default_mode: "fixed"
+      fixed_label: "Voice mặc định của server"
+      fixed_tooltip: "Gửi voice=default và không gửi audio tham chiếu."
+      profile_label: "Clone giọng bằng Profile"
+      profile_tooltip: "Audio Profile được mã hoá thành Data URI và gửi trong references."
+    default_voice_preset: "default"
+    voice_presets:
+      default: "default · voice mặc định server"
+    runtime:
+      api_model: ""
+      response_format: "pcm"
+      stream: true
+      max_new_tokens: 2048
+      temperature: 1.0
+      initial_codec_chunk_frames: 1
+      concurrency: 1
+    notes: "Higgs TTS 3 chạy trên endpoint SGLang-Omni từ xa; URL không hardcode và có thể thay đổi khi TryCloudflare restart."
+    ref_audio_hints:
+      min_seconds: 3.0
+      max_seconds: 30.0
+      optimal_min_seconds: 5.0
+      optimal_max_seconds: 15.0
+      needs_transcript: true
+    catalog_info:
+      category: "remote-gpu"
+      description: "Higgs TTS 3 qua API /v1/audio/speech. Hỗ trợ streaming PCM, clone giọng bằng Data URI và control token trong nội dung."
+      highlight: "Remote GPU · không cần tải model cục bộ"
+      quality_score: 5
+      speed_score: 4
+      vram_mb: 0
+      ram_mb: 0
+      recommend_for: "Tạo giọng đa ngôn ngữ/clone giọng trên máy anh Tùng hoặc GPU thuê ngoài"
+      install_note: "Nhập URL endpoint hiện tại trong Studio và bấm Kiểm tra kết nối"
+
 support_models:
   higgs_audio_v2_tokenizer:
     display_name: "Higgs Audio V2 Tokenizer"

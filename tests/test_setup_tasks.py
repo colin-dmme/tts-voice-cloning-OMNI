@@ -7,7 +7,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from omni_tts_core.setup_tasks import SetupService
+from omni_tts_core.paths import PROJECT_ROOT
+from omni_tts_core.setup_tasks import SetupService, _main_python_status
 
 
 class SetupTasksTest(unittest.TestCase):
@@ -41,6 +42,22 @@ class SetupTasksTest(unittest.TestCase):
 
         self.assertEqual(message, "ok")
         install.assert_called_once_with("f5tts")
+
+    def test_main_python_status_reports_the_running_project_python(self) -> None:
+        project_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+        with patch("omni_tts_core.setup_tasks.sys.executable", str(project_python)):
+            status = _main_python_status()
+
+        self.assertEqual(status.status, "ok")
+        self.assertIn(str(project_python), status.detail)
+
+    def test_main_python_status_rejects_an_inherited_foreign_venv(self) -> None:
+        foreign_python = Path("C:/Users/example/ToolLauncherHub/.venv/Scripts/python.exe")
+        with patch("omni_tts_core.setup_tasks.sys.executable", str(foreign_python)):
+            status = _main_python_status()
+
+        self.assertEqual(status.status, "error")
+        self.assertIn("chạy nhầm Python", status.detail)
 
 
 if __name__ == "__main__":

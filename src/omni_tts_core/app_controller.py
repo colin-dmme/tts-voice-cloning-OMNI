@@ -21,6 +21,7 @@ from omni_tts_core.file_queue import FileQueueOutputManifest, FileQueueStatus
 from omni_tts_core.gpu_safety import gpu_temperature_guidance
 from omni_tts_core.media_player import MediaPlayerService
 from omni_tts_core.progress import ProgressCallback, ProgressEvent, check_cancel
+from omni_tts_core.remote.higgs_sglang import EndpointCheckResult, HiggsSglangClient
 from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES, runtime_target_label
 from omni_tts_core.service import TtsService
 from omni_tts_core.ui_presenters import labels, model_groups
@@ -204,6 +205,13 @@ class AppController:
     def gpu_temperature_guidance(self) -> str:
         return gpu_temperature_guidance()
 
+    def check_higgs_endpoint(self, settings: GenerationSettings) -> EndpointCheckResult:
+        """Check health/model discovery using the same core settings as generation."""
+        request = settings.to_request("Kiểm tra kết nối")
+        if request.remote_endpoint is None or request.higgs is None:
+            raise OmniTtsError("Thiếu cấu hình Higgs Remote.")
+        return HiggsSglangClient(request.remote_endpoint, request.higgs).check()
+
     def vieneu_codec_choices(self, model_id: str) -> list[tuple[str, str]]:
         return self.service.list_vieneu_codecs(model_id)
 
@@ -234,6 +242,25 @@ class AppController:
 
     def all_voice_profiles(self) -> list[VoiceProfile]:
         return self.service.list_voice_profiles()
+
+    def voice_profile(self, profile_id: str) -> VoiceProfile:
+        return self.service.get_voice_profile(profile_id)
+
+    def play_audio_file(self, path: Path | str | None) -> Path:
+        """Open any audio file in the OS player — used for not-yet-saved samples."""
+        return self.media_player.play_first_available(
+            [path],
+            missing_message="Không tìm thấy file audio này trên đĩa.",
+            empty_message="Chưa chọn file audio để nghe.",
+        )
+
+    def play_voice_profile_sample(
+        self, profile_id: str, sample_id: str | None = None
+    ) -> Path:
+        """Open a profile's reference audio in the OS player (no TTS run)."""
+        return self.media_player.play_profile(
+            self.service.get_voice_profile(profile_id), sample_id
+        )
 
     def save_voice_profile(
         self,

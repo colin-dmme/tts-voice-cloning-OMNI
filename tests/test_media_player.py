@@ -5,9 +5,28 @@ import unittest
 from pathlib import Path
 
 from omni_tts_core.file_queue import FileQueueOutputManifest
-from omni_tts_core.media_player import MediaPlayerService
+from omni_tts_core.media_player import MediaPlayerService, profile_preview_candidates
 from omni_tts_shared.errors import OmniTtsError
-from omni_tts_shared.schemas import GenerateSpeechResult
+from omni_tts_shared.schemas import AudioSampleMeta, GenerateSpeechResult, VoiceProfile
+
+
+def _profile(root: Path, default_sample_id: str = "", extras: int = 0) -> VoiceProfile:
+    main = root / "main.wav"
+    main.write_bytes(b"main")
+    samples = []
+    for index in range(1, extras + 1):
+        path = root / f"extra{index}.wav"
+        path.write_bytes(b"extra")
+        samples.append(
+            AudioSampleMeta(sample_id=f"s{index}", role="neutral", audio_path=path)
+        )
+    return VoiceProfile(
+        profile_id="p1",
+        name="Giọng thử",
+        audio_path=main,
+        default_sample_id=default_sample_id,
+        extra_samples=samples,
+    )
 
 
 class MediaPlayerServiceTest(unittest.TestCase):
@@ -88,6 +107,69 @@ class MediaPlayerServiceTest(unittest.TestCase):
 
             with self.assertRaisesRegex(OmniTtsError, "ứng dụng mặc định"):
                 MediaPlayerService(fail).play_first_available([audio])
+
+
+class VoiceProfilePreviewTest(unittest.TestCase):
+    def test_plays_main_sample_when_no_default_is_set(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            profile = _profile(root, extras=1)
+            opened: list[Path] = []
+
+            selected = MediaPlayerService(opened.append).play_profile(profile)
+
+            self.assertEqual(selected, root / "main.wav")
+            self.assertEqual(opened, [root / "main.wav"])
+
+    def test_default_sample_wins_over_main_sample(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            profile = _profile(root, default_sample_id="s2", extras=2)
+            opened: list[Path] = []
+
+            selected = MediaPlayerService(opened.append).play_profile(profile)
+
+            self.assertEqual(selected, root / "extra2.wav")
+            self.assertEqual(opened, [root / "extra2.wav"])
+
+    def test_requested_sample_id_is_played_exactly(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            profile = _profile(root, default_sample_id="s2", extras=2)
+            opened: list[Path] = []
+
+            selected = MediaPlayerService(opened.append).play_profile(profile, "s1")
+
+            self.assertEqual(selected, root / "extra1.wav")
+            self.assertEqual(opened, [root / "extra1.wav"])
+
+    def test_unknown_sample_id_does_not_fall_back_to_another_take(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            profile = _profile(Path(temp), extras=1)
+
+            with self.assertRaisesRegex(OmniTtsError, "Không tìm thấy mẫu phụ"):
+                MediaPlayerService(lambda _path: None).play_profile(profile, "nope")
+
+    def test_deleted_sample_file_has_profile_specific_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            profile = _profile(root)
+            (root / "main.wav").unlink()
+
+            with self.assertRaisesRegex(OmniTtsError, "audio mẫu của profile"):
+                MediaPlayerService(lambda _path: None).play_profile(profile)
+
+    def test_candidates_fall_back_from_missing_default_to_remaining_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            profile = _profile(root, default_sample_id="gone", extras=2)
+
+            candidates = profile_preview_candidates(profile)
+
+            self.assertEqual(
+                candidates,
+                [root / "main.wav", root / "extra1.wav", root / "extra2.wav"],
+            )
 
 
 if __name__ == "__main__":

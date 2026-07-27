@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pickle
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -74,7 +75,9 @@ class OmniVoiceEngine(BaseTtsEngine):
             import omnivoice.models.omnivoice as omnivoice_module
         except Exception as exc:
             raise EngineDependencyError(
-                "Thiếu thư viện OmniVoice/torch. Mở tab Quản lý model, chọn OmniVoice rồi bấm Cài worker/môi trường."
+                f"Không nạp được OmniVoice/torch bằng Python {sys.executable}: "
+                f"{type(exc).__name__}: {exc}. "
+                "Mở tab Quản lý model, chọn OmniVoice rồi kiểm tra mục Python/Thư viện TTS chính."
             ) from exc
         device, dtype = _best_device(torch, runtime_target)
         cache_key = f"{device}:{getattr(dtype, '__name__', str(dtype))}"

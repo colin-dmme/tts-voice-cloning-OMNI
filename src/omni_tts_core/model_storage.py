@@ -92,6 +92,10 @@ class ModelStorage:
         )
 
     def is_installed(self, spec: ModelSpec) -> bool:
+        if _uses_remote_endpoint(spec):
+            # There is intentionally no local payload. Endpoint reachability is
+            # checked from the Studio with the current, user-supplied URL.
+            return True
         if _uses_hf_cache(spec):
             worker_name = PROVIDER_WORKERS.get(spec.provider)
             return bool(
@@ -104,7 +108,19 @@ class ModelStorage:
             if subfolder:
                 model_path = spec.local_path / subfolder
                 return model_path.exists() and any(model_path.iterdir())
-        return spec.local_path.exists() and any(spec.local_path.iterdir())
+        if not spec.local_path.exists():
+            return False
+        required_artifacts = [
+            _runtime_text(spec, key)
+            for key in ("model_file", "config_file")
+            if _runtime_text(spec, key)
+        ]
+        if required_artifacts:
+            return all(
+                (spec.local_path / relative_path).is_file()
+                for relative_path in required_artifacts
+            )
+        return any(spec.local_path.iterdir())
 
     def _status_path(self, spec: ModelSpec) -> Path:
         if _uses_hf_cache(spec):
@@ -115,6 +131,10 @@ class ModelStorage:
 
     def download(self, model_id: str) -> ModelStatus:
         spec = self.registry.get(model_id)
+        if _uses_remote_endpoint(spec):
+            raise ConfigError(
+                f"{spec.display_name} chạy trên endpoint từ xa, không tải model vào máy này."
+            )
         if _uses_hf_cache(spec):
             self._ensure_worker(spec.provider)
             self._precache_hf_repos(spec)
@@ -137,6 +157,10 @@ class ModelStorage:
 
     def remove(self, model_id: str) -> ModelStatus:
         spec = self.registry.get(model_id)
+        if _uses_remote_endpoint(spec):
+            raise ConfigError(
+                f"{spec.display_name} không có payload cục bộ để gỡ."
+            )
         if spec.required:
             raise ConfigError(f"{spec.display_name} là model bắt buộc, không gỡ từ app.")
         if not _uses_hf_cache(spec) and spec.local_path.exists():
@@ -366,6 +390,8 @@ def _usage_for(spec: ModelSpec) -> str:
 
 
 def _storage_kind(spec: ModelSpec) -> str:
+    if _uses_remote_endpoint(spec):
+        return "Remote endpoint"
     if _uses_hf_cache(spec):
         return "HF cache + worker"
     if spec.provider in PROVIDER_WORKERS:
@@ -373,13 +399,17 @@ def _storage_kind(spec: ModelSpec) -> str:
     return "Model folder"
 
 
-def _storage_path_for(spec: ModelSpec) -> Path:
+def _storage_path_for(spec: ModelSpec) -> Path | None:
+    if _uses_remote_endpoint(spec):
+        return None
     if _uses_hf_cache(spec):
         return hf_cache_root()
     return spec.local_path
 
 
 def _storage_note_for(spec: ModelSpec) -> str:
+    if _uses_remote_endpoint(spec):
+        return "Model chạy trên GPU từ xa; URL và kết nối được cấu hình trong Studio."
     if spec.required:
         return "Bắt buộc cho cấu hình mặc định."
     if _uses_hf_cache(spec):
@@ -401,6 +431,11 @@ def _safe_rmtree(path: Path, allowed_roots: list[Path]) -> None:
 def _uses_hf_cache(spec: ModelSpec) -> bool:
     descriptor = provider_descriptor(spec.provider)
     return bool(descriptor and descriptor.storage_mode == "hf_cache")
+
+
+def _uses_remote_endpoint(spec: ModelSpec) -> bool:
+    descriptor = provider_descriptor(spec.provider)
+    return bool(descriptor and descriptor.storage_mode == "remote")
 
 
 def _uses_ephemeral_download_cache(spec: ModelSpec) -> bool:

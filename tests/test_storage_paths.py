@@ -147,6 +147,31 @@ class StoragePathsTest(unittest.TestCase):
                 self.assertTrue(second.installed)
                 self.assertTrue(model_path.exists())
 
+    def test_piper_is_not_installed_when_required_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            model_path = Path(temp) / "models" / "piper" / "voice"
+            model_path.mkdir(parents=True)
+            (model_path / "voice.onnx").write_bytes(b"model")
+            spec = ModelSpec(
+                model_id="piper_partial",
+                display_name="Piper Partial",
+                provider="piper",
+                model_type="tts",
+                local_path=model_path,
+                hf_repo="owner/repo",
+                language_priority="vi",
+                runtime={
+                    "model_file": "voice.onnx",
+                    "config_file": "voice.onnx.json",
+                },
+                capabilities=ModelCapabilities(),
+            )
+            storage = ModelStorage(_Registry(spec))
+
+            self.assertFalse(storage.is_installed(spec))
+            (model_path / "voice.onnx.json").write_text("{}", encoding="utf-8")
+            self.assertTrue(storage.is_installed(spec))
+
     def test_piper_download_rejects_wrong_configured_model_hash(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

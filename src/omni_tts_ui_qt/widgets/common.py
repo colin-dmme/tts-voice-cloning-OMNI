@@ -111,9 +111,15 @@ class CollapsibleSection(QFrame):
         self.setVisible(visible)
 
 
-def spin_for(field: str, value: int | None = None, tooltip_key: str = "") -> QSpinBox:
+def spin_for(
+    field: str,
+    value: int | None = None,
+    tooltip_key: str = "",
+    *,
+    schema=None,
+) -> QSpinBox:
     """Integer input whose range comes from the request schema, never from here."""
-    limit = field_limits.limit(field)
+    limit = field_limits.limit_for(schema, field) if schema else field_limits.limit(field)
     minimum, maximum, step = limit.ints()
     default = value if value is not None else field_limits.default_of(field)
     widget = make_spin(minimum, maximum, int(limit.clamp(default or minimum)), step)
@@ -122,9 +128,15 @@ def spin_for(field: str, value: int | None = None, tooltip_key: str = "") -> QSp
     return widget
 
 
-def dspin_for(field: str, value: float | None = None, tooltip_key: str = "") -> QDoubleSpinBox:
+def dspin_for(
+    field: str,
+    value: float | None = None,
+    tooltip_key: str = "",
+    *,
+    schema=None,
+) -> QDoubleSpinBox:
     """Decimal input whose range comes from the request schema, never from here."""
-    limit = field_limits.limit(field)
+    limit = field_limits.limit_for(schema, field) if schema else field_limits.limit(field)
     default = value if value is not None else field_limits.default_of(field)
     widget = make_dspin(
         limit.widget_minimum,

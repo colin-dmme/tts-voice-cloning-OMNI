@@ -11,7 +11,7 @@ provider) → Đầu ra → Bảo vệ GPU.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QThreadPool, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -41,6 +42,8 @@ from omni_tts_core.ui_presenters.settings_state import (
 )
 from omni_tts_core.ui_presenters.tooltips import tooltip
 from omni_tts_ui_qt.context import AppContext
+from omni_tts_ui_qt.background import FunctionTask
+from omni_tts_ui_qt.pages.higgs_remote_section import HiggsRemoteGroup
 from omni_tts_ui_qt.pages.settings_sections import ChatterboxGroup, F5Group, VieneuGroup
 from omni_tts_ui_qt.widgets.common import (
     CollapsibleSection,
@@ -228,9 +231,16 @@ class SettingsPanel(QScrollArea):
         self.vieneu_group = VieneuGroup()
         self.f5_group = F5Group()
         self.chatterbox_group = ChatterboxGroup()
-        for group in (self.vieneu_group, self.f5_group, self.chatterbox_group):
+        self.higgs_remote_group = HiggsRemoteGroup()
+        for group in (
+            self.vieneu_group,
+            self.f5_group,
+            self.chatterbox_group,
+            self.higgs_remote_group,
+        ):
             self.tuning_section.body_layout.addWidget(group)
             self._connect_all(*group.widgets())
+        self.higgs_remote_group.check_requested.connect(self._check_higgs_endpoint)
         self._layout.addWidget(self.tuning_section)
         # Providers without tuning knobs say so, instead of leaving a silent gap
         # that reads as "the settings failed to load".
@@ -332,6 +342,8 @@ class SettingsPanel(QScrollArea):
                 widget.currentIndexChanged.connect(self._emit_changed)
             elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
                 widget.valueChanged.connect(self._emit_changed)
+            elif isinstance(widget, QLineEdit):
+                widget.textChanged.connect(self._emit_changed)
 
     def _emit_changed(self, *_args) -> None:
         if not self._loading:
@@ -434,10 +446,17 @@ class SettingsPanel(QScrollArea):
             (self.vieneu_group, control_policy.TUNING_VIENEU),
             (self.f5_group, control_policy.TUNING_F5),
             (self.chatterbox_group, control_policy.TUNING_CHATTERBOX),
+            (self.higgs_remote_group, control_policy.TUNING_HIGGS_REMOTE),
         ):
             group.setVisible(group_id in groups)
         self.tuning_section.set_title(policy.tuning_title)
         self.tuning_section.setVisible(policy.has_tuning)
+        if self.tuning_section.activation is not None:
+            self.tuning_section.activation.setVisible(not policy.higgs_remote.supported)
+        if policy.higgs_remote.supported:
+            # Endpoint/transport fields are required connection settings, not
+            # optional sound tuning, so this provider cannot deactivate them.
+            self.tuning_section.set_active(True)
         self.tuning_absent.setText("" if policy.has_tuning else policy.tuning_absent_note())
         self.tuning_absent.setVisible(not policy.has_tuning)
 
@@ -534,6 +553,21 @@ class SettingsPanel(QScrollArea):
         group.seed.setValue(seed if seed is not None else -1)
         group.norm_loudness.setChecked(bool(defaults.get("chatterbox_norm_loudness", True)))
 
+    def _check_higgs_endpoint(self) -> None:
+        group = self.higgs_remote_group
+        group.set_checking(True, "Đang kiểm tra /health và /v1/models…")
+        settings = self.current_settings()
+        task = FunctionTask(lambda: self.ctrl.check_higgs_endpoint(settings))
+        task.signals.completed.connect(
+            lambda result: group.set_checking(False, result.message)
+        )
+        task.signals.failed.connect(
+            lambda message: group.set_checking(False, f"Lỗi: {message}")
+        )
+        # Keep a reference until Qt completes the runnable/signals.
+        self._higgs_check_task = task
+        QThreadPool.globalInstance().start(task)
+
     def _on_voice_mode_changed(self, *_args) -> None:
         if self._loading:
             return
@@ -601,6 +635,7 @@ class SettingsPanel(QScrollArea):
         tuning = self.tuning_section.is_active()
         mode = "fixed" if self.mode_fixed.isChecked() else "profile"
         vieneu, f5, cb = self.vieneu_group, self.f5_group, self.chatterbox_group
+        higgs = self.higgs_remote_group
 
         def on(state) -> bool:
             """A tuning control counts only if supported AND tuning is active."""
@@ -671,6 +706,29 @@ class SettingsPanel(QScrollArea):
             mp3_bitrate_kbps=int(self.bitrate_combo.currentData()),
             output_srt=self.output_srt.isChecked(),
             join_split_output_audio=self.join_split.isChecked(),
+            # Preserve the endpoint profile while switching to a local model.
+            # TtsService capability-gates it and only passes it to remote engines.
+            remote_base_url=higgs.endpoint_url.text().strip(),
+            remote_connect_timeout_seconds=higgs.connect_timeout.value(),
+            remote_request_timeout_seconds=higgs.request_timeout.value(),
+            remote_max_retries=higgs.retries.value(),
+            higgs_model=higgs.model.text().strip(),
+            higgs_voice=higgs.voice.text().strip() or "default",
+            higgs_stream=higgs.stream.isChecked(),
+            higgs_response_format=str(higgs.response_format.currentData() or "pcm"),
+            higgs_max_new_tokens=higgs.max_new_tokens.value(),
+            higgs_temperature=higgs.temperature.value(),
+            higgs_top_p=higgs.top_p.value() if higgs.top_p_enabled.isChecked() else None,
+            higgs_top_k=higgs.top_k.value() if higgs.top_k_enabled.isChecked() else None,
+            higgs_seed=higgs.seed.value() if higgs.seed.value() >= 0 else None,
+            higgs_initial_codec_chunk_frames=higgs.codec_frames.value(),
+            higgs_concurrency=higgs.concurrency.value(),
+            higgs_emotion=str(higgs.emotion.currentData() or ""),
+            higgs_style=str(higgs.style.currentData() or ""),
+            higgs_speed=str(higgs.speed.currentData() or ""),
+            higgs_pitch=str(higgs.pitch.currentData() or ""),
+            higgs_expressiveness=str(higgs.expressiveness.currentData() or ""),
+            higgs_delivery_tags=higgs.delivery_tags.text().strip(),
         )
 
     # --- Preferences round-trip --------------------------------------------
@@ -756,8 +814,45 @@ class SettingsPanel(QScrollArea):
             self.chatterbox_group.norm_loudness.setChecked(
                 bool(data.get("chatterbox_norm_loudness", True))
             )
+        if policy.higgs_remote:
+            self._load_higgs_remote(data)
         # Values just restored belong to this model; do not overwrite them.
         self._seeded_model_id = self.current_model_id()
+
+    def _load_higgs_remote(self, data: dict) -> None:
+        group = self.higgs_remote_group
+        group.endpoint_url.setText(str(data.get("remote_base_url") or ""))
+        group.model.setText(str(data.get("higgs_model") or ""))
+        group.voice.setText(str(data.get("higgs_voice") or "default"))
+        group.stream.setChecked(bool(data.get("higgs_stream", True)))
+        self._set_combo(group.response_format, data.get("higgs_response_format", "pcm"))
+        for field, widget in (
+            ("higgs_max_new_tokens", group.max_new_tokens),
+            ("higgs_temperature", group.temperature),
+            ("higgs_seed", group.seed),
+            ("higgs_initial_codec_chunk_frames", group.codec_frames),
+            ("higgs_concurrency", group.concurrency),
+            ("remote_connect_timeout_seconds", group.connect_timeout),
+            ("remote_request_timeout_seconds", group.request_timeout),
+            ("remote_max_retries", group.retries),
+        ):
+            value = data.get(field)
+            if value is not None:
+                widget.setValue(value)
+        top_p = data.get("higgs_top_p")
+        group.top_p_enabled.setChecked(top_p is not None)
+        if top_p is not None:
+            group.top_p.setValue(float(top_p))
+        top_k = data.get("higgs_top_k")
+        group.top_k_enabled.setChecked(top_k is not None)
+        if top_k is not None:
+            group.top_k.setValue(int(top_k))
+        self._set_combo(group.emotion, data.get("higgs_emotion", ""))
+        self._set_combo(group.style, data.get("higgs_style", ""))
+        self._set_combo(group.speed, data.get("higgs_speed", ""))
+        self._set_combo(group.pitch, data.get("higgs_pitch", ""))
+        self._set_combo(group.expressiveness, data.get("higgs_expressiveness", ""))
+        group.delivery_tags.setText(str(data.get("higgs_delivery_tags") or ""))
 
     def _load_gpu(self, data: dict) -> None:
         for _attribute, field, _label, _tooltip in self._gpu_rows:

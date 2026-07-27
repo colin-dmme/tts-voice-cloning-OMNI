@@ -37,6 +37,7 @@ PARAGRAPH_PAUSE_TOOLTIP = tooltip("paragraph_pause")
 TUNING_VIENEU = "vieneu"
 TUNING_F5 = "f5"
 TUNING_CHATTERBOX = "chatterbox"
+TUNING_HIGGS_REMOTE = "higgs_remote"
 
 _CUDA_TARGETS = {"cuda"}
 
@@ -74,6 +75,7 @@ class GenerationControlPolicy:
     sampling: ControlState
     f5: ControlState
     chatterbox: ControlState
+    higgs_remote: ControlState
     punctuation_pauses: ControlState
     gpu_safety: ControlState
     gpu_scope_note: str = ""
@@ -88,6 +90,8 @@ class GenerationControlPolicy:
             groups.append(TUNING_F5)
         if self.chatterbox:
             groups.append(TUNING_CHATTERBOX)
+        if self.higgs_remote:
+            groups.append(TUNING_HIGGS_REMOTE)
         return tuple(groups)
 
     @property
@@ -130,22 +134,27 @@ def build_policy(
 ) -> GenerationControlPolicy:
     descriptor = provider_descriptor(spec.provider)
     provider_label = descriptor.label if descriptor else (spec.provider or "Khác")
+    is_remote = bool(descriptor and descriptor.storage_mode == "remote")
     gpu_available = bool(runtime_status.gpu_available)
 
     languages = tuple(
         (_language_choice_label(code), code) for code in capabilities.supported_languages
     ) or (("Tiếng Việt", "vi"),)
 
-    device_targets = tuple(
-        (label, value)
-        for label, value in RUNTIME_TARGET_CHOICES
-        if gpu_available or value not in _CUDA_TARGETS
-    )
-    device_note = (
-        ""
-        if gpu_available
-        else f"{provider_label} chưa có CUDA khả dụng nên chỉ chạy CPU."
-    )
+    if is_remote:
+        device_targets = (("GPU từ xa (server quyết định)", "auto"),)
+        device_note = "Máy hiện tại chỉ gửi request; GPU và runtime nằm ở endpoint."
+    else:
+        device_targets = tuple(
+            (label, value)
+            for label, value in RUNTIME_TARGET_CHOICES
+            if gpu_available or value not in _CUDA_TARGETS
+        )
+        device_note = (
+            ""
+            if gpu_available
+            else f"{provider_label} chưa có CUDA khả dụng nên chỉ chạy CPU."
+        )
 
     return GenerationControlPolicy(
         model_id=spec.model_id,
@@ -177,17 +186,25 @@ def build_policy(
         ),
         f5=_state(supports_f5, "Chỉ áp dụng cho model F5-TTS."),
         chatterbox=_state(supports_chatterbox, "Chỉ áp dụng cho model Chatterbox."),
+        higgs_remote=_state(
+            bool(descriptor and "higgs_remote" in descriptor.controls),
+            "Chỉ áp dụng cho endpoint Higgs TTS 3 qua SGLang-Omni.",
+        ),
         punctuation_pauses=_state(
             bool(descriptor and "punctuation_pauses" in descriptor.controls),
             f"{provider_label} chưa có cơ chế ngắt nghỉ theo từng loại dấu câu.",
             tooltip("punctuation_section"),
         ),
         gpu_safety=_state(
-            gpu_available,
+            gpu_available and not is_remote,
             "Model đang chạy CPU nên bảo vệ GPU không can thiệp vào lần chạy này.",
             tooltip("gpu_enabled"),
         ),
-        gpu_scope_note=_gpu_scope_note(spec.provider, gpu_available),
+        gpu_scope_note=(
+            "Bảo vệ GPU cục bộ không can thiệp vào GPU từ xa; server phải tự giới hạn tải/nhiệt."
+            if is_remote
+            else _gpu_scope_note(spec.provider, gpu_available)
+        ),
     )
 
 

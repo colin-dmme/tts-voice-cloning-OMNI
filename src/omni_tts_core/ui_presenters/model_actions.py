@@ -91,7 +91,11 @@ def payload_ready(item: ModelStatus) -> bool:
 
 
 def _download_state(selected: Sequence[ModelStatus]) -> ActionState:
-    targets = tuple(item.model_id for item in selected if not payload_ready(item))
+    targets = tuple(
+        item.model_id
+        for item in selected
+        if item.storage_kind != "Remote endpoint" and not payload_ready(item)
+    )
     if targets:
         return ActionState(True, f"Tải {len(targets)} model đang thiếu.", targets)
     return ActionState(False, "Các model đang chọn đã tải đủ.")
@@ -99,7 +103,11 @@ def _download_state(selected: Sequence[ModelStatus]) -> ActionState:
 
 def _remove_state(selected: Sequence[ModelStatus]) -> ActionState:
     targets = tuple(
-        item.model_id for item in selected if item.installed and not item.required
+        item.model_id
+        for item in selected
+        if item.storage_kind != "Remote endpoint"
+        and item.installed
+        and not item.required
     )
     if targets:
         return ActionState(True, f"Gỡ {len(targets)} model đang chọn.", targets)
@@ -138,6 +146,8 @@ def _provider_state(
 def _open_state(selected: Sequence[ModelStatus]) -> ActionState:
     if len(selected) != 1:
         return ActionState(False, "Chỉ mở được thư mục của một model.")
+    if selected[0].storage_kind == "Remote endpoint":
+        return ActionState(False, "Model từ xa không có thư mục payload trên máy này.")
     return ActionState(True, "Mở thư mục lưu của model đang chọn.", (selected[0].model_id,))
 
 

@@ -82,6 +82,23 @@ Bản UI và quản lý model chạy với nhóm thư viện nhẹ. Khi muốn d
 
 Các file `install_*.bat` vẫn tồn tại để core chạy đúng tác vụ trên Windows, nhưng không cần bấm trực tiếp khi dùng app. VieNeu, Qwen, Valtec, F5-TTS và Chatterbox chạy trong worker riêng dưới `engines/`, tách khỏi môi trường chính để tránh xung đột dependency với OmniVoice.
 
+### Higgs TTS 3 trên GPU từ xa
+
+Trong giao diện Qt, chọn nhà cung cấp `Higgs Remote GPU` và model
+`Higgs TTS 3 · Remote GPU`. Model này không tải payload/worker vào máy hiện tại:
+
+1. Dán URL gốc hoặc URL đầy đủ `/v1/audio/speech` vào `URL endpoint`.
+2. Bấm `Kiểm tra kết nối` để kiểm tra `/health` và đọc ID thực từ `/v1/models`.
+3. Có thể để `Model API` trống để dùng model server đang serve, hoặc điền đúng ID
+   vừa kiểm tra. `voice=default` là lựa chọn thông thường.
+4. Chọn `Clone từ Profile` để app gửi audio tham chiếu dưới dạng Data URI kèm
+   transcript. Bật streaming PCM để nhận dữ liệu sớm qua proxy.
+
+URL TryCloudflare Quick Tunnel có thể đổi khi tunnel khởi động lại; URL được lưu
+trong preferences, không hardcode trong source. Phiên bản hiện tại không gửi
+Authorization. Lớp endpoint đã hỗ trợ cấu hình Bearer token qua biến môi trường
+để có thể đặt gateway bảo vệ phía trước khi chuyển sang GPU thuê ngoài.
+
 ## Giao diện mới Colin TTS Studio (PySide6)
 
 Giao diện studio mới nằm song song trong `src/omni_tts_ui_qt/`, **không dùng chung

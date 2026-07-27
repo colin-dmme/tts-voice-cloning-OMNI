@@ -175,6 +175,57 @@ TOOLTIPS: dict[str, str] = {
         "Turbo hiểu tag trong text như [laugh], [chuckle], [sigh], [gasp], [cough], "
         "[whisper], [breath]. Chỉ dùng khi cần hiệu ứng biểu cảm."
     ),
+    # --- Higgs TTS 3 qua SGLang-Omni -----------------------------------------
+    "higgs_endpoint": (
+        "Dán URL gốc hoặc URL đầy đủ kết thúc bằng /v1/audio/speech. App tự chuẩn hoá "
+        "đường dẫn health, models và speech. URL Quick Tunnel của TryCloudflare đổi khi "
+        "tunnel khởi động lại, nên hãy cập nhật và kiểm tra trước khi chạy."
+    ),
+    "higgs_check": (
+        "Gọi /health và /v1/models ở luồng nền; không tạo audio và không khoá giao diện."
+    ),
+    "higgs_auth": (
+        "Hiện gửi request không có Authorization. Bản sau có thể bật Bearer token lấy từ "
+        "biến môi trường, để secret không nằm trong file cài đặt hoặc job manifest."
+    ),
+    "higgs_model": (
+        "ID gửi ở trường model. Để trống để SGLang dùng model đang serve mặc định. "
+        "Bấm Kiểm tra kết nối để xem ID mà /v1/models thực sự công bố."
+    ),
+    "higgs_voice": (
+        "Giá trị trường voice của OpenAI-compatible API; thông thường giữ 'default'. "
+        "Với clone giọng, Profile/audio tham chiếu vẫn được gửi riêng dưới dạng references Data URI."
+    ),
+    "higgs_stream": (
+        "Bật để nhận PCM ngay khi server bắt đầu sinh, giảm nguy cơ Cloudflare timeout "
+        "khi phải chờ toàn bộ WAV. Khi bật, response_format luôn là PCM."
+    ),
+    "higgs_format": "PCM dùng cho streaming; WAV chỉ dùng khi tắt streaming.",
+    "higgs_temperature": "Độ ngẫu nhiên khi sinh. 1.0 là mặc định của API Higgs/SGLang.",
+    "higgs_top_p": "Giới hạn nucleus sampling. Bỏ chọn để server dùng mặc định.",
+    "higgs_top_k": "Giới hạn số token ứng viên. Bỏ chọn để server dùng mặc định.",
+    "higgs_max_tokens": "Giới hạn token audio mới; tăng cho đoạn dài nhưng tốn thời gian/GPU hơn.",
+    "higgs_seed": "Seed cố định để dễ tái lập; -1 nghĩa là không gửi seed.",
+    "higgs_codec_frames": "Số codec frame ở chunk streaming đầu; mặc định 1 để có audio sớm.",
+    "higgs_concurrency": (
+        "Số chunk gửi song song từ app. Server anh Tùng đặt trần 16, nhưng nên bắt đầu 1 "
+        "và chỉ tăng sau khi đo VRAM/độ ổn định."
+    ),
+    "higgs_connect_timeout": "Thời gian tối đa để thiết lập kết nối tới endpoint.",
+    "higgs_request_timeout": (
+        "Thời gian tối đa cho một lượt sinh. Mặc định 600 giây; streaming giúp tránh chờ "
+        "im lặng quá lâu qua proxy."
+    ),
+    "higgs_retries": "Chỉ retry lỗi mạng và lỗi tạm thời 502–504/520–524; không retry request sai.",
+    "higgs_tags": (
+        "Token nâng cao đặt trước toàn đoạn. Pause và SFX có vị trí cụ thể nên thường chèn "
+        "trực tiếp trong văn bản, ví dụ <|prosody:pause|> hoặc <|sfx:laughter|>Haha."
+    ),
+    "higgs_emotion": "21 emotion chính thức của Higgs; token được đặt đầu lượt đọc.",
+    "higgs_style": "Singing, shouting hoặc whispering; để Mặc định nếu không cần.",
+    "higgs_speed": "Điều khiển prosody toàn đoạn: rất chậm, chậm, nhanh hoặc rất nhanh.",
+    "higgs_pitch": "Điều khiển pitch toàn đoạn: thấp khoảng -3 hoặc cao khoảng +2.5 nửa cung.",
+    "higgs_expressiveness": "Độ biểu cảm toàn đoạn cao hoặc thấp.",
     # --- Bảo vệ GPU (toàn cục) ------------------------------------------------
     "gpu_enabled": (
         "Áp dụng cho MỌI model chạy CUDA, không riêng Chatterbox. Nếu tắt, app sẽ không chờ "

@@ -11,7 +11,11 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from omni_tts_shared.schemas import GenerateSpeechRequest
+from omni_tts_shared.schemas import (
+    GenerateSpeechRequest,
+    HiggsTtsOptions,
+    RemoteEndpointOptions,
+)
 
 
 # Default preference values for every generation field. Window/layout keys are
@@ -71,6 +75,27 @@ DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "mp3_bitrate_kbps": 192,
     "output_srt": False,
     "join_split_output_audio": False,
+    "remote_base_url": "",
+    "remote_connect_timeout_seconds": 10.0,
+    "remote_request_timeout_seconds": 600.0,
+    "remote_max_retries": 1,
+    "higgs_model": "",
+    "higgs_voice": "default",
+    "higgs_stream": True,
+    "higgs_response_format": "pcm",
+    "higgs_max_new_tokens": 2048,
+    "higgs_temperature": 1.0,
+    "higgs_top_p": None,
+    "higgs_top_k": None,
+    "higgs_seed": None,
+    "higgs_initial_codec_chunk_frames": 1,
+    "higgs_concurrency": 1,
+    "higgs_emotion": "",
+    "higgs_style": "",
+    "higgs_speed": "",
+    "higgs_pitch": "",
+    "higgs_expressiveness": "",
+    "higgs_delivery_tags": "",
 }
 
 # Keys that carry a filesystem path and round-trip as strings in preferences.
@@ -135,6 +160,27 @@ class GenerationSettings:
     mp3_bitrate_kbps: int = 192
     output_srt: bool = False
     join_split_output_audio: bool = False
+    remote_base_url: str = ""
+    remote_connect_timeout_seconds: float = 10.0
+    remote_request_timeout_seconds: float = 600.0
+    remote_max_retries: int = 1
+    higgs_model: str = ""
+    higgs_voice: str = "default"
+    higgs_stream: bool = True
+    higgs_response_format: str = "pcm"
+    higgs_max_new_tokens: int = 2048
+    higgs_temperature: float | None = 1.0
+    higgs_top_p: float | None = None
+    higgs_top_k: int | None = None
+    higgs_seed: int | None = None
+    higgs_initial_codec_chunk_frames: int = 1
+    higgs_concurrency: int = 1
+    higgs_emotion: str = ""
+    higgs_style: str = ""
+    higgs_speed: str = ""
+    higgs_pitch: str = ""
+    higgs_expressiveness: str = ""
+    higgs_delivery_tags: str = ""
 
     def to_request(self, text: str) -> GenerateSpeechRequest:
         return GenerateSpeechRequest(
@@ -197,6 +243,35 @@ class GenerationSettings:
             mp3_bitrate_kbps=self.mp3_bitrate_kbps,
             output_srt=self.output_srt,
             join_split_output_audio=self.join_split_output_audio,
+            remote_endpoint=RemoteEndpointOptions(
+                base_url=self.remote_base_url.strip(),
+                # Version one intentionally has no authorization. The shared
+                # endpoint schema already supports bearer_env for a later
+                # gateway without changing the GUI/request contract.
+                auth_mode="none",
+                connect_timeout_seconds=self.remote_connect_timeout_seconds,
+                request_timeout_seconds=self.remote_request_timeout_seconds,
+                max_retries=self.remote_max_retries,
+            ),
+            higgs=HiggsTtsOptions(
+                model=self.higgs_model.strip() or None,
+                voice=self.higgs_voice.strip() or "default",
+                stream=self.higgs_stream,
+                response_format=self.higgs_response_format,
+                max_new_tokens=self.higgs_max_new_tokens,
+                temperature=self.higgs_temperature,
+                top_p=self.higgs_top_p,
+                top_k=self.higgs_top_k,
+                seed=self.higgs_seed,
+                initial_codec_chunk_frames=self.higgs_initial_codec_chunk_frames,
+                concurrency=self.higgs_concurrency,
+                emotion=self.higgs_emotion,
+                style=self.higgs_style,
+                speed=self.higgs_speed,
+                pitch=self.higgs_pitch,
+                expressiveness=self.higgs_expressiveness,
+                delivery_tags=self.higgs_delivery_tags,
+            ),
         )
 
     @classmethod

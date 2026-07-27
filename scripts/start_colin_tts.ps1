@@ -9,6 +9,11 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $ProjectRoot
 
+# A launcher may itself run inside a uv environment. Never let that parent
+# environment redirect this project's uv sync/run away from its own .venv.
+Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+Remove-Item Env:UV_PROJECT_ENVIRONMENT -ErrorAction SilentlyContinue
+
 function Ensure-Uv {
     $uv = Get-Command uv -ErrorAction SilentlyContinue
     if ($uv) {

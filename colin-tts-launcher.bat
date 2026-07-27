@@ -1,5 +1,8 @@
 @echo off
 setlocal EnableDelayedExpansion
+REM Do not let a parent launcher force uv to reuse its own virtual environment.
+set "VIRTUAL_ENV="
+set "UV_PROJECT_ENVIRONMENT="
 chcp 65001 >nul
 cls
 

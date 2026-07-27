@@ -126,11 +126,23 @@ class StudioPage(QWidget):
         self.voice_search.setPlaceholderText("Tìm giọng…")
         self.voice_list = QListWidget()
         self.voice_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.voice_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.voice_preview_button = QPushButton("▶ Nghe giọng mẫu")
+        self.voice_preview_button.setEnabled(False)
+        self.voice_preview_button.setToolTip(
+            "Mở audio mẫu của profile giọng bằng trình nghe nhạc mặc định. "
+            "Giọng cố định của model không có file mẫu sẵn nên không nghe thử được."
+        )
         layout.addWidget(title)
         layout.addWidget(self.voice_search)
         layout.addWidget(self.voice_list, 1)
+        layout.addWidget(self.voice_preview_button)
         self.voice_search.textChanged.connect(self._filter_voices)
         self.voice_list.itemClicked.connect(self._on_voice_selected)
+        self.voice_list.currentItemChanged.connect(self._update_voice_preview_button)
+        self.voice_list.itemDoubleClicked.connect(self._preview_voice_item)
+        self.voice_list.customContextMenuRequested.connect(self._voice_context_menu)
+        self.voice_preview_button.clicked.connect(self._preview_current_voice)
         panel.setMinimumWidth(210)
         return panel
 
@@ -155,6 +167,7 @@ class StudioPage(QWidget):
             placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
             self.voice_list.addItem(placeholder)
         self._filter_voices(self.voice_search.text())
+        self._update_voice_preview_button()
 
     def _filter_voices(self, text: str) -> None:
         needle = text
@@ -171,6 +184,44 @@ class StudioPage(QWidget):
             self.settings_panel.set_fixed_voice(value)
         else:
             self.settings_panel.set_profile(value)
+
+    def _voice_item_profile_id(self, item: QListWidgetItem | None) -> str | None:
+        data = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if not data:
+            return None
+        mode, value = data
+        return value if mode == "profile" else None
+
+    def _update_voice_preview_button(self, *_args) -> None:
+        enabled = self._voice_item_profile_id(self.voice_list.currentItem()) is not None
+        self.voice_preview_button.setEnabled(enabled)
+
+    def _preview_current_voice(self) -> None:
+        self._preview_voice_item(self.voice_list.currentItem())
+
+    def _preview_voice_item(self, item: QListWidgetItem | None) -> None:
+        profile_id = self._voice_item_profile_id(item)
+        if profile_id is None:
+            return
+        self._play_audio(lambda: self.ctrl.play_voice_profile_sample(profile_id))
+
+    def _voice_context_menu(self, position) -> None:
+        item = self.voice_list.itemAt(position)
+        profile_id = self._voice_item_profile_id(item)
+        if profile_id is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("▶ Nghe giọng mẫu", lambda: self._preview_voice_item(item))
+        menu.addAction("Mở thư mục audio mẫu", lambda: self._open_profile_folder(profile_id))
+        menu.exec(self.voice_list.viewport().mapToGlobal(position))
+
+    def _open_profile_folder(self, profile_id: str) -> None:
+        try:
+            profile = self.ctrl.voice_profile(profile_id)
+        except Exception as error:
+            QMessageBox.warning(self, "Không mở được thư mục", str(error))
+            return
+        open_path(Path(profile.audio_path).parent)
 
     # --- Center -------------------------------------------------------------
 

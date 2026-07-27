@@ -367,6 +367,7 @@ tts_models:
       model_file: "piper-tts/taian2.onnx"
       config_file: "piper-tts/config.json"
       download_allow_patterns: ["piper-tts/taian2.onnx", "piper-tts/config.json"]
+      model_sha256: "74e911f0c6d32e3e14811271f5da896befadbdea418272b72c7ad228c6322498"
     catalog_info:
       category: "community"
       origin: "community"
@@ -390,6 +391,7 @@ tts_models:
       model_file: "piper-tts/taian4.onnx"
       config_file: "piper-tts/config.json"
       download_allow_patterns: ["piper-tts/taian4.onnx", "piper-tts/config.json"]
+      model_sha256: "45f5e1eab57f84361d109f1b0ff9a512151bd78a0a675351a633be12101e2877"
     catalog_info:
       category: "community"
       origin: "community"

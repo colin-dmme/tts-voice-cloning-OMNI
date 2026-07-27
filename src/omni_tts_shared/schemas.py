@@ -11,6 +11,8 @@ OutputMode = Literal["merged", "split"]
 OutputAudioFormat = Literal["wav", "mp3"]
 RuntimeTarget = Literal["auto", "cpu", "cuda"]
 VoiceSourceMode = Literal["fixed", "profile"]
+RemoteAuthMode = Literal["none", "bearer_env"]
+HiggsResponseFormat = Literal["wav", "mp3", "flac", "opus", "aac", "pcm"]
 
 
 class ModelStatus(BaseModel):
@@ -122,6 +124,59 @@ class SetupTaskStatus(BaseModel):
     script_name: str = ""
 
 
+class RemoteEndpointOptions(BaseModel):
+    """Connection policy shared by remote model providers.
+
+    Secrets are deliberately represented by an environment-variable name, not
+    by a token value, so preferences/job manifests never persist credentials.
+    """
+
+    base_url: str = ""
+    auth_mode: RemoteAuthMode = "none"
+    auth_env: str = "OMNI_TTS_REMOTE_API_KEY"
+    connect_timeout_seconds: float = Field(default=10.0, ge=1.0, le=120.0)
+    request_timeout_seconds: float = Field(default=600.0, ge=10.0, le=7200.0)
+    max_retries: int = Field(default=1, ge=0, le=5)
+
+
+class HiggsTtsOptions(BaseModel):
+    """SGLang-Omni ``/v1/audio/speech`` options for Higgs TTS 3."""
+
+    model: str | None = None
+    voice: str = "default"
+    response_format: HiggsResponseFormat = "pcm"
+    stream: bool = True
+    max_new_tokens: int = Field(default=2048, ge=1, le=32768)
+    temperature: float | None = Field(default=1.0, ge=0.1, le=2.0)
+    top_p: float | None = Field(default=None, ge=0.01, le=1.0)
+    top_k: int | None = Field(default=None, ge=1, le=2000)
+    seed: int | None = Field(default=None, ge=0)
+    initial_codec_chunk_frames: int = Field(default=1, ge=0, le=64)
+    concurrency: int = Field(default=1, ge=1, le=16)
+    emotion: str = ""
+    style: str = ""
+    speed: str = ""
+    pitch: str = ""
+    expressiveness: str = ""
+    delivery_tags: str = ""
+
+    @model_validator(mode="after")
+    def normalize_stream_format(self):
+        # The SGLang streaming endpoint emits raw signed 16-bit PCM. WAV stays
+        # available for non-streaming calls.
+        if self.stream:
+            self.response_format = "pcm"
+        self.model = (self.model or "").strip() or None
+        self.voice = self.voice.strip() or "default"
+        self.emotion = self.emotion.strip()
+        self.style = self.style.strip()
+        self.speed = self.speed.strip()
+        self.pitch = self.pitch.strip()
+        self.expressiveness = self.expressiveness.strip()
+        self.delivery_tags = self.delivery_tags.strip()
+        return self
+
+
 class GenerateSpeechRequest(BaseModel):
     text: str = Field(min_length=1)
     language: LanguageCode = "vi"
@@ -181,6 +236,8 @@ class GenerateSpeechRequest(BaseModel):
     mp3_bitrate_kbps: int = Field(default=192, ge=64, le=320)
     output_srt: bool = False
     join_split_output_audio: bool = False
+    remote_endpoint: RemoteEndpointOptions | None = None
+    higgs: HiggsTtsOptions | None = None
 
     @model_validator(mode="before")
     @classmethod

@@ -69,6 +69,27 @@ class PiperCatalogTest(unittest.TestCase):
         self.assertIn("nam viral", adam.display_name.lower())
         self.assertFalse(adam.capabilities.supports_voice_profile)
 
+    def test_tai_an_variants_have_distinct_verified_artifacts(self) -> None:
+        tai_an_2 = self.registry.get("piper_tai_an_2")
+        tai_an_4 = self.registry.get("piper_tai_an_4")
+
+        self.assertEqual(tai_an_2.runtime["model_file"], "piper-tts/taian2.onnx")
+        self.assertEqual(
+            tai_an_2.runtime["model_sha256"],
+            "74e911f0c6d32e3e14811271f5da896befadbdea418272b72c7ad228c6322498",
+        )
+        self.assertEqual(tai_an_4.runtime["model_file"], "piper-tts/taian4.onnx")
+        self.assertEqual(
+            tai_an_4.runtime["model_sha256"],
+            "45f5e1eab57f84361d109f1b0ff9a512151bd78a0a675351a633be12101e2877",
+        )
+        self.assertNotEqual(
+            tai_an_2.runtime["model_sha256"],
+            tai_an_4.runtime["model_sha256"],
+        )
+        self.assertFalse(tai_an_2.capabilities.supports_voice_profile)
+        self.assertFalse(tai_an_4.capabilities.supports_voice_profile)
+
     def test_vivos_exposes_all_embedded_speakers(self) -> None:
         vivos = self.registry.get("piper_vivos_x_low")
 

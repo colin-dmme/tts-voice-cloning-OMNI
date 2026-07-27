@@ -73,6 +73,9 @@ class TtsService:
     def list_voice_profiles(self) -> list[VoiceProfile]:
         return self.voice_profiles.list_profiles()
 
+    def get_voice_profile(self, profile_id: str) -> VoiceProfile:
+        return self.voice_profiles.get_profile(profile_id)
+
     def save_voice_profile(
         self,
         name: str,
@@ -439,6 +442,10 @@ class TtsService:
                     0,
                     max(1, len(chunks)),
                 ),
+                remote_endpoint=(
+                    request.remote_endpoint if spec.provider == "higgs_remote" else None
+                ),
+                higgs=request.higgs if spec.provider == "higgs_remote" else None,
             )
             for chunk in chunks
         ]
@@ -591,11 +598,14 @@ class TtsService:
             raise ModelMissingError(
                 f"Model chưa có trong dự án: {spec.display_name}. Hãy tải model trước."
             )
-        missing_required = [
-            item
-            for item in self.missing_required_models()
-            if item.model_type != "tts"
-        ]
+        missing_required = []
+        descriptor = provider_descriptor(spec.provider)
+        if not descriptor or descriptor.storage_mode != "remote":
+            missing_required = [
+                item
+                for item in self.missing_required_models()
+                if item.model_type != "tts"
+            ]
         if missing_required:
             names = ", ".join(item.display_name for item in missing_required)
             raise ModelMissingError(
@@ -760,6 +770,12 @@ class TtsService:
                             0,
                             max(1, len(engine_requests)),
                         ),
+                        remote_endpoint=(
+                            request.remote_endpoint
+                            if spec.provider == "higgs_remote"
+                            else None
+                        ),
+                        higgs=request.higgs if spec.provider == "higgs_remote" else None,
                     )
                 )
             split_jobs.append(

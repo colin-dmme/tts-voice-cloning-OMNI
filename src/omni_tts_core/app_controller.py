@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from typing import Callable, Protocol
 
 from omni_tts_core.file_queue import FileQueueOutputManifest, FileQueueStatus
@@ -586,26 +586,39 @@ def _file_progress(
     if callback is None and file_event_callback is None:
         return None
 
+    last_file_progress = 0.0
+    progress_lock = Lock()
+
     def scaled(event: ProgressEvent) -> None:
-        file_progress = event.current / event.total if event.total > 0 else 0.0
-        if callback is not None:
-            callback(
-                ProgressEvent(
-                    message=f"File {file_index}/{total_files} ({file_name}): {event.message}",
-                    current=(file_index - 1) + file_progress,
-                    total=total_files,
+        nonlocal last_file_progress
+        candidate = event.current / event.total if event.total > 0 else 0.0
+        candidate = max(0.0, min(1.0, candidate))
+        # Provider status messages may carry 0/current while a request starts.
+        # Multiple remote requests can emit those messages concurrently and out
+        # of order, so progress for one file must never move backwards.
+        with progress_lock:
+            file_progress = max(last_file_progress, candidate)
+            last_file_progress = file_progress
+            # Keep calculation and emission under the same lock. Otherwise a
+            # thread holding an older value could emit after a newer thread.
+            if callback is not None:
+                callback(
+                    ProgressEvent(
+                        message=f"File {file_index}/{total_files} ({file_name}): {event.message}",
+                        current=(file_index - 1) + file_progress,
+                        total=total_files,
+                    )
                 )
+            _emit_file_event(
+                file_event_callback,
+                FileGenerationEvent(
+                    item_id=item_id,
+                    source_path=source_path,
+                    status=FileQueueStatus.RUNNING,
+                    progress_percent=max(0.0, min(100.0, file_progress * 100.0)),
+                    message=event.message,
+                ),
             )
-        _emit_file_event(
-            file_event_callback,
-            FileGenerationEvent(
-                item_id=item_id,
-                source_path=source_path,
-                status=FileQueueStatus.RUNNING,
-                progress_percent=max(0.0, min(100.0, file_progress * 100.0)),
-                message=event.message,
-            ),
-        )
 
     return scaled
 

@@ -141,10 +141,20 @@ class QueueController(QObject):
     # --- Worker event handlers ---------------------------------------------
 
     def _on_file_event(self, event: FileGenerationEvent) -> None:
-        if event.status == FileQueueStatus.RUNNING and event.progress_percent <= 0:
-            self.store.mark_running(event.item_id)
-        elif event.status == FileQueueStatus.RUNNING:
-            self.store.update_progress(event.item_id, event.progress_percent, event.message)
+        if event.status == FileQueueStatus.RUNNING:
+            current = self.store.get(event.item_id)
+            if current.status != FileQueueStatus.RUNNING:
+                self.store.mark_running(event.item_id)
+                current = self.store.get(event.item_id)
+            # Status callbacks and concurrent requests may arrive late. Keep
+            # the row monotonic and update only its message when the candidate
+            # percentage is stale or equal.
+            if event.progress_percent > current.progress_percent:
+                self.store.update_progress(
+                    event.item_id, event.progress_percent, event.message
+                )
+            else:
+                self.store.update_detail(event.item_id, event.message)
         elif event.status == FileQueueStatus.DONE and event.result is not None:
             manifest = results.result_output_manifest(event.result)
             self.store.mark_done(
@@ -163,7 +173,7 @@ class QueueController(QObject):
 
     def _on_progress(self, event) -> None:
         percent = (event.current / event.total) if event.total else 0.0
-        self.progress.emit(percent, event.message)
+        self.progress.emit(percent, f"Toàn hàng đợi · {event.message}")
         self.log.emit(event.message)
 
     def _on_completed(self, _outcomes) -> None:

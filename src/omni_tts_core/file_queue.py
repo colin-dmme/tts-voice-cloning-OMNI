@@ -281,13 +281,14 @@ class FileQueueStore:
                     last_error = '', status_detail = 'Đang khởi tạo...',
                     job_id = '', output_paths_json = '[]', output_manifest_json = '{}',
                     source_signature = ?, started_at = ?, finished_at = ''
-                WHERE item_id = ?
+                WHERE item_id = ? AND status != ?
                 """,
                 (
                     FileQueueStatus.RUNNING.value,
                     source_signature(self.get(item_id).source_path),
                     _now(),
                     item_id,
+                    FileQueueStatus.RUNNING.value,
                 ),
             )
 
@@ -300,6 +301,18 @@ class FileQueueStore:
                 WHERE item_id = ?
                 """,
                 (max(0.0, min(100.0, progress_percent)), detail, item_id),
+            )
+
+    def update_detail(self, item_id: str, detail: str) -> None:
+        """Update a running message without changing numeric progress/attempts."""
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE file_queue
+                SET status_detail = ?
+                WHERE item_id = ?
+                """,
+                (detail, item_id),
             )
 
     def mark_done(

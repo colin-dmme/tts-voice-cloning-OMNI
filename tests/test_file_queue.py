@@ -60,6 +60,23 @@ class _FakeService:
 
 
 class TestFileQueueStore(unittest.TestCase):
+    def test_mark_running_is_idempotent_within_one_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.txt"
+            source.write_text("hello", encoding="utf-8")
+            store = FileQueueStore(root / "queue.sqlite3")
+            item, _ = store.add(source, 5)
+
+            store.mark_running(item.item_id)
+            store.update_progress(item.item_id, 42.0, "Đã tạo 8/19")
+            store.mark_running(item.item_id)
+
+            current = store.get(item.item_id)
+            self.assertEqual(current.attempt_count, 1)
+            self.assertEqual(current.progress_percent, 42.0)
+            self.assertEqual(current.status_detail, "Đã tạo 8/19")
+
     def test_persists_status_and_rejects_duplicate_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

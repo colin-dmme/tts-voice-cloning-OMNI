@@ -6,6 +6,7 @@ from threading import Event
 
 from omni_tts_core.app_controller import AppController, FileGenerationEvent
 from omni_tts_core.file_queue import FileQueueStatus
+from omni_tts_core.progress import ProgressEvent
 from omni_tts_core.ui_presenters.settings_state import GenerationSettings
 from omni_tts_shared.errors import GpuSafetyError
 
@@ -44,11 +45,18 @@ class _FakeJobStore:
 
 
 class _FakeService:
-    def __init__(self, *, fail_on: set[str] | None = None, gpu_fail_on: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on: set[str] | None = None,
+        gpu_fail_on: set[str] | None = None,
+        progress_events: list[ProgressEvent] | None = None,
+    ) -> None:
         self.fail_on = fail_on or set()
         self.gpu_fail_on = gpu_fail_on or set()
         self.job_store = _FakeJobStore()
         self.calls: list[str] = []
+        self.progress_events = progress_events or []
 
     def generate_from_source_file(self, source_path, request_template, output_dir, progress_callback, cancel_event):
         name = source_path.name
@@ -57,6 +65,9 @@ class _FakeService:
             raise GpuSafetyError("GPU quá nóng")
         if name in self.fail_on:
             raise RuntimeError(f"lỗi {name}")
+        if progress_callback is not None:
+            for event in self.progress_events:
+                progress_callback(event)
         return _FakeResult(name)
 
 
@@ -117,6 +128,36 @@ class GenerateFilesTest(unittest.TestCase):
         controller = _controller(_FakeService())
         with self.assertRaises(Exception):
             controller.generate_files([], GenerationSettings())
+
+    def test_status_events_cannot_move_file_or_queue_progress_backwards(self) -> None:
+        service = _FakeService(
+            progress_events=[
+                ProgressEvent("Đã tạo 1/3", 1, 3),
+                ProgressEvent("Đang gửi yêu cầu tiếp theo", 0, 3),
+                ProgressEvent("Đã tạo 2/3", 2, 3),
+            ]
+        )
+        progress: list[ProgressEvent] = []
+        file_events: list[FileGenerationEvent] = []
+
+        _controller(service).generate_files(
+            _tasks("a"),
+            GenerationSettings(),
+            progress_callback=progress.append,
+            file_event_callback=file_events.append,
+        )
+
+        numeric = [event.current / event.total for event in progress]
+        self.assertEqual(numeric, sorted(numeric))
+        running = [
+            event.progress_percent
+            for event in file_events
+            if event.status == FileQueueStatus.RUNNING
+        ]
+        self.assertEqual(
+            [round(value, 6) for value in running],
+            [0.0, 33.333333, 33.333333, 66.666667],
+        )
 
 
 if __name__ == "__main__":

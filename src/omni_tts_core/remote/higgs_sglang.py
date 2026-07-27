@@ -10,6 +10,7 @@ import numpy as np
 import soundfile as sf
 
 from omni_tts_core.remote.endpoint import RemoteEndpointTransport
+from omni_tts_core.higgs.script import apply_delivery_defaults
 from omni_tts_shared.errors import ConfigError, GenerationError
 from omni_tts_shared.schemas import HiggsTtsOptions, RemoteEndpointOptions
 
@@ -22,7 +23,7 @@ class EndpointCheckResult:
 
 
 class HiggsSglangClient:
-    """Protocol adapter for SGLang-Omni's OpenAI-compatible speech route."""
+    """Protocol adapter for SGLang, Boson, and compatible Higgs speech routes."""
 
     def __init__(
         self,
@@ -34,6 +35,13 @@ class HiggsSglangClient:
         self.transport = RemoteEndpointTransport(endpoint)
 
     def check(self) -> EndpointCheckResult:
+        if self.endpoint.api_flavor == "boson":
+            models = self.transport.get_json(self.transport.paths.models_url)
+            ids = _model_ids(models)
+            detail = "Boson API hoạt động"
+            if ids:
+                detail += " · model: " + ", ".join(ids)
+            return EndpointCheckResult(True, detail, ids)
         health_response = self.transport.get(self.transport.paths.health_url)
         models = self.transport.get_json(self.transport.paths.models_url)
         ids = _model_ids(models)
@@ -84,39 +92,39 @@ class HiggsSglangClient:
         reference_audio_path: Path | None = None,
         reference_text: str | None = None,
     ) -> dict:
-        tags = [
-            f"<|emotion:{self.options.emotion}|>" if self.options.emotion else "",
-            f"<|style:{self.options.style}|>" if self.options.style else "",
-            f"<|prosody:{self.options.speed}|>" if self.options.speed else "",
-            f"<|prosody:{self.options.pitch}|>" if self.options.pitch else "",
-            f"<|prosody:{self.options.expressiveness}|>"
-            if self.options.expressiveness
-            else "",
-            self.options.delivery_tags,
-        ]
-        prefix = "".join(item for item in tags if item)
-        tagged_text = f"{prefix}{text.strip()}"
+        tagged_text = apply_delivery_defaults(text, self.options)
         payload: dict[str, object] = {
             "input": tagged_text,
             "voice": self.options.voice,
             "response_format": self.options.response_format,
             "stream": self.options.stream,
             "max_new_tokens": self.options.max_new_tokens,
-            "initial_codec_chunk_frames": self.options.initial_codec_chunk_frames,
         }
+        if self.endpoint.api_flavor == "sglang":
+            payload["initial_codec_chunk_frames"] = (
+                self.options.initial_codec_chunk_frames
+            )
         if self.options.model:
             payload["model"] = self.options.model
+        elif self.endpoint.api_flavor == "boson":
+            payload["model"] = "higgs-tts-3"
         for key in ("temperature", "top_p", "top_k", "seed"):
             value = getattr(self.options, key)
             if value is not None:
                 payload[key] = value
         if reference_audio_path:
-            payload["references"] = [
-                {
-                    "audio_path": audio_data_uri(reference_audio_path),
-                    "text": (reference_text or "").strip(),
-                }
-            ]
+            encoded = audio_data_uri(reference_audio_path)
+            transcript = (reference_text or "").strip()
+            if self.endpoint.api_flavor == "boson":
+                payload["ref_audio"] = encoded
+                payload["ref_text"] = transcript
+            else:
+                payload["references"] = [
+                    {
+                        "audio_path": encoded,
+                        "text": transcript,
+                    }
+                ]
         return payload
 
 

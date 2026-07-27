@@ -1575,8 +1575,8 @@ tts_models:
     voice_input:
       modes: ["fixed", "profile"]
       default_mode: "fixed"
-      fixed_label: "Voice mặc định của server"
-      fixed_tooltip: "Gửi voice=default và không gửi audio tham chiếu."
+      fixed_label: "Voice server / Custom Voice"
+      fixed_tooltip: "Gửi voice=default, preset hoặc Custom Voice ID; không gửi audio tham chiếu."
       profile_label: "Clone giọng bằng Profile"
       profile_tooltip: "Audio Profile được mã hoá thành Data URI và gửi trong references."
     default_voice_preset: "default"
@@ -1590,7 +1590,7 @@ tts_models:
       temperature: 1.0
       initial_codec_chunk_frames: 1
       concurrency: 1
-    notes: "Higgs TTS 3 chạy trên endpoint SGLang-Omni từ xa; URL không hardcode và có thể thay đổi khi TryCloudflare restart."
+    notes: "Higgs TTS 3 chạy qua endpoint từ xa; hỗ trợ SGLang, Boson/custom gateway, Higgs Script và Custom Voice theo capability."
     ref_audio_hints:
       min_seconds: 3.0
       max_seconds: 30.0

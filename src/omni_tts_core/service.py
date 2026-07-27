@@ -13,6 +13,11 @@ from omni_tts_core.audio.wav_tools import (
 from omni_tts_core.config import AppSettings
 from omni_tts_core.engine_profile_cache import EngineProfileCache
 from omni_tts_core.generation_form import GenerationFormPresenter
+from omni_tts_core.higgs.custom_voices import (
+    HiggsCustomVoiceClient,
+    HiggsCustomVoiceStore,
+)
+from omni_tts_core.higgs.script import compile_higgs_chunks, validate_higgs_script
 from omni_tts_core.model_catalog import open_catalog
 from omni_tts_core.engines.base import BaseTtsEngine, TtsEngineRequest, TtsEngineResult
 from omni_tts_core.jobs.store import JobStore
@@ -38,6 +43,7 @@ from omni_tts_shared.schemas import (
     GenerateSpeechRequest,
     GenerateSpeechResult,
     GenerationFormDescriptor,
+    HiggsCustomVoice,
     ModelCapabilities,
     ModelStatus,
     ProfileSaveWarning,
@@ -57,6 +63,7 @@ class TtsService:
         registry: ModelRegistry | None = None,
         storage: ModelStorage | None = None,
         voice_profiles: VoiceProfileManager | None = None,
+        higgs_custom_voices: HiggsCustomVoiceStore | None = None,
     ) -> None:
         self.settings = settings or AppSettings()
         self.registry = registry or ModelRegistry()
@@ -64,6 +71,7 @@ class TtsService:
         self.runtime_status = RuntimeStatusService(self.registry, self.storage)
         self.setup = SetupService(self.registry, self.storage, self.runtime_status)
         self.voice_profiles = voice_profiles or VoiceProfileManager()
+        self.higgs_custom_voices = higgs_custom_voices or HiggsCustomVoiceStore()
         self.engine_cache = EngineProfileCache()
         self.voice_policy = VoiceProfilePolicy(self.registry, self.engine_cache)
         self.generation_form = GenerationFormPresenter(self.registry)
@@ -75,6 +83,25 @@ class TtsService:
 
     def get_voice_profile(self, profile_id: str) -> VoiceProfile:
         return self.voice_profiles.get_profile(profile_id)
+
+    def list_higgs_custom_voices(self, endpoint_id: str) -> list[HiggsCustomVoice]:
+        return self.higgs_custom_voices.list(endpoint_id)
+
+    def create_higgs_custom_voice(
+        self,
+        *,
+        endpoint,
+        profile_id: str,
+        title: str,
+    ) -> HiggsCustomVoice:
+        profile = self.voice_profiles.get_profile(profile_id)
+        voice = HiggsCustomVoiceClient(endpoint).create(
+            title=title,
+            reference_audio_path=profile.audio_path,
+            reference_text=profile.transcript,
+        )
+        voice = voice.model_copy(update={"source_profile_id": profile.profile_id})
+        return self.higgs_custom_voices.save(voice)
 
     def save_voice_profile(
         self,
@@ -332,7 +359,13 @@ class TtsService:
         request = self._apply_voice_profile(request)
         spec = self.registry.get(request.model_id)
         self._ensure_request_can_generate(request, spec)
-        units = _prepared_text_units(request.text, request.language, request.max_chunk_chars)
+        units = _prepared_text_units(
+            request.text,
+            request.language,
+            request.max_chunk_chars,
+            provider=spec.provider,
+            higgs=request.higgs,
+        )
         chunks = [chunk for unit in units for chunk in unit["chunks"]]
         if not chunks:
             raise ConfigError("Không có nội dung để đọc.")
@@ -546,7 +579,11 @@ class TtsService:
                 progress_callback,
                 cancel_event,
             )
-        text = read_source_text(source_path)
+        spec = self.registry.get(request_template.model_id)
+        text = read_source_text(
+            source_path,
+            preserve_higgs_tags=spec.provider == "higgs_remote",
+        )
         request = request_template.model_copy(
             update={
                 "text": text,
@@ -566,7 +603,11 @@ class TtsService:
         cancel_event: Event | None = None,
     ) -> GenerateSpeechResult:
         check_cancel(cancel_event)
-        units = read_source_units(source_path)
+        spec = self.registry.get(request_template.model_id)
+        units = read_source_units(
+            source_path,
+            preserve_higgs_tags=spec.provider == "higgs_remote",
+        )
         request = request_template.model_copy(
             update={
                 "source_path": source_path,
@@ -697,8 +738,13 @@ class TtsService:
         split_jobs = []
         engine_requests: list[TtsEngineRequest] = []
         for unit in units:
-            text = _prepare_text(unit.text, request.language)
-            chunks = split_text(text, request.max_chunk_chars)
+            chunks = _chunks_for_provider(
+                unit.text,
+                request.language,
+                request.max_chunk_chars,
+                provider=spec.provider,
+                higgs=request.higgs,
+            )
             if not chunks:
                 continue
             unit_stem = f"{output_stem}_{unit.index:03}"
@@ -1018,11 +1064,23 @@ def _prepare_text(text: str, language: str) -> str:
     return text.strip()
 
 
-def _prepared_text_units(text: str, language: str, max_chunk_chars: int) -> list[dict]:
+def _prepared_text_units(
+    text: str,
+    language: str,
+    max_chunk_chars: int,
+    *,
+    provider: str = "",
+    higgs=None,
+) -> list[dict]:
     prepared_units = []
     for unit in text_units_from_blank_lines(text):
-        prepared_text = _prepare_text(unit.text, language)
-        chunks = split_text(prepared_text, max_chunk_chars)
+        chunks = _chunks_for_provider(
+            unit.text,
+            language,
+            max_chunk_chars,
+            provider=provider,
+            higgs=higgs,
+        )
         if chunks:
             prepared_units.append(
                 {
@@ -1031,6 +1089,29 @@ def _prepared_text_units(text: str, language: str, max_chunk_chars: int) -> list
                 }
             )
     return prepared_units
+
+
+def _chunks_for_provider(
+    text: str,
+    language: str,
+    max_chunk_chars: int,
+    *,
+    provider: str,
+    higgs=None,
+) -> list[str]:
+    if provider == "higgs_remote":
+        analysis = validate_higgs_script(text)
+        errors = [
+            issue.message
+            for issue in analysis.issues
+            if issue.severity == "error"
+        ]
+        if errors:
+            raise ConfigError(
+                "Higgs Script không hợp lệ: " + " ".join(errors[:3])
+            )
+        return compile_higgs_chunks(text, language, max_chunk_chars, higgs)
+    return split_text(_prepare_text(text, language), max_chunk_chars)
 
 
 def _paragraph_pause_ms(request: GenerateSpeechRequest) -> int:

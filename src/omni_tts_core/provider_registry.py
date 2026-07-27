@@ -78,7 +78,7 @@ PROVIDERS: dict[str, ProviderDescriptor] = {
         "remote",
         None,
         _simple(HiggsRemoteEngine),
-        frozenset({"higgs_remote"}),
+        frozenset({"higgs_remote", "higgs_script"}),
     ),
 }
 

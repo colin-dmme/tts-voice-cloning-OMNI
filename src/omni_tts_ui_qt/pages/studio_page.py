@@ -43,6 +43,7 @@ from omni_tts_ui_qt.context import AppContext
 from omni_tts_ui_qt.models.queue_model import ProgressBarDelegate, QueueTableModel
 from omni_tts_ui_qt.pages.queue_controller import QueueController
 from omni_tts_ui_qt.pages.settings_panel import SettingsPanel
+from omni_tts_ui_qt.widgets.higgs_script_toolbar import HiggsScriptToolbar
 from omni_tts_ui_qt.widgets.common import open_path
 
 _FILTERS = [
@@ -112,6 +113,7 @@ class StudioPage(QWidget):
         self._wire()
         self._load_preferences()
         self._refresh_sidebar()
+        self._sync_higgs_script_toolbar()
         self._refresh_queue()
 
     # --- Sidebar ------------------------------------------------------------
@@ -155,6 +157,11 @@ class StudioPage(QWidget):
         except Exception:
             presets = []
         for label, voice_id in presets:
+            item = QListWidgetItem(f"🎧  {label}")
+            item.setData(Qt.ItemDataRole.UserRole, ("fixed", voice_id))
+            self.voice_list.addItem(item)
+        settings = self.settings_panel.current_settings()
+        for label, voice_id in self.ctrl.higgs_custom_voice_choices(settings):
             item = QListWidgetItem(f"🎧  {label}")
             item.setData(Qt.ItemDataRole.UserRole, ("fixed", voice_id))
             self.voice_list.addItem(item)
@@ -277,6 +284,17 @@ class StudioPage(QWidget):
         layout = QVBoxLayout(widget)
         self.text_input = QPlainTextEdit()
         self.text_input.setPlaceholderText("Nhập nội dung cần đọc…")
+        self.higgs_script_toolbar = HiggsScriptToolbar()
+        self.higgs_script_toolbar.setVisible(False)
+        self.higgs_script_toolbar.token_requested.connect(
+            self._insert_higgs_token
+        )
+        self.higgs_script_toolbar.validate_requested.connect(
+            self._validate_higgs_script
+        )
+        self.higgs_script_toolbar.preview_requested.connect(
+            self._preview_higgs_requests
+        )
         stem_row = QHBoxLayout()
         self.output_stem = QLineEdit()
         self.output_stem.setPlaceholderText("Tên file xuất (tùy chọn)")
@@ -300,6 +318,7 @@ class StudioPage(QWidget):
             "Mở file audio kết quả bằng trình nghe nhạc mặc định của Windows."
         )
         result_header.addWidget(self.text_preview_button)
+        layout.addWidget(self.higgs_script_toolbar)
         layout.addWidget(self.text_input, 1)
         layout.addLayout(stem_row)
         layout.addLayout(result_header)
@@ -384,6 +403,7 @@ class StudioPage(QWidget):
     def _apply_settings_change(self) -> None:
         if self.settings_panel.current_model_id() != self._current_model_id:
             self._refresh_sidebar()
+        self._sync_higgs_script_toolbar()
         if not self.queue.is_running():
             self.queue.mark_settings_outdated(self.settings_panel.current_settings())
         # Persist after the same short debounce used for queue invalidation, so
@@ -392,6 +412,61 @@ class StudioPage(QWidget):
         data = self.context.preferences.load()
         self.save_preferences(data)
         self.context.preferences.save(data)
+
+    def _sync_higgs_script_toolbar(self) -> None:
+        policy = self.ctrl.control_policy(
+            self.settings_panel.current_model_id()
+        )
+        self.higgs_script_toolbar.setVisible(bool(policy.higgs_script))
+
+    def _insert_higgs_token(self, token: str) -> None:
+        cursor = self.text_input.textCursor()
+        cursor.insertText(token)
+        self.text_input.setTextCursor(cursor)
+        self.text_input.setFocus()
+
+    def _validate_higgs_script(self) -> None:
+        analysis = self.ctrl.analyze_higgs_script(
+            self.text_input.toPlainText()
+        )
+        detail = analysis.summary
+        if analysis.issues:
+            detail += "\n\n" + "\n".join(
+                f"- Vị trí {issue.offset + 1}: {issue.message}"
+                for issue in analysis.issues[:12]
+            )
+            if len(analysis.issues) > 12:
+                detail += f"\n- … và {len(analysis.issues) - 12} vấn đề khác."
+        QMessageBox.information(self, "Kiểm tra Higgs Script", detail)
+
+    def _preview_higgs_requests(self) -> None:
+        try:
+            chunks = self.ctrl.preview_higgs_script(
+                self.text_input.toPlainText(),
+                self.settings_panel.current_settings(),
+            )
+        except Exception as error:
+            QMessageBox.warning(self, "Không xem trước được", str(error))
+            return
+        if not chunks:
+            QMessageBox.information(
+                self, "Higgs request", "Chưa có nội dung để biên dịch."
+            )
+            return
+        preview = "\n\n".join(
+            f"REQUEST {index}/{len(chunks)}\n{chunk}"
+            for index, chunk in enumerate(chunks[:20], start=1)
+        )
+        if len(chunks) > 20:
+            preview += f"\n\n… còn {len(chunks) - 20} request."
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Higgs request sau khi chia")
+        dialog.setText(
+            f"Đã biên dịch thành {len(chunks)} request. "
+            "Mở “Show Details” để kiểm tra delivery state và ranh giới chunk."
+        )
+        dialog.setDetailedText(preview)
+        dialog.exec()
 
     # --- Queue tab actions --------------------------------------------------
 

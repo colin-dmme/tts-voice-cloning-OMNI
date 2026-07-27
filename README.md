@@ -1,4 +1,4 @@
-# Colin TTS Local v0.1.0
+# Colin TTS Local v0.2.0
 
 App TTS local ưu tiên tiếng Việt, có lõi tách khỏi giao diện để sau này đổi Gradio sang CustomTkinter, PyQt6 hoặc giao diện khác mà không phải viết lại logic model.
 

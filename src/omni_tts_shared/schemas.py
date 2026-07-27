@@ -12,6 +12,7 @@ OutputAudioFormat = Literal["wav", "mp3"]
 RuntimeTarget = Literal["auto", "cpu", "cuda"]
 VoiceSourceMode = Literal["fixed", "profile"]
 RemoteAuthMode = Literal["none", "bearer_env"]
+HiggsApiFlavor = Literal["sglang", "boson", "compatible"]
 HiggsResponseFormat = Literal["wav", "mp3", "flac", "opus", "aac", "pcm"]
 
 
@@ -131,6 +132,8 @@ class RemoteEndpointOptions(BaseModel):
     by a token value, so preferences/job manifests never persist credentials.
     """
 
+    endpoint_id: str = "higgs-default"
+    api_flavor: HiggsApiFlavor = "sglang"
     base_url: str = ""
     auth_mode: RemoteAuthMode = "none"
     auth_env: str = "OMNI_TTS_REMOTE_API_KEY"
@@ -138,9 +141,15 @@ class RemoteEndpointOptions(BaseModel):
     request_timeout_seconds: float = Field(default=600.0, ge=10.0, le=7200.0)
     max_retries: int = Field(default=1, ge=0, le=5)
 
+    @model_validator(mode="after")
+    def normalize_identity(self):
+        self.endpoint_id = self.endpoint_id.strip() or "higgs-default"
+        self.auth_env = self.auth_env.strip() or "OMNI_TTS_REMOTE_API_KEY"
+        return self
+
 
 class HiggsTtsOptions(BaseModel):
-    """SGLang-Omni ``/v1/audio/speech`` options for Higgs TTS 3."""
+    """Higgs TTS 3 ``/v1/audio/speech`` options shared by remote API flavors."""
 
     model: str | None = None
     voice: str = "default"
@@ -174,6 +183,31 @@ class HiggsTtsOptions(BaseModel):
         self.pitch = self.pitch.strip()
         self.expressiveness = self.expressiveness.strip()
         self.delivery_tags = self.delivery_tags.strip()
+        return self
+
+
+class HiggsCustomVoice(BaseModel):
+    """Reusable remote Higgs voice ID scoped to one logical endpoint profile."""
+
+    voice_id: str
+    title: str
+    endpoint_id: str = "higgs-default"
+    api_flavor: HiggsApiFlavor = "boson"
+    ref_text: str = ""
+    source_profile_id: str = ""
+    created_at: str = ""
+
+    @model_validator(mode="after")
+    def normalize_fields(self):
+        self.voice_id = self.voice_id.strip()
+        self.title = self.title.strip()
+        self.endpoint_id = self.endpoint_id.strip() or "higgs-default"
+        self.ref_text = self.ref_text.strip()
+        self.source_profile_id = self.source_profile_id.strip()
+        if not self.voice_id:
+            raise ValueError("voice_id không được để trống")
+        if not self.title:
+            raise ValueError("title không được để trống")
         return self
 
 

@@ -18,12 +18,22 @@ from threading import Event, Lock
 from typing import Callable, Protocol
 
 from omni_tts_core.file_queue import FileQueueOutputManifest, FileQueueStatus
+from omni_tts_core.higgs.endpoint_capabilities import (
+    endpoint_capabilities,
+    endpoint_preset_voices,
+)
+from omni_tts_core.higgs.script import (
+    HiggsScriptAnalysis,
+    compile_higgs_chunks,
+    validate_higgs_script,
+)
 from omni_tts_core.gpu_safety import gpu_temperature_guidance
 from omni_tts_core.media_player import MediaPlayerService
 from omni_tts_core.progress import ProgressCallback, ProgressEvent, check_cancel
 from omni_tts_core.remote.higgs_sglang import EndpointCheckResult, HiggsSglangClient
 from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES, runtime_target_label
 from omni_tts_core.service import TtsService
+from omni_tts_core.text.source_reader import text_units_from_blank_lines
 from omni_tts_core.ui_presenters import labels, model_groups
 from omni_tts_core.ui_presenters.control_policy import (
     GenerationControlPolicy,
@@ -211,6 +221,69 @@ class AppController:
         if request.remote_endpoint is None or request.higgs is None:
             raise OmniTtsError("Thiếu cấu hình Higgs Remote.")
         return HiggsSglangClient(request.remote_endpoint, request.higgs).check()
+
+    def higgs_endpoint_capabilities(self, settings: GenerationSettings):
+        return endpoint_capabilities(settings.remote_api_flavor)
+
+    def analyze_higgs_script(self, text: str) -> HiggsScriptAnalysis:
+        return validate_higgs_script(text)
+
+    def preview_higgs_script(
+        self, text: str, settings: GenerationSettings
+    ) -> list[str]:
+        if self.provider_of(settings.model_id) != "higgs_remote":
+            raise OmniTtsError("Chỉ model Higgs mới biên dịch Higgs Script.")
+        request = settings.to_request(text)
+        chunks: list[str] = []
+        for unit in text_units_from_blank_lines(text):
+            chunks.extend(
+                compile_higgs_chunks(
+                    unit.text,
+                    request.language,
+                    request.max_chunk_chars,
+                    request.higgs,
+                )
+            )
+        return chunks
+
+    def higgs_custom_voice_choices(
+        self, settings: GenerationSettings
+    ) -> list[tuple[str, str]]:
+        if self.provider_of(settings.model_id) != "higgs_remote":
+            return []
+        choices = list(endpoint_preset_voices(settings.remote_api_flavor))
+        if not endpoint_capabilities(
+            settings.remote_api_flavor
+        ).supports_custom_voice_create:
+            return choices
+        choices.extend(
+            (f"{voice.title} · Custom Higgs", voice.voice_id)
+            for voice in self.service.list_higgs_custom_voices(
+                settings.remote_endpoint_id
+            )
+        )
+        return choices
+
+    def create_higgs_custom_voice(
+        self,
+        settings: GenerationSettings,
+        profile_id: str,
+        title: str,
+    ):
+        if not endpoint_capabilities(
+            settings.remote_api_flavor
+        ).supports_custom_voice_create:
+            raise OmniTtsError(
+                "Endpoint hiện tại không khai báo API tạo Custom Voice."
+            )
+        request = settings.to_request("Tạo Custom Voice")
+        if request.remote_endpoint is None:
+            raise OmniTtsError("Thiếu cấu hình endpoint Higgs.")
+        return self.service.create_higgs_custom_voice(
+            endpoint=request.remote_endpoint,
+            profile_id=profile_id,
+            title=title,
+        )
 
     def vieneu_codec_choices(self, model_id: str) -> list[tuple[str, str]]:
         return self.service.list_vieneu_codecs(model_id)

@@ -16,6 +16,7 @@ from omni_tts_shared.schemas import RemoteEndpointOptions
 class EndpointPaths:
     root_url: str
     speech_url: str
+    voices_url: str
     models_url: str
     health_url: str
 
@@ -125,6 +126,7 @@ def endpoint_paths(value: str) -> EndpointPaths:
     return EndpointPaths(
         root_url=root,
         speech_url=f"{root}/v1/audio/speech",
+        voices_url=f"{root}/v1/audio/voices",
         models_url=f"{root}/v1/models",
         health_url=f"{root}/health",
     )

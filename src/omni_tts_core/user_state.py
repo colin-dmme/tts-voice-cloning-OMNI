@@ -10,6 +10,7 @@ from omni_tts_core.paths import PROJECT_ROOT
 
 USER_STATE_ROOT = "user_state"
 SETTINGS_FILE = "settings.json"
+HIGGS_CUSTOM_VOICES_FILE = "higgs_custom_voices.json"
 
 PORTABLE_TKINTER_KEYS = {
     "language",
@@ -53,11 +54,17 @@ def export_user_state(project_root: Path | None = None) -> dict[str, Any]:
 
     copied_profiles = _export_profiles(src_profiles, dst_profiles, root)
     copied_samples = _copy_files(src_samples, dst_samples, overwrite=True)
+    copied_custom_voices = _copy_optional_file(
+        root / "voices" / HIGGS_CUSTOM_VOICES_FILE,
+        state_root / "voices" / HIGGS_CUSTOM_VOICES_FILE,
+        overwrite=True,
+    )
     settings = _export_settings(root / "config", state_root / SETTINGS_FILE)
 
     return {
         "profiles": copied_profiles,
         "samples": copied_samples,
+        "higgs_custom_voices": copied_custom_voices,
         "settings_keys": sorted(settings),
         "state_root": str(state_root),
     }
@@ -79,6 +86,11 @@ def restore_user_state(
 
     restored_samples = _copy_files(src_samples, dst_samples, overwrite=overwrite)
     restored_profiles = _restore_profiles(src_profiles, dst_profiles, root, overwrite=overwrite)
+    restored_custom_voices = _copy_optional_file(
+        state_root / "voices" / HIGGS_CUSTOM_VOICES_FILE,
+        root / "voices" / HIGGS_CUSTOM_VOICES_FILE,
+        overwrite=overwrite,
+    )
     restored_settings = _restore_settings(
         state_root / SETTINGS_FILE,
         root / "config",
@@ -88,6 +100,7 @@ def restore_user_state(
     return {
         "profiles": restored_profiles,
         "samples": restored_samples,
+        "higgs_custom_voices": restored_custom_voices,
         "settings_restored": restored_settings,
         "state_root": str(state_root),
     }
@@ -111,6 +124,16 @@ def _copy_files(source_dir: Path, target_dir: Path, *, overwrite: bool) -> int:
         shutil.copy2(source, target)
         count += 1
     return count
+
+
+def _copy_optional_file(
+    source: Path, target: Path, *, overwrite: bool
+) -> bool:
+    if not source.is_file() or (target.exists() and not overwrite):
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    return True
 
 
 def _export_profiles(source_dir: Path, target_dir: Path, project_root: Path) -> int:

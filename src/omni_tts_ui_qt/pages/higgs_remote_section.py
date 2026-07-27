@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from omni_tts_core.ui_presenters.tooltips import tooltip
+from omni_tts_core.higgs.endpoint_capabilities import HIGGS_API_FLAVOR_CHOICES
 from omni_tts_core.remote.higgs_controls import (
     HIGGS_EMOTION_CHOICES,
     HIGGS_EXPRESSIVENESS_CHOICES,
@@ -36,11 +37,26 @@ class HiggsRemoteGroup(QWidget):
         self.form.setContentsMargins(0, 0, 0, 0)
         self.form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
 
+        self.endpoint_id = self._line(
+            "ID endpoint:",
+            "higgs-default",
+            "higgs_endpoint",
+        )
+        self.endpoint_id.setText("higgs-default")
+        self.endpoint_id.setToolTip(
+            "Tên kỹ thuật ổn định để gắn Custom Voice với đúng server. "
+            "Có thể giữ nguyên khi URL TryCloudflare thay đổi."
+        )
         self.endpoint_url = self._line(
             "URL endpoint:",
             "https://…/v1/audio/speech",
             "higgs_endpoint",
         )
+        self.api_flavor = make_combo(list(HIGGS_API_FLAVOR_CHOICES), "sglang")
+        self.api_flavor.setToolTip(
+            "Chọn đúng loại API để app chỉ hiển thị tính năng endpoint thực sự hỗ trợ."
+        )
+        self.form.addRow("Loại endpoint:", self.api_flavor)
         check_row = QWidget()
         check_layout = QHBoxLayout(check_row)
         check_layout.setContentsMargins(0, 0, 0, 0)
@@ -54,9 +70,23 @@ class HiggsRemoteGroup(QWidget):
         self.form.addRow(check_row)
         self.check_button.clicked.connect(self.check_requested)
 
+        self.auth_mode = make_combo(
+            [
+                ("Không authorization", "none"),
+                ("Bearer token từ biến môi trường", "bearer_env"),
+            ],
+            "none",
+        )
+        self.auth_mode.setToolTip(tooltip("higgs_auth"))
+        self.form.addRow("Authorization:", self.auth_mode)
+        self.auth_env = self._line(
+            "Biến môi trường API key:",
+            "OMNI_TTS_REMOTE_API_KEY",
+            "higgs_auth",
+        )
+        self.auth_env.setText("OMNI_TTS_REMOTE_API_KEY")
         auth_note = QLabel(
-            "Phiên bản này: không authorization. Kiến trúc đã chừa chế độ Bearer "
-            "qua biến môi trường cho gateway/GPU thuê sau này."
+            "Token không được lưu trong cấu hình; app chỉ lưu tên biến môi trường."
         )
         auth_note.setWordWrap(True)
         auth_note.setObjectName("hint")
@@ -64,7 +94,9 @@ class HiggsRemoteGroup(QWidget):
         self.form.addRow(auth_note)
 
         self.model = self._line("Model API:", "Để trống = model server đang serve", "higgs_model")
-        self.voice = self._line("Voice API (nâng cao):", "default", "higgs_voice")
+        # Voice selection belongs to the shared "Nguồn giọng" section. Keep
+        # this hidden state only for preference migration from version 0.1.
+        self.voice = QLineEdit("default")
         self.stream = QCheckBox("Streaming PCM (khuyến nghị qua Cloudflare)")
         self.stream.setChecked(True)
         self.stream.setToolTip(tooltip("higgs_stream"))
@@ -145,19 +177,20 @@ class HiggsRemoteGroup(QWidget):
             (self.expressiveness, "higgs_expressiveness"),
         ):
             widget.setToolTip(tooltip(key))
-        self.form.addRow("Emotion:", self.emotion)
-        self.form.addRow("Style:", self.style)
-        self.form.addRow("Speed/prosody:", self.speed)
-        self.form.addRow("Pitch/prosody:", self.pitch)
-        self.form.addRow("Expressiveness:", self.expressiveness)
-
-        self.delivery_tags = self._line(
-            "Tags nâng cao:",
-            "Pause/SFX/custom token chèn trước toàn đoạn",
-            "higgs_tags",
+        self.delivery_tags = QLineEdit()
+        inline_note = QLabel(
+            "Emotion, Style, Prosody, Pause và SFX là token trong nội dung. "
+            "Hãy dùng thanh “Higgs Script” ở tab Văn bản; các giá trị cũ vẫn "
+            "được đọc như baseline để tương thích."
         )
+        inline_note.setWordWrap(True)
+        inline_note.setObjectName("hint")
+        self.form.addRow("Điều khiển cách đọc:", inline_note)
         self.stream.toggled.connect(self._sync_stream_format)
+        self.auth_mode.currentIndexChanged.connect(self._sync_auth)
+        self.api_flavor.currentIndexChanged.connect(self._sync_flavor_defaults)
         self._sync_stream_format(True)
+        self._sync_auth()
 
     def _line(self, label: str, placeholder: str, tooltip_key: str) -> QLineEdit:
         widget = QLineEdit()
@@ -184,9 +217,22 @@ class HiggsRemoteGroup(QWidget):
             self.response_format.setCurrentIndex(index)
         self.response_format.setEnabled(not streaming)
 
+    def _sync_auth(self, *_args) -> None:
+        self.auth_env.setEnabled(self.auth_mode.currentData() == "bearer_env")
+
+    def _sync_flavor_defaults(self, *_args) -> None:
+        if self.api_flavor.currentData() == "boson" and self.auth_mode.currentData() == "none":
+            index = self.auth_mode.findData("bearer_env")
+            if index >= 0:
+                self.auth_mode.setCurrentIndex(index)
+
     def widgets(self) -> list[QWidget]:
         return [
             self.endpoint_url,
+            self.endpoint_id,
+            self.api_flavor,
+            self.auth_mode,
+            self.auth_env,
             self.model,
             self.voice,
             self.stream,

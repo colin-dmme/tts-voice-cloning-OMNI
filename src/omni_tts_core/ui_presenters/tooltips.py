@@ -185,8 +185,8 @@ TOOLTIPS: dict[str, str] = {
         "Gọi /health và /v1/models ở luồng nền; không tạo audio và không khoá giao diện."
     ),
     "higgs_auth": (
-        "Hiện gửi request không có Authorization. Bản sau có thể bật Bearer token lấy từ "
-        "biến môi trường, để secret không nằm trong file cài đặt hoặc job manifest."
+        "Máy GPU riêng có thể dùng không authorization. Boson/gateway có thể dùng Bearer "
+        "token lấy từ biến môi trường, để secret không nằm trong cấu hình hoặc job manifest."
     ),
     "higgs_model": (
         "ID gửi ở trường model. Để trống để SGLang dùng model đang serve mặc định. "
@@ -218,8 +218,8 @@ TOOLTIPS: dict[str, str] = {
     ),
     "higgs_retries": "Chỉ retry lỗi mạng và lỗi tạm thời 502–504/520–524; không retry request sai.",
     "higgs_tags": (
-        "Token nâng cao đặt trước toàn đoạn. Pause và SFX có vị trí cụ thể nên thường chèn "
-        "trực tiếp trong văn bản, ví dụ <|prosody:pause|> hoặc <|sfx:laughter|>Haha."
+        "Higgs control token nằm trong nội dung. Dùng thanh Higgs Script để chèn đúng vị trí, "
+        "ví dụ <|prosody:pause|> hoặc <|sfx:laughter|>Haha."
     ),
     "higgs_emotion": "21 emotion chính thức của Higgs; token được đặt đầu lượt đọc.",
     "higgs_style": "Singing, shouting hoặc whispering; để Mặc định nếu không cần.",

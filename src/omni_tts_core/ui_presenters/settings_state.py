@@ -76,6 +76,10 @@ DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "output_srt": False,
     "join_split_output_audio": False,
     "remote_base_url": "",
+    "remote_endpoint_id": "higgs-default",
+    "remote_api_flavor": "sglang",
+    "remote_auth_mode": "none",
+    "remote_auth_env": "OMNI_TTS_REMOTE_API_KEY",
     "remote_connect_timeout_seconds": 10.0,
     "remote_request_timeout_seconds": 600.0,
     "remote_max_retries": 1,
@@ -161,6 +165,10 @@ class GenerationSettings:
     output_srt: bool = False
     join_split_output_audio: bool = False
     remote_base_url: str = ""
+    remote_endpoint_id: str = "higgs-default"
+    remote_api_flavor: str = "sglang"
+    remote_auth_mode: str = "none"
+    remote_auth_env: str = "OMNI_TTS_REMOTE_API_KEY"
     remote_connect_timeout_seconds: float = 10.0
     remote_request_timeout_seconds: float = 600.0
     remote_max_retries: int = 1
@@ -244,11 +252,11 @@ class GenerationSettings:
             output_srt=self.output_srt,
             join_split_output_audio=self.join_split_output_audio,
             remote_endpoint=RemoteEndpointOptions(
+                endpoint_id=self.remote_endpoint_id,
+                api_flavor=self.remote_api_flavor,
                 base_url=self.remote_base_url.strip(),
-                # Version one intentionally has no authorization. The shared
-                # endpoint schema already supports bearer_env for a later
-                # gateway without changing the GUI/request contract.
-                auth_mode="none",
+                auth_mode=self.remote_auth_mode,
+                auth_env=self.remote_auth_env,
                 connect_timeout_seconds=self.remote_connect_timeout_seconds,
                 request_timeout_seconds=self.remote_request_timeout_seconds,
                 max_retries=self.remote_max_retries,

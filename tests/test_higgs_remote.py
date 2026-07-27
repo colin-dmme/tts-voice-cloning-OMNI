@@ -22,6 +22,7 @@ class EndpointPathsTest(unittest.TestCase):
         paths = endpoint_paths("https://example.test/v1/audio/speech")
         self.assertEqual(paths.root_url, "https://example.test")
         self.assertEqual(paths.speech_url, "https://example.test/v1/audio/speech")
+        self.assertEqual(paths.voices_url, "https://example.test/v1/audio/voices")
         self.assertEqual(paths.models_url, "https://example.test/v1/models")
 
     def test_accepts_deployment_prefix(self):
@@ -54,6 +55,28 @@ class HiggsPayloadTest(unittest.TestCase):
         reference = payload["references"][0]
         self.assertRegex(reference["audio_path"], r"^data:audio/(x-)?wav;base64,")
         self.assertEqual(reference["text"], "Đây là giọng mẫu.")
+
+    def test_boson_payload_uses_cloud_reference_fields_and_model(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "voice.wav"
+            path.write_bytes(b"RIFF-test")
+            client = HiggsSglangClient(
+                RemoteEndpointOptions(
+                    base_url="https://api.boson.test",
+                    api_flavor="boson",
+                ),
+                HiggsTtsOptions(model=""),
+            )
+            payload = client.build_payload(
+                text="Hello",
+                reference_audio_path=path,
+                reference_text="Exact words.",
+            )
+        self.assertEqual(payload["model"], "higgs-tts-3")
+        self.assertIn("ref_audio", payload)
+        self.assertEqual(payload["ref_text"], "Exact words.")
+        self.assertNotIn("references", payload)
+        self.assertNotIn("initial_codec_chunk_frames", payload)
 
     def test_delivery_controls_are_composed_at_start_of_input(self):
         payload = self._client(
@@ -115,6 +138,10 @@ class RemoteCatalogTest(unittest.TestCase):
         settings = GenerationSettings(
             model_id="higgs_tts3_remote",
             remote_base_url="https://example.test/v1/audio/speech",
+            remote_endpoint_id="boson-main",
+            remote_api_flavor="boson",
+            remote_auth_mode="bearer_env",
+            remote_auth_env="BOSON_API_KEY",
             higgs_model="bosonai/higgs-audio-v3-tts-4b",
             higgs_voice="default",
             higgs_stream=True,
@@ -129,7 +156,10 @@ class RemoteCatalogTest(unittest.TestCase):
         self.assertEqual(request.higgs.model, "bosonai/higgs-audio-v3-tts-4b")
         self.assertEqual(request.higgs.concurrency, 4)
         self.assertEqual(request.higgs.emotion, "relief")
-        self.assertEqual(request.remote_endpoint.auth_mode, "none")
+        self.assertEqual(request.remote_endpoint.endpoint_id, "boson-main")
+        self.assertEqual(request.remote_endpoint.api_flavor, "boson")
+        self.assertEqual(request.remote_endpoint.auth_mode, "bearer_env")
+        self.assertEqual(request.remote_endpoint.auth_env, "BOSON_API_KEY")
 
     def test_remote_generation_does_not_require_local_support_payloads(self):
         service = TtsService()

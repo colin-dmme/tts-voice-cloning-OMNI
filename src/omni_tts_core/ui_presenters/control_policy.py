@@ -76,6 +76,7 @@ class GenerationControlPolicy:
     f5: ControlState
     chatterbox: ControlState
     higgs_remote: ControlState
+    higgs_script: ControlState
     punctuation_pauses: ControlState
     gpu_safety: ControlState
     gpu_scope_note: str = ""
@@ -189,6 +190,11 @@ def build_policy(
         higgs_remote=_state(
             bool(descriptor and "higgs_remote" in descriptor.controls),
             "Chỉ áp dụng cho endpoint Higgs TTS 3 qua SGLang-Omni.",
+        ),
+        higgs_script=_state(
+            bool(descriptor and "higgs_script" in descriptor.controls),
+            "Chỉ model Higgs mới đọc các token <|category:value|>.",
+            "Chèn Emotion, Style, Prosody, Pause và SFX trực tiếp trong nội dung.",
         ),
         punctuation_pauses=_state(
             bool(descriptor and "punctuation_pauses" in descriptor.controls),

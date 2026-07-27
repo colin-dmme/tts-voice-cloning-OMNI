@@ -151,6 +151,23 @@ class PunctuationPauseCapabilityTest(unittest.TestCase):
             self.assertFalse(_policy(spec=_Spec(provider=provider)).punctuation_pauses)
 
 
+class HiggsScriptCapabilityTest(unittest.TestCase):
+    def test_only_higgs_exposes_script_authoring(self) -> None:
+        self.assertTrue(
+            _policy(spec=_Spec(provider="higgs_remote")).higgs_script
+        )
+        for provider in (
+            "vieneu",
+            "omnivoice",
+            "qwen",
+            "valtec",
+            "f5tts",
+            "chatterbox",
+            "piper",
+        ):
+            self.assertFalse(_policy(spec=_Spec(provider=provider)).higgs_script)
+
+
 class GpuScopeTest(unittest.TestCase):
     def test_note_says_the_gate_is_shared_by_every_cuda_model(self) -> None:
         policy = _policy(spec=_Spec(provider="vieneu"), runtime=_runtime(gpu=True))

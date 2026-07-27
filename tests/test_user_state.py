@@ -13,6 +13,43 @@ from omni_tts_core.voice_profiles import VoiceProfileManager
 
 
 class UserStateTest(unittest.TestCase):
+    def test_custom_higgs_voices_are_portable_without_endpoint_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            voices_dir = root / "voices"
+            voices_dir.mkdir(parents=True)
+            payload = [
+                {
+                    "voice_id": "voice_123",
+                    "title": "Narrator",
+                    "endpoint_id": "boson-main",
+                    "api_flavor": "boson",
+                }
+            ]
+            (voices_dir / "higgs_custom_voices.json").write_text(
+                json.dumps(payload), encoding="utf-8"
+            )
+
+            exported = export_user_state(root)
+            self.assertTrue(exported["higgs_custom_voices"])
+            portable = (
+                root
+                / "user_state"
+                / "voices"
+                / "higgs_custom_voices.json"
+            )
+            self.assertTrue(portable.exists())
+            self.assertNotIn("base_url", portable.read_text(encoding="utf-8"))
+
+            target = root / "new-machine"
+            (target / "user_state").mkdir(parents=True)
+            _copy_tree(root / "user_state", target / "user_state")
+            restored = restore_user_state(target)
+            self.assertTrue(restored["higgs_custom_voices"])
+            self.assertTrue(
+                (target / "voices" / "higgs_custom_voices.json").exists()
+            )
+
     def test_export_and_restore_profiles_with_portable_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

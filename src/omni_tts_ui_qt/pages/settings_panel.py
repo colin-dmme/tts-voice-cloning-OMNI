@@ -52,6 +52,9 @@ from omni_tts_ui_qt.widgets.common import (
     make_combo,
     spin_for,
 )
+from omni_tts_ui_qt.widgets.higgs_custom_voice_creator import (
+    HiggsCustomVoiceCreator,
+)
 
 _AUDIO_FORMATS = [("WAV", "wav"), ("MP3", "mp3")]
 _BITRATES = [("128 kbps", 128), ("160 kbps", 160), ("192 kbps", 192), ("256 kbps", 256), ("320 kbps", 320)]
@@ -213,9 +216,20 @@ class SettingsPanel(QScrollArea):
         form.addRow(self.profile_compat)
         self.voice_status = self._hint()
         form.addRow(self.voice_status)
+        self.custom_voice_creator = HiggsCustomVoiceCreator(
+            self,
+            self.ctrl,
+            self.current_settings,
+            self._select_created_custom_voice,
+        )
+        self.create_custom_voice_button = self.custom_voice_creator.button
+        self._custom_voice_row = form.rowCount()
+        form.addRow(self.create_custom_voice_button)
         self._voice_form = form
         self.mode_fixed.toggled.connect(self._on_voice_mode_changed)
-        self.fixed_voice_combo.currentIndexChanged.connect(self._emit_changed)
+        self.fixed_voice_combo.currentIndexChanged.connect(
+            self._on_fixed_voice_changed
+        )
         self.profile_combo.currentIndexChanged.connect(self._on_profile_changed)
 
     def _build_tuning(self) -> None:
@@ -241,6 +255,9 @@ class SettingsPanel(QScrollArea):
             self.tuning_section.body_layout.addWidget(group)
             self._connect_all(*group.widgets())
         self.higgs_remote_group.check_requested.connect(self._check_higgs_endpoint)
+        self.higgs_remote_group.api_flavor.currentIndexChanged.connect(
+            self._on_higgs_endpoint_type_changed
+        )
         self._layout.addWidget(self.tuning_section)
         # Providers without tuning knobs say so, instead of leaving a silent gap
         # that reads as "the settings failed to load".
@@ -457,6 +474,7 @@ class SettingsPanel(QScrollArea):
             # Endpoint/transport fields are required connection settings, not
             # optional sound tuning, so this provider cannot deactivate them.
             self.tuning_section.set_active(True)
+        self._sync_custom_voice_feature()
         self.tuning_absent.setText("" if policy.has_tuning else policy.tuning_absent_note())
         self.tuning_absent.setVisible(not policy.has_tuning)
 
@@ -505,6 +523,10 @@ class SettingsPanel(QScrollArea):
             index = self.fixed_voice_combo.findData(descriptor.default_fixed_voice_id)
             if index >= 0:
                 self.fixed_voice_combo.setCurrentIndex(index)
+        if self._policy and self._policy.higgs_remote:
+            self._append_higgs_endpoint_voices(
+                self.higgs_remote_group.voice.text().strip() or "default"
+            )
         show_fixed = descriptor.show_fixed_voice and self.fixed_voice_combo.count() > 0
         self._voice_form.setRowVisible(self._fixed_row, show_fixed)
         self.profile_combo.clear()
@@ -568,6 +590,62 @@ class SettingsPanel(QScrollArea):
         self._higgs_check_task = task
         QThreadPool.globalInstance().start(task)
 
+    def _on_higgs_endpoint_type_changed(self, *_args) -> None:
+        if self._loading:
+            return
+        self._sync_custom_voice_feature()
+        self.apply_model(self.current_model_id(), seed_defaults=False)
+        self._emit_changed()
+
+    def _higgs_endpoint_settings(self) -> GenerationSettings:
+        group = self.higgs_remote_group
+        return GenerationSettings(
+            model_id=self.current_model_id(),
+            remote_endpoint_id=group.endpoint_id.text().strip()
+            or "higgs-default",
+            remote_api_flavor=str(group.api_flavor.currentData() or "sglang"),
+            remote_base_url=group.endpoint_url.text().strip(),
+            remote_auth_mode=str(group.auth_mode.currentData() or "none"),
+            remote_auth_env=group.auth_env.text().strip()
+            or "OMNI_TTS_REMOTE_API_KEY",
+            remote_connect_timeout_seconds=group.connect_timeout.value(),
+            remote_request_timeout_seconds=group.request_timeout.value(),
+            remote_max_retries=group.retries.value(),
+        )
+
+    def _sync_custom_voice_feature(self) -> None:
+        supported = bool(
+            self._policy
+            and self._policy.higgs_remote
+            and self.ctrl.higgs_endpoint_capabilities(
+                self._higgs_endpoint_settings()
+            ).supports_custom_voice_create
+        )
+        self._voice_form.setRowVisible(self._custom_voice_row, supported)
+
+    def _append_higgs_endpoint_voices(self, selected: str | None = None) -> None:
+        existing = {
+            str(self.fixed_voice_combo.itemData(index))
+            for index in range(self.fixed_voice_combo.count())
+        }
+        for label, voice_id in self.ctrl.higgs_custom_voice_choices(
+            self._higgs_endpoint_settings()
+        ):
+            if voice_id not in existing:
+                self.fixed_voice_combo.addItem(label, voice_id)
+                existing.add(voice_id)
+        if selected:
+            index = self.fixed_voice_combo.findData(selected)
+            if index >= 0:
+                self.fixed_voice_combo.setCurrentIndex(index)
+
+    def _select_created_custom_voice(self, voice) -> None:
+        self.apply_model(self.current_model_id(), seed_defaults=False)
+        index = self.fixed_voice_combo.findData(voice.voice_id)
+        if index >= 0:
+            self.fixed_voice_combo.setCurrentIndex(index)
+            self.mode_fixed.setChecked(True)
+
     def _on_voice_mode_changed(self, *_args) -> None:
         if self._loading:
             return
@@ -576,6 +654,19 @@ class SettingsPanel(QScrollArea):
 
     def _on_profile_changed(self, *_args) -> None:
         self._update_profile_compat(self.current_model_id())
+        self._emit_changed()
+
+    def _on_fixed_voice_changed(self, *_args) -> None:
+        if self._loading:
+            return
+        if (
+            self._policy
+            and self._policy.higgs_remote
+            and self.fixed_voice_combo.currentData()
+        ):
+            self.higgs_remote_group.voice.setText(
+                str(self.fixed_voice_combo.currentData())
+            )
         self._emit_changed()
 
     def _update_profile_compat(self, model_id: str) -> None:
@@ -709,11 +800,21 @@ class SettingsPanel(QScrollArea):
             # Preserve the endpoint profile while switching to a local model.
             # TtsService capability-gates it and only passes it to remote engines.
             remote_base_url=higgs.endpoint_url.text().strip(),
+            remote_endpoint_id=higgs.endpoint_id.text().strip()
+            or "higgs-default",
+            remote_api_flavor=str(higgs.api_flavor.currentData() or "sglang"),
+            remote_auth_mode=str(higgs.auth_mode.currentData() or "none"),
+            remote_auth_env=higgs.auth_env.text().strip()
+            or "OMNI_TTS_REMOTE_API_KEY",
             remote_connect_timeout_seconds=higgs.connect_timeout.value(),
             remote_request_timeout_seconds=higgs.request_timeout.value(),
             remote_max_retries=higgs.retries.value(),
             higgs_model=higgs.model.text().strip(),
-            higgs_voice=higgs.voice.text().strip() or "default",
+            higgs_voice=(
+                str(self.fixed_voice_combo.currentData() or "default")
+                if policy and policy.higgs_remote and mode == "fixed"
+                else higgs.voice.text().strip() or "default"
+            ),
             higgs_stream=higgs.stream.isChecked(),
             higgs_response_format=str(higgs.response_format.currentData() or "pcm"),
             higgs_max_new_tokens=higgs.max_new_tokens.value(),
@@ -770,6 +871,9 @@ class SettingsPanel(QScrollArea):
             self._set_combo(self.profile_combo, data.get("voice_profile_id"))
             self._set_combo(self.fixed_voice_combo, data.get("speaker_id"))
             self._load_tuning(data)
+            # Endpoint settings belong to the Higgs provider profile and must
+            # survive even when the app starts on a different provider.
+            self._load_higgs_remote(data)
             self.gpu_section.set_active(bool(data.get("gpu_safety_enabled", True)))
             self._load_gpu(data)
             self.bitrate_combo.setEnabled(self.format_combo.currentData() == "mp3")
@@ -814,16 +918,25 @@ class SettingsPanel(QScrollArea):
             self.chatterbox_group.norm_loudness.setChecked(
                 bool(data.get("chatterbox_norm_loudness", True))
             )
-        if policy.higgs_remote:
-            self._load_higgs_remote(data)
         # Values just restored belong to this model; do not overwrite them.
         self._seeded_model_id = self.current_model_id()
 
     def _load_higgs_remote(self, data: dict) -> None:
         group = self.higgs_remote_group
+        group.endpoint_id.setText(
+            str(data.get("remote_endpoint_id") or "higgs-default")
+        )
         group.endpoint_url.setText(str(data.get("remote_base_url") or ""))
+        self._set_combo(group.api_flavor, data.get("remote_api_flavor", "sglang"))
+        self._set_combo(group.auth_mode, data.get("remote_auth_mode", "none"))
+        group.auth_env.setText(
+            str(data.get("remote_auth_env") or "OMNI_TTS_REMOTE_API_KEY")
+        )
         group.model.setText(str(data.get("higgs_model") or ""))
-        group.voice.setText(str(data.get("higgs_voice") or "default"))
+        saved_voice = str(data.get("higgs_voice") or "default")
+        group.voice.setText(saved_voice)
+        if self._policy and self._policy.higgs_remote:
+            self._append_higgs_endpoint_voices(saved_voice)
         group.stream.setChecked(bool(data.get("higgs_stream", True)))
         self._set_combo(group.response_format, data.get("higgs_response_format", "pcm"))
         for field, widget in (

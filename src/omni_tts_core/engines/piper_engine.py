@@ -32,7 +32,7 @@ from omni_tts_shared.errors import EngineDependencyError, GenerationError
 
 
 class _SharedPiperWorker:
-    """One worker process shared by every Piper voice in the application."""
+    """One serial Piper process slot."""
 
     def __init__(self) -> None:
         self.worker_dir = project_path("engines/piper_worker")
@@ -139,8 +139,52 @@ class _SharedPiperWorker:
         )
 
 
-_SHARED_PIPER_WORKER = _SharedPiperWorker()
-atexit.register(_SHARED_PIPER_WORKER.close)
+class _PiperWorkerPool:
+    """Small reusable pool so text and queue may synthesize concurrently."""
+
+    def __init__(self, size: int = 2) -> None:
+        self._workers = [_SharedPiperWorker() for _ in range(max(1, size))]
+        self._available = list(range(len(self._workers)))
+        self._condition = threading.Condition()
+
+    def close(self) -> None:
+        for worker in self._workers:
+            worker.close()
+
+    def worker_runtime(self) -> "WorkerRuntime":
+        return self._workers[0]._worker_runtime()
+
+    def run(
+        self,
+        runtime: "WorkerRuntime",
+        payload: dict,
+        *,
+        timeout: float,
+        cancel_event,
+        tick_callback=None,
+    ) -> None:
+        worker_index: int | None = None
+        with self._condition:
+            while not self._available:
+                check_cancel(cancel_event)
+                self._condition.wait(timeout=0.1)
+            worker_index = self._available.pop(0)
+        try:
+            self._workers[worker_index].run(
+                runtime,
+                payload,
+                timeout=timeout,
+                cancel_event=cancel_event,
+                tick_callback=tick_callback,
+            )
+        finally:
+            with self._condition:
+                self._available.append(worker_index)
+                self._condition.notify()
+
+
+_SHARED_PIPER_POOL = _PiperWorkerPool(size=2)
+atexit.register(_SHARED_PIPER_POOL.close)
 
 
 class PiperSubprocessEngine(BaseTtsEngine):
@@ -160,7 +204,7 @@ class PiperSubprocessEngine(BaseTtsEngine):
     ) -> list[TtsEngineResult]:
         if not requests:
             return []
-        runtime = _SHARED_PIPER_WORKER._worker_runtime()
+        runtime = _SHARED_PIPER_POOL.worker_runtime()
         (PROJECT_ROOT / "outputs").mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="piper_", dir=PROJECT_ROOT / "outputs") as temp_dir:
             temp_path = Path(temp_dir)
@@ -204,7 +248,7 @@ class PiperSubprocessEngine(BaseTtsEngine):
                     chunks, reported_chunks, progress_callback, chunk_callback, force=force
                 )
 
-            _SHARED_PIPER_WORKER.run(
+            _SHARED_PIPER_POOL.run(
                 runtime,
                 payload,
                 timeout=300 + 60 * len(chunks),

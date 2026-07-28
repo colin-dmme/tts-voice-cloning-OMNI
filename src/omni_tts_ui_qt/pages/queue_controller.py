@@ -13,6 +13,10 @@ from PySide6.QtCore import QObject, Signal
 
 from omni_tts_core.app_controller import FileGenerationEvent
 from omni_tts_core.file_queue import FileQueueItem, FileQueueStatus, FileQueueStore, settings_fingerprint
+from omni_tts_core.generation_history import (
+    GenerationHistoryStore,
+    HistoryStatus,
+)
 from omni_tts_core.path_intake import parse_path_text
 from omni_tts_core.text.source_reader import SUPPORTED_TEXT_EXTENSIONS, count_source_text_chars
 from omni_tts_core.ui_presenters import results
@@ -27,12 +31,20 @@ class QueueController(QObject):
     worker_status = Signal(str, str)  # status, message
     progress = Signal(float, str)  # percent 0..1 (or -1 to hide), message
     run_state_changed = Signal(bool)  # True = a run is active
+    history_changed = Signal()
 
-    def __init__(self, context: AppContext, parent=None) -> None:
+    def __init__(
+        self,
+        context: AppContext,
+        history_store: GenerationHistoryStore | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.context = context
         self.store = FileQueueStore()
+        self.history_store = history_store or GenerationHistoryStore()
         self._worker: GenerationWorker | None = None
+        self._active_settings: GenerationSettings | None = None
         recovered = self.store.recover_and_validate()
         if recovered:
             self.log.emit(f"Đã khôi phục {recovered} mục hàng đợi sau lần đóng trước.")
@@ -104,6 +116,7 @@ class QueueController(QObject):
             self.log.emit("Không có file phù hợp để chạy.")
             return
         self._fingerprint = settings_fingerprint(settings.to_request("x").model_dump(mode="json"))
+        self._active_settings = settings
         self._worker = GenerationWorker(self.context.controller, "files", settings, tasks=tasks)
         self._worker.file_event.connect(self._on_file_event)
         self._worker.progress_event.connect(self._on_progress)
@@ -163,12 +176,16 @@ class QueueController(QObject):
                 output_paths=results.result_output_paths(event.result),
                 fingerprint=getattr(self, "_fingerprint", ""),
                 output_manifest=manifest,
+                duration_seconds=event.result.duration_seconds,
                 detail=event.message or "Đã tạo audio.",
             )
+            self._record_history(event, HistoryStatus.DONE)
         elif event.status == FileQueueStatus.FAILED:
             self.store.mark_failed(event.item_id, event.error or event.message)
+            self._record_history(event, HistoryStatus.FAILED)
         elif event.status == FileQueueStatus.CANCELLED:
             self.store.mark_cancelled(event.item_id)
+            self._record_history(event, HistoryStatus.CANCELLED)
         self.items_changed.emit()
 
     def _on_progress(self, event) -> None:
@@ -192,6 +209,7 @@ class QueueController(QObject):
         self.progress.emit(-1.0, "")
         self.run_state_changed.emit(False)
         self._worker = None
+        self._active_settings = None
         self.items_changed.emit()
 
     # --- Export helpers -----------------------------------------------------
@@ -204,6 +222,26 @@ class QueueController(QObject):
                 continue
             collected.extend(item.output_manifest.paths_for(kind))
         return list(dict.fromkeys(collected))
+
+    def _record_history(
+        self, event: FileGenerationEvent, status: HistoryStatus
+    ) -> None:
+        settings = self._active_settings
+        if settings is None:
+            return
+        item = self.store.get(event.item_id)
+        self.history_store.record(
+            mode="file",
+            source_label=item.source_path.name,
+            source_path=item.source_path,
+            char_count=item.char_count,
+            model_id=settings.model_id,
+            provider_id=self.context.controller.provider_of_model(settings.model_id),
+            status=status,
+            result=event.result,
+            error=event.error or (event.message if status != HistoryStatus.DONE else ""),
+        )
+        self.history_changed.emit()
 
 
 def _expand(path: Path) -> list[Path]:

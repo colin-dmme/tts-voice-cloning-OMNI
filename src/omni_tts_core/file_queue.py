@@ -86,6 +86,23 @@ class FileQueueOutputManifest:
             or self.job_dir
         )
 
+    def preferred_audio_path(self, *, existing_only: bool = False) -> Path | None:
+        """Return merged audio first, then the first split output.
+
+        Path selection belongs to the core manifest so every UI uses the same
+        playback/copy rules instead of reconstructing output filenames.
+        """
+        for path in (self.merged_audio_path, *self.split_audio_paths):
+            if path is not None and (not existing_only or path.is_file()):
+                return path
+        return None
+
+    def preferred_srt_path(self, *, existing_only: bool = False) -> Path | None:
+        for path in self.srt_paths:
+            if not existing_only or path.is_file():
+                return path
+        return None
+
     def paths_for(self, kind: str) -> tuple[Path, ...]:
         if kind == "all":
             return _unique_paths(
@@ -132,6 +149,7 @@ class FileQueueItem:
     job_id: str = ""
     output_paths: tuple[Path, ...] = ()
     output_manifest: FileQueueOutputManifest = field(default_factory=FileQueueOutputManifest)
+    duration_seconds: float = 0.0
     settings_fingerprint: str = ""
     source_signature: str = ""
     position: int = 0
@@ -201,8 +219,8 @@ class FileQueueStore:
                     item_id, source_path, path_key, char_count, status,
                     progress_percent, attempt_count, last_error, status_detail,
                     job_id, output_paths_json, output_manifest_json, settings_fingerprint,
-                    source_signature, position, created_at, started_at, finished_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source_signature, duration_seconds, position, created_at, started_at, finished_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 self._item_values(item),
             )
@@ -265,8 +283,8 @@ class FileQueueStore:
                         item_id, source_path, path_key, char_count, status,
                         progress_percent, attempt_count, last_error, status_detail,
                         job_id, output_paths_json, output_manifest_json, settings_fingerprint,
-                        source_signature, position, created_at, started_at, finished_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        source_signature, duration_seconds, position, created_at, started_at, finished_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     insert_values,
                 )
@@ -280,7 +298,7 @@ class FileQueueStore:
                 SET status = ?, progress_percent = 0, attempt_count = attempt_count + 1,
                     last_error = '', status_detail = 'Đang khởi tạo...',
                     job_id = '', output_paths_json = '[]', output_manifest_json = '{}',
-                    source_signature = ?, started_at = ?, finished_at = ''
+                    duration_seconds = 0, source_signature = ?, started_at = ?, finished_at = ''
                 WHERE item_id = ? AND status != ?
                 """,
                 (
@@ -323,6 +341,7 @@ class FileQueueStore:
         output_paths: Iterable[Path],
         fingerprint: str,
         output_manifest: FileQueueOutputManifest | None = None,
+        duration_seconds: float = 0.0,
         detail: str = "Đã tạo audio.",
     ) -> None:
         outputs = [str(Path(path)) for path in output_paths]
@@ -334,7 +353,7 @@ class FileQueueStore:
                 SET status = ?, progress_percent = 100, last_error = '',
                     status_detail = ?, job_id = ?, output_paths_json = ?,
                     output_manifest_json = ?,
-                    settings_fingerprint = ?, finished_at = ?
+                    settings_fingerprint = ?, duration_seconds = ?, finished_at = ?
                 WHERE item_id = ?
                 """,
                 (
@@ -344,6 +363,7 @@ class FileQueueStore:
                     json.dumps(outputs, ensure_ascii=False),
                     manifest.to_json_text(),
                     fingerprint,
+                    max(0.0, float(duration_seconds)),
                     _now(),
                     item_id,
                 ),
@@ -391,7 +411,8 @@ class FileQueueStore:
                 SET status = ?, progress_percent = 0, last_error = '',
                     status_detail = '', job_id = '', output_paths_json = '[]',
                     output_manifest_json = '{{}}',
-                    settings_fingerprint = '', started_at = '', finished_at = ''
+                    settings_fingerprint = '', duration_seconds = 0,
+                    started_at = '', finished_at = ''
                 WHERE item_id IN ({placeholders}) AND status != ?
                 """,
                 (
@@ -513,6 +534,7 @@ class FileQueueStore:
                     output_manifest_json TEXT NOT NULL DEFAULT '{}',
                     settings_fingerprint TEXT NOT NULL DEFAULT '',
                     source_signature TEXT NOT NULL DEFAULT '',
+                    duration_seconds REAL NOT NULL DEFAULT 0,
                     position INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL DEFAULT '',
                     started_at TEXT NOT NULL DEFAULT '',
@@ -526,6 +548,10 @@ class FileQueueStore:
             if "output_manifest_json" not in _column_names(connection, "file_queue"):
                 connection.execute(
                     "ALTER TABLE file_queue ADD COLUMN output_manifest_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            if "duration_seconds" not in _column_names(connection, "file_queue"):
+                connection.execute(
+                    "ALTER TABLE file_queue ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0"
                 )
 
     @staticmethod
@@ -554,6 +580,7 @@ class FileQueueStore:
             job_id=row["job_id"],
             output_paths=outputs,
             output_manifest=manifest,
+            duration_seconds=float(row["duration_seconds"] or 0.0),
             settings_fingerprint=row["settings_fingerprint"],
             source_signature=row["source_signature"],
             position=int(row["position"]),
@@ -579,6 +606,7 @@ class FileQueueStore:
             item.output_manifest.to_json_text(),
             item.settings_fingerprint,
             item.source_signature,
+            item.duration_seconds,
             item.position,
             item.created_at,
             item.started_at,

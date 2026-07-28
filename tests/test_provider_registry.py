@@ -16,6 +16,7 @@ class ProviderRegistryTest(unittest.TestCase):
         self.assertEqual(descriptor.worker_name, "piper_worker")
         self.assertEqual(descriptor.storage_mode, "folder")
         self.assertIn("speed", descriptor.controls)
+        self.assertEqual(descriptor.max_parallel_jobs, 2)
 
     def test_hf_cache_policy_is_declared_by_provider(self) -> None:
         self.assertEqual(provider_descriptor("vieneu").storage_mode, "hf_cache")

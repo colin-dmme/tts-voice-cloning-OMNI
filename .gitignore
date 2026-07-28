@@ -28,7 +28,7 @@ releases/
 
 # Runtime caches and downloaded model assets
 .hf_cache/
-models/
+/models/
 
 # App runtime data
 outputs/
@@ -40,6 +40,9 @@ config/storage.local.yaml
 config/file_queue.sqlite3
 config/file_queue.sqlite3-shm
 config/file_queue.sqlite3-wal
+config/generation_history.sqlite3
+config/generation_history.sqlite3-shm
+config/generation_history.sqlite3-wal
 
 # Git-backed portable user state lives in user_state/ and is intentionally tracked.
 !user_state/

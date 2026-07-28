@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 
 from omni_tts_core.audio.wav_tools import (
     concatenate_segments,
@@ -77,6 +77,7 @@ class TtsService:
         self.generation_form = GenerationFormPresenter(self.registry)
         self.job_store = JobStore(self.settings.outputs_root)
         self._engines: dict[str, BaseTtsEngine] = {}
+        self._engine_lock = Lock()
 
     def list_voice_profiles(self) -> list[VoiceProfile]:
         return self.voice_profiles.list_profiles()
@@ -621,12 +622,18 @@ class TtsService:
         self,
         spec: ModelSpec,
     ) -> BaseTtsEngine:
-        if spec.model_id not in self._engines:
-            descriptor = provider_descriptor(spec.provider)
-            if descriptor is None:
-                raise ConfigError(f"Provider chưa được hỗ trợ: {spec.provider}")
-            self._engines[spec.model_id] = descriptor.engine_factory(spec, self.engine_cache)
-        return self._engines[spec.model_id]
+        engine = self._engines.get(spec.model_id)
+        if engine is not None:
+            return engine
+        with self._engine_lock:
+            engine = self._engines.get(spec.model_id)
+            if engine is None:
+                descriptor = provider_descriptor(spec.provider)
+                if descriptor is None:
+                    raise ConfigError(f"Provider chưa được hỗ trợ: {spec.provider}")
+                engine = descriptor.engine_factory(spec, self.engine_cache)
+                self._engines[spec.model_id] = engine
+        return engine
 
     def _ensure_request_can_generate(self, request: GenerateSpeechRequest, spec: ModelSpec) -> None:
         _validate_request_for_model(request, spec)

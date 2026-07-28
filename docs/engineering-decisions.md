@@ -108,3 +108,40 @@ Nếu model là community fine-tune dựa trên official base, không ghi là of
 - Model `experimental` phải hiện là `Debug/Legacy`, không gọi là production.
 - Khi thêm model mới, luôn điền `catalog_info.category`, `origin`, `highlight`, `recommend_for`, và nếu là fine-tune/quantize thì điền thêm `base_model`/`source_repo`.
 - Model test phải đặt `required: false`, dùng `risk: "test"` hoặc `risk: "checkpoint"`, và không đổi `generation.default_model_id`.
+
+## 2026-07-28 — Chạy độc lập Văn bản và Hàng đợi
+
+### Quyết định
+
+PySide6 cho phép tác vụ ở tab Văn bản và Hàng đợi cùng hoạt động, với worker,
+progress và nút Hủy riêng. Quyền chạy đồng thời không được quyết định trong
+widget; `GenerationCoordinator` ở core cấp slot theo tài nguyên:
+
+- Piper CPU: tối đa 2 job và dùng pool 2 worker process.
+- Higgs Remote: tối đa 2 job trên cùng endpoint.
+- Mọi provider dùng CUDA cục bộ: dùng chung 1 slot GPU.
+- Provider CPU khác: 1 slot cho mỗi provider; hai provider khác nhau vẫn có thể
+  chạy đồng thời.
+- Hai job có cùng thư mục + stem đầu ra phải chờ nhau để tránh ghi đè/race.
+
+Nếu chưa có slot, job vẫn giữ worker và cờ Hủy riêng, đồng thời báo trạng thái
+đang chờ tài nguyên. Hủy một tab không được đặt cờ hủy của tab còn lại.
+
+### Rủi ro và nguyên tắc
+
+- Không cho hai model CUDA cục bộ nạp cùng lúc theo mặc định vì có thể nhân đôi
+  VRAM, gây OOM, CUDA device loss hoặc nhiệt độ tăng đột ngột.
+- Hai Piper worker có thể dùng CPU/RAM mạnh hơn và không bảo đảm nhanh gấp đôi;
+  giới hạn 2 để tránh oversubscription quá mức.
+- Hai job remote có thể gặp rate limit hoặc hàng đợi phía server; lỗi phải thuộc
+  đúng job, không làm hủy job còn lại.
+- Không dùng chung progress bar hoặc cancel event giữa Văn bản và Hàng đợi.
+- Giới hạn song song thuộc provider registry/core, không hardcode vào GUI.
+
+### Lịch sử và metadata
+
+`GenerationHistoryStore` lưu lịch sử riêng trong
+`config/generation_history.sqlite3`; xóa hàng khỏi queue không xóa lịch sử.
+`FileQueueStore` giữ số ký tự và thời lượng kết quả. Quy tắc chọn audio/SRT để
+phát hoặc copy nằm trong `FileQueueOutputManifest`, để PySide6/Tkinter có thể
+dùng lại cùng một cách chọn đường dẫn.

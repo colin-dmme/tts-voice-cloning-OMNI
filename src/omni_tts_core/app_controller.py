@@ -28,6 +28,7 @@ from omni_tts_core.higgs.script import (
     validate_higgs_script,
 )
 from omni_tts_core.gpu_safety import gpu_temperature_guidance
+from omni_tts_core.generation_concurrency import GenerationCoordinator
 from omni_tts_core.media_player import MediaPlayerService
 from omni_tts_core.progress import ProgressCallback, ProgressEvent, check_cancel
 from omni_tts_core.remote.higgs_sglang import EndpointCheckResult, HiggsSglangClient
@@ -104,11 +105,15 @@ class AppController:
         license_provider: LicenseProviderProtocol | None = None,
         safety_gate: SafetyGateProtocol | None = None,
         media_player: MediaPlayerService | None = None,
+        generation_coordinator: GenerationCoordinator | None = None,
     ) -> None:
         self.service = service or TtsService()
         self.license_provider = license_provider or _default_license_provider()
         self.safety_gate = safety_gate
         self.media_player = media_player or MediaPlayerService()
+        self.generation_coordinator = generation_coordinator or GenerationCoordinator(
+            self.service
+        )
 
     # --- Model catalog / choices -------------------------------------------
 
@@ -458,8 +463,14 @@ class AppController:
         if not text.strip():
             raise OmniTtsError("Bạn chưa nhập nội dung cần đọc.")
         self.validate_license_for_model(settings.model_id)
-        self._wait_for_gpu(settings, cancel_event, _status_from(progress_callback))
-        return self.service.generate_audio(settings.to_request(text), progress_callback, cancel_event)
+        status_callback = _status_from(progress_callback)
+        with self.generation_coordinator.acquire(
+            settings, cancel_event, status_callback
+        ):
+            self._wait_for_gpu(settings, cancel_event, status_callback)
+            return self.service.generate_audio(
+                settings.to_request(text), progress_callback, cancel_event
+            )
 
     def generate_files(
         self,
@@ -488,22 +499,28 @@ class AppController:
                 ),
             )
             try:
-                self._wait_for_gpu(settings, cancel_event, status_callback)
-                result = self.service.generate_from_source_file(
+                with self.generation_coordinator.acquire(
+                    settings,
+                    cancel_event,
+                    status_callback,
                     source_path=source_path,
-                    request_template=template,
-                    output_dir=settings.output_dir,
-                    progress_callback=_file_progress(
-                        progress_callback,
-                        file_event_callback,
-                        item_id,
-                        source_path,
-                        file_index,
-                        total_files,
-                        source_path.name,
-                    ),
-                    cancel_event=cancel_event,
-                )
+                ):
+                    self._wait_for_gpu(settings, cancel_event, status_callback)
+                    result = self.service.generate_from_source_file(
+                        source_path=source_path,
+                        request_template=template,
+                        output_dir=settings.output_dir,
+                        progress_callback=_file_progress(
+                            progress_callback,
+                            file_event_callback,
+                            item_id,
+                            source_path,
+                            file_index,
+                            total_files,
+                            source_path.name,
+                        ),
+                        cancel_event=cancel_event,
+                    )
             except GenerationCancelled:
                 _emit_file_event(
                     file_event_callback,

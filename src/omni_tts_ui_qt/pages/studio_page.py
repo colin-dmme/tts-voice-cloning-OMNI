@@ -12,6 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -34,6 +35,10 @@ from PySide6.QtWidgets import (
 )
 
 from omni_tts_core.file_queue import STATUS_LABELS, FileQueueStatus
+from omni_tts_core.generation_history import (
+    GenerationHistoryStore,
+    HistoryStatus,
+)
 from omni_tts_core.path_intake import parse_path_text
 from omni_tts_core.text.source_reader import SUPPORTED_TEXT_EXTENSIONS
 from omni_tts_core.ui_presenters import labels
@@ -41,6 +46,7 @@ from omni_tts_core.ui_presenters.search import matches_search
 from omni_tts_ui_qt.background import GenerationWorker
 from omni_tts_ui_qt.context import AppContext
 from omni_tts_ui_qt.models.queue_model import ProgressBarDelegate, QueueTableModel
+from omni_tts_ui_qt.models.history_model import HistoryTableModel
 from omni_tts_ui_qt.pages.queue_controller import QueueController
 from omni_tts_ui_qt.pages.settings_panel import SettingsPanel
 from omni_tts_ui_qt.widgets.higgs_script_toolbar import HiggsScriptToolbar
@@ -90,9 +96,16 @@ class StudioPage(QWidget):
         self.ctrl = context.controller
         self._text_worker: GenerationWorker | None = None
         self._last_text_result = None
+        self._active_text_settings = None
+        self._active_text_char_count = 0
+        self._active_text_source_label = ""
         self._current_model_id = ""
+        self._queue_status_message = ""
+        self._queue_active = False
+        self._text_active = False
 
-        self.queue = QueueController(context)
+        self.history_store = GenerationHistoryStore()
+        self.queue = QueueController(context, self.history_store)
         self.settings_panel = SettingsPanel(context)
         context.register_settings_provider(self.settings_panel.current_settings)
 
@@ -254,29 +267,8 @@ class StudioPage(QWidget):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_text_tab(), "Văn bản")
         self.tabs.addTab(self._build_queue_tab(), "Hàng đợi file")
+        self.tabs.addTab(self._build_history_tab(), "Lịch sử")
         layout.addWidget(self.tabs, 1)
-
-        action_bar = QHBoxLayout()
-        self.job_label = QLabel("Sẵn sàng")
-        self.job_label.setObjectName("hint")
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.run_button = QPushButton("Chạy hàng đợi")
-        self.run_button.setObjectName("primaryButton")
-        self.run_selected_button = QPushButton("Chạy mục chọn")
-        self.retry_button = QPushButton("Chạy lại lỗi")
-        self.cancel_button = QPushButton("Hủy")
-        self.cancel_button.setObjectName("dangerButton")
-        self.cancel_button.setEnabled(False)
-        self.run_button.clicked.connect(lambda: self._run_queue("pending"))
-        self.run_selected_button.clicked.connect(lambda: self._run_queue("selected"))
-        self.retry_button.clicked.connect(lambda: self._run_queue("failed"))
-        self.cancel_button.clicked.connect(self._cancel)
-        action_bar.addWidget(self.job_label, 1)
-        action_bar.addWidget(self.progress_bar, 1)
-        for button in (self.run_button, self.run_selected_button, self.retry_button, self.cancel_button):
-            action_bar.addWidget(button)
-        layout.addLayout(action_bar)
         return panel
 
     def _build_text_tab(self) -> QWidget:
@@ -318,9 +310,17 @@ class StudioPage(QWidget):
             "Mở file audio kết quả bằng trình nghe nhạc mặc định của Windows."
         )
         result_header.addWidget(self.text_preview_button)
+        text_progress_row = QHBoxLayout()
+        self.text_job_label = QLabel("Sẵn sàng")
+        self.text_job_label.setObjectName("hint")
+        self.text_progress_bar = QProgressBar()
+        self.text_progress_bar.setVisible(False)
+        text_progress_row.addWidget(self.text_job_label, 1)
+        text_progress_row.addWidget(self.text_progress_bar, 1)
         layout.addWidget(self.higgs_script_toolbar)
         layout.addWidget(self.text_input, 1)
         layout.addLayout(stem_row)
+        layout.addLayout(text_progress_row)
         layout.addLayout(result_header)
         layout.addWidget(self.result_view)
         self.generate_button.clicked.connect(self._generate_text)
@@ -337,11 +337,18 @@ class StudioPage(QWidget):
             self.filter_combo.addItem(label, value)
         self.queue_search = QLineEdit()
         self.queue_search.setPlaceholderText("Tìm theo tên file…")
-        self.queue_preview_button = QPushButton("▶ Phát audio")
-        self.queue_preview_button.setEnabled(False)
-        self.queue_preview_button.setToolTip(
-            "Phát audio của hàng đã chọn bằng trình nghe nhạc mặc định của Windows."
+        self.queue_preview_button = self._compact_button(
+            "▶", "Phát audio kết quả bằng trình nghe nhạc mặc định."
         )
+        self.queue_preview_button.setEnabled(False)
+        self.queue_copy_audio_button = self._compact_button(
+            "⧉ Audio", "Copy đường dẫn file audio kết quả."
+        )
+        self.queue_copy_srt_button = self._compact_button(
+            "⧉ SRT", "Copy đường dẫn file phụ đề SRT kết quả."
+        )
+        self.queue_copy_audio_button.setEnabled(False)
+        self.queue_copy_srt_button.setEnabled(False)
         self.delete_button = QPushButton("Xóa mục chọn")
         self.reset_button = QPushButton("Đặt lại")
         self.clear_button = QPushButton("Xóa tất cả")
@@ -349,6 +356,8 @@ class StudioPage(QWidget):
         filter_row.addWidget(self.filter_combo)
         filter_row.addWidget(self.queue_search, 1)
         filter_row.addWidget(self.queue_preview_button)
+        filter_row.addWidget(self.queue_copy_audio_button)
+        filter_row.addWidget(self.queue_copy_srt_button)
         filter_row.addWidget(self.delete_button)
         filter_row.addWidget(self.reset_button)
         filter_row.addWidget(self.clear_button)
@@ -359,15 +368,45 @@ class StudioPage(QWidget):
         self.queue_table.setModel(self.queue_model)
         self.queue_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.queue_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.queue_table.setItemDelegateForColumn(2, ProgressBarDelegate(self.queue_table))
+        self.queue_table.setItemDelegateForColumn(3, ProgressBarDelegate(self.queue_table))
         self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header = self.queue_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.queue_table, 1)
         self.queue_summary = QLabel("")
         self.queue_summary.setObjectName("hint")
         layout.addWidget(self.queue_summary)
+        action_bar = QHBoxLayout()
+        self.queue_job_label = QLabel("Sẵn sàng")
+        self.queue_job_label.setObjectName("hint")
+        self.queue_progress_bar = QProgressBar()
+        self.queue_progress_bar.setVisible(False)
+        self.run_button = QPushButton("Chạy hàng đợi")
+        self.run_button.setObjectName("primaryButton")
+        self.run_selected_button = QPushButton("Chạy mục chọn")
+        self.retry_button = QPushButton("Chạy lại lỗi")
+        self.cancel_button = QPushButton("Hủy")
+        self.cancel_button.setObjectName("dangerButton")
+        self.cancel_button.setEnabled(False)
+        self.run_button.clicked.connect(lambda: self._run_queue("pending"))
+        self.run_selected_button.clicked.connect(lambda: self._run_queue("selected"))
+        self.retry_button.clicked.connect(lambda: self._run_queue("failed"))
+        self.cancel_button.clicked.connect(self._cancel)
+        action_bar.addWidget(self.queue_job_label, 1)
+        action_bar.addWidget(self.queue_progress_bar, 1)
+        for button in (
+            self.run_button,
+            self.run_selected_button,
+            self.retry_button,
+            self.cancel_button,
+        ):
+            action_bar.addWidget(button)
+        layout.addLayout(action_bar)
 
         self.filter_combo.currentIndexChanged.connect(self._refresh_queue)
         self.queue_search.textChanged.connect(self._refresh_queue)
@@ -375,13 +414,99 @@ class StudioPage(QWidget):
         self.reset_button.clicked.connect(self._reset_selected)
         self.clear_button.clicked.connect(self._clear_queue)
         self.queue_preview_button.clicked.connect(self._preview_selected_queue_audio)
+        self.queue_copy_audio_button.clicked.connect(
+            lambda: self._copy_selected_queue_path("merged_audio")
+        )
+        self.queue_copy_srt_button.clicked.connect(
+            lambda: self._copy_selected_queue_path("srt")
+        )
         self.queue_table.paths_dropped.connect(self.queue.add_paths)
         self.queue_table.customContextMenuRequested.connect(self._queue_context_menu)
         self.queue_table.doubleClicked.connect(self._preview_queue_index)
         self.queue_table.selectionModel().selectionChanged.connect(
-            self._update_queue_preview_button
+            self._update_queue_output_buttons
         )
         return widget
+
+    def _build_history_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        toolbar = QHBoxLayout()
+        self.history_search = QLineEdit()
+        self.history_search.setPlaceholderText("Tìm theo nguồn hoặc model…")
+        self.history_preview_button = self._compact_button(
+            "▶", "Phát lại audio của lịch sử đang chọn."
+        )
+        self.history_copy_audio_button = self._compact_button(
+            "⧉ Audio", "Copy đường dẫn audio của lịch sử đang chọn."
+        )
+        self.history_copy_srt_button = self._compact_button(
+            "⧉ SRT", "Copy đường dẫn SRT của lịch sử đang chọn."
+        )
+        self.history_delete_button = QPushButton("Xóa mục chọn")
+        self.history_clear_button = QPushButton("Xóa lịch sử")
+        for button in (
+            self.history_preview_button,
+            self.history_copy_audio_button,
+            self.history_copy_srt_button,
+        ):
+            button.setEnabled(False)
+        toolbar.addWidget(self.history_search, 1)
+        toolbar.addWidget(self.history_preview_button)
+        toolbar.addWidget(self.history_copy_audio_button)
+        toolbar.addWidget(self.history_copy_srt_button)
+        toolbar.addWidget(self.history_delete_button)
+        toolbar.addWidget(self.history_clear_button)
+        layout.addLayout(toolbar)
+
+        self.history_model = HistoryTableModel()
+        self.history_table = QTableView()
+        self.history_table.setModel(self.history_model)
+        self.history_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.history_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
+        history_header = self.history_table.horizontalHeader()
+        history_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        history_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        history_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        history_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        history_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        history_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        history_header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.history_table, 1)
+        self.history_summary = QLabel("")
+        self.history_summary.setObjectName("hint")
+        layout.addWidget(self.history_summary)
+
+        self.history_search.textChanged.connect(self._refresh_history)
+        self.history_preview_button.clicked.connect(self._preview_history_audio)
+        self.history_copy_audio_button.clicked.connect(
+            lambda: self._copy_selected_history_path("audio")
+        )
+        self.history_copy_srt_button.clicked.connect(
+            lambda: self._copy_selected_history_path("srt")
+        )
+        self.history_delete_button.clicked.connect(self._delete_history_selected)
+        self.history_clear_button.clicked.connect(self._clear_history)
+        self.history_table.doubleClicked.connect(
+            lambda _index: self._preview_history_audio()
+        )
+        self.history_table.selectionModel().selectionChanged.connect(
+            self._update_history_output_buttons
+        )
+        self._refresh_history()
+        return widget
+
+    @staticmethod
+    def _compact_button(text: str, tooltip: str) -> QPushButton:
+        button = QPushButton(text)
+        button.setToolTip(tooltip)
+        button.setMaximumWidth(76 if len(text) > 1 else 36)
+        button.setMinimumWidth(32)
+        return button
 
     # --- Wiring -------------------------------------------------------------
 
@@ -389,9 +514,10 @@ class StudioPage(QWidget):
         self.settings_panel.settings_changed.connect(self._on_settings_changed)
         self.queue.items_changed.connect(self._refresh_queue)
         self.queue.log.connect(self.context.log)
-        self.queue.worker_status.connect(self.context.set_worker_status)
+        self.queue.worker_status.connect(self._on_queue_worker_status)
         self.queue.progress.connect(self._on_queue_progress)
         self.queue.run_state_changed.connect(self._on_run_state)
+        self.queue.history_changed.connect(self._refresh_history)
         self._settings_timer = QTimer(self)
         self._settings_timer.setSingleShot(True)
         self._settings_timer.setInterval(400)
@@ -507,11 +633,27 @@ class StudioPage(QWidget):
             return None
         return self.queue_model.item_at(rows[0].row())
 
-    def _update_queue_preview_button(self, *_args) -> None:
+    def _update_queue_output_buttons(self, *_args) -> None:
         item = self._selected_queue_item()
-        self.queue_preview_button.setEnabled(
-            bool(item and item.status == FileQueueStatus.DONE)
+        done = bool(item and item.status == FileQueueStatus.DONE)
+        audio_path = (
+            item.output_manifest.preferred_audio_path()
+            if done and item is not None
+            else None
         )
+        playable_audio = (
+            item.output_manifest.preferred_audio_path(existing_only=True)
+            if done and item is not None
+            else None
+        )
+        srt = (
+            item.output_manifest.preferred_srt_path()
+            if done and item is not None
+            else None
+        )
+        self.queue_preview_button.setEnabled(playable_audio is not None)
+        self.queue_copy_audio_button.setEnabled(audio_path is not None)
+        self.queue_copy_srt_button.setEnabled(srt is not None)
 
     def _delete_selected(self) -> None:
         self.queue.delete(self._selected_item_ids())
@@ -536,7 +678,7 @@ class StudioPage(QWidget):
                 continue
             items.append(item)
         self.queue_model.set_items(items)
-        self._update_queue_preview_button()
+        self._update_queue_output_buttons()
         total = sum(counts.values())
         done = counts.get(FileQueueStatus.DONE, 0)
         failed = counts.get(FileQueueStatus.FAILED, 0)
@@ -551,7 +693,14 @@ class StudioPage(QWidget):
         if item and item.status == FileQueueStatus.DONE:
             menu.addAction("▶ Phát audio", lambda: self._preview_queue_audio(item))
             menu.addAction("Mở thư mục kết quả", lambda: self._open_result(item))
-            menu.addAction("Copy đường dẫn kết quả", lambda: self._copy_result(item))
+            menu.addAction(
+                "Copy đường dẫn audio",
+                lambda: self._copy_manifest_path(item.output_manifest, "audio"),
+            )
+            menu.addAction(
+                "Copy đường dẫn SRT",
+                lambda: self._copy_manifest_path(item.output_manifest, "srt"),
+            )
             menu.addSeparator()
         menu.addAction("Chạy lại", lambda: self._run_selected_context())
         menu.addAction("Đặt lại trạng thái", self._reset_selected)
@@ -579,13 +728,114 @@ class StudioPage(QWidget):
         if paths:
             open_path(paths[0])
 
-    def _copy_result(self, item) -> None:
-        from PySide6.QtWidgets import QApplication
+    def _copy_selected_queue_path(self, kind: str) -> None:
+        item = self._selected_queue_item()
+        if item is not None:
+            self._copy_manifest_path(item.output_manifest, kind)
 
-        paths = self.queue.collect_paths([item.item_id], "all")
-        if paths:
-            QApplication.clipboard().setText("\n".join(str(p) for p in paths))
-            self.context.log("Đã copy đường dẫn kết quả.")
+    def _copy_manifest_path(self, manifest, kind: str) -> None:
+        path = (
+            manifest.preferred_audio_path()
+            if kind == "audio" or kind == "merged_audio"
+            else manifest.preferred_srt_path()
+        )
+        if path is None:
+            QMessageBox.information(
+                self, "Chưa có kết quả", f"Không có đường dẫn {kind.upper()} để copy."
+            )
+            return
+        QApplication.clipboard().setText(str(path))
+        self.context.log(f"Đã copy đường dẫn: {path}")
+
+    # --- History tab actions ------------------------------------------------
+
+    def _refresh_history(self, *_args) -> None:
+        needle = self.history_search.text() if hasattr(self, "history_search") else ""
+        entries = self.history_store.list_entries()
+        visible = [
+            entry
+            for entry in entries
+            if matches_search(
+                " ".join(
+                    (
+                        entry.source_label,
+                        str(entry.source_path or ""),
+                        entry.model_id,
+                        entry.provider_id,
+                    )
+                ),
+                needle,
+            )
+        ]
+        self.history_model.set_items(visible)
+        self.history_summary.setText(
+            f"Hiển thị {len(visible)}/{len(entries)} lần xử lý gần nhất"
+        )
+        self._update_history_output_buttons()
+
+    def _selected_history_entries(self):
+        rows = self.history_table.selectionModel().selectedRows()
+        return [
+            item
+            for index in rows
+            if (item := self.history_model.item_at(index.row())) is not None
+        ]
+
+    def _selected_history_entry(self):
+        entries = self._selected_history_entries()
+        return entries[0] if len(entries) == 1 else None
+
+    def _update_history_output_buttons(self, *_args) -> None:
+        entry = self._selected_history_entry()
+        audio_path = (
+            entry.output_manifest.preferred_audio_path()
+            if entry is not None
+            else None
+        )
+        playable_audio = (
+            entry.output_manifest.preferred_audio_path(existing_only=True)
+            if entry is not None
+            else None
+        )
+        srt = (
+            entry.output_manifest.preferred_srt_path()
+            if entry is not None
+            else None
+        )
+        self.history_preview_button.setEnabled(playable_audio is not None)
+        self.history_copy_audio_button.setEnabled(audio_path is not None)
+        self.history_copy_srt_button.setEnabled(srt is not None)
+
+    def _preview_history_audio(self) -> None:
+        entry = self._selected_history_entry()
+        if entry is not None:
+            self._play_audio(
+                lambda: self.ctrl.play_queue_audio(entry.output_manifest)
+            )
+
+    def _copy_selected_history_path(self, kind: str) -> None:
+        entry = self._selected_history_entry()
+        if entry is not None:
+            self._copy_manifest_path(entry.output_manifest, kind)
+
+    def _delete_history_selected(self) -> None:
+        entries = self._selected_history_entries()
+        if not entries:
+            return
+        self.history_store.delete([entry.history_id for entry in entries])
+        self._refresh_history()
+
+    def _clear_history(self) -> None:
+        if (
+            QMessageBox.question(
+                self, "Xóa lịch sử", "Xóa toàn bộ lịch sử xử lý?"
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        removed = self.history_store.clear()
+        self.context.log(f"Đã xóa {removed} mục lịch sử.")
+        self._refresh_history()
 
     # --- Running ------------------------------------------------------------
 
@@ -598,17 +848,43 @@ class StudioPage(QWidget):
 
     def _on_queue_progress(self, percent: float, message: str) -> None:
         if percent < 0:
-            self.progress_bar.setVisible(False)
-            self.job_label.setText("Sẵn sàng")
+            self.queue_progress_bar.setVisible(False)
+            self.queue_job_label.setText("Sẵn sàng")
             return
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(int(max(0.0, min(1.0, percent)) * 100))
-        self.job_label.setText(message)
+        self.queue_progress_bar.setVisible(True)
+        self.queue_progress_bar.setValue(
+            int(max(0.0, min(1.0, percent)) * 100)
+        )
+        self.queue_job_label.setText(message)
 
     def _on_run_state(self, running: bool) -> None:
+        self._queue_active = running
         self.cancel_button.setEnabled(running)
         for button in (self.run_button, self.run_selected_button, self.retry_button):
             button.setEnabled(not running)
+        self._sync_global_worker_status()
+
+    def _on_queue_worker_status(self, status: str, message: str) -> None:
+        self._queue_status_message = message
+        self._sync_global_worker_status(status, message)
+
+    def _sync_global_worker_status(
+        self, fallback_status: str = "ready", fallback_message: str = "Sẵn sàng"
+    ) -> None:
+        queue_running = self._queue_active
+        text_running = self._text_active
+        if queue_running and text_running:
+            self.context.set_worker_status(
+                "processing", "Đang chạy độc lập: Văn bản + Hàng đợi"
+            )
+        elif queue_running:
+            self.context.set_worker_status(
+                "processing", self._queue_status_message or "Đang chạy hàng đợi…"
+            )
+        elif text_running:
+            self.context.set_worker_status("processing", "Đang tạo giọng đọc…")
+        else:
+            self.context.set_worker_status(fallback_status, fallback_message)
 
     # --- Text generation ----------------------------------------------------
 
@@ -621,6 +897,9 @@ class StudioPage(QWidget):
         stem = self.output_stem.text().strip()
         if stem:
             settings.output_stem = stem
+        self._active_text_settings = settings
+        self._active_text_char_count = len(text)
+        self._active_text_source_label = stem or "Văn bản trực tiếp"
         self._last_text_result = None
         self.text_preview_button.setEnabled(False)
         self._text_worker = GenerationWorker(self.ctrl, "text", settings, text=text)
@@ -630,8 +909,11 @@ class StudioPage(QWidget):
         self._text_worker.cancelled.connect(self._on_text_cancelled)
         self.generate_button.setEnabled(False)
         self.text_cancel_button.setEnabled(True)
-        self.progress_bar.setVisible(True)
-        self.context.set_worker_status("processing", "Đang tạo giọng đọc…")
+        self._text_active = True
+        self.text_progress_bar.setVisible(True)
+        self.text_progress_bar.setValue(0)
+        self.text_job_label.setText("Đang tạo giọng đọc…")
+        self._sync_global_worker_status()
         self.result_view.setPlainText("Đang xử lý…")
         self._text_worker.start()
 
@@ -641,24 +923,31 @@ class StudioPage(QWidget):
 
     def _on_text_progress(self, event) -> None:
         percent = (event.current / event.total) if event.total else 0.0
-        self.progress_bar.setValue(int(max(0.0, min(1.0, percent)) * 100))
-        self.job_label.setText(event.message)
+        self.text_progress_bar.setValue(
+            int(max(0.0, min(1.0, percent)) * 100)
+        )
+        self.text_job_label.setText(event.message)
         self.context.log(event.message)
 
     def _on_text_done(self, result) -> None:
         self._last_text_result = result
         self.text_preview_button.setEnabled(True)
         self.result_view.setPlainText(labels.format_result(result))
+        self._record_text_history(HistoryStatus.DONE, result=result)
         self._finish_text("ready", "Đã tạo giọng đọc.")
 
     def _on_text_failed(self, message: str) -> None:
         self.result_view.setPlainText(f"Lỗi: {message}")
+        self._record_text_history(HistoryStatus.FAILED, error=message)
         self._finish_text("error", "Tạo giọng thất bại.")
         if "license" in message.lower() or "License" in message:
             self.context.show_page("license")
 
     def _on_text_cancelled(self) -> None:
         self.result_view.setPlainText("Đã hủy.")
+        self._record_text_history(
+            HistoryStatus.CANCELLED, error="Đã hủy khi đang xử lý"
+        )
         self._finish_text("paused", "Đã hủy tạo giọng.")
 
     def _preview_text_audio(self) -> None:
@@ -678,11 +967,31 @@ class StudioPage(QWidget):
     def _finish_text(self, status: str, message: str) -> None:
         self.generate_button.setEnabled(True)
         self.text_cancel_button.setEnabled(False)
-        self.progress_bar.setVisible(False)
-        self.job_label.setText("Sẵn sàng")
-        self.context.set_worker_status(status, message)
+        self.text_progress_bar.setVisible(False)
+        self.text_job_label.setText("Sẵn sàng")
         self.context.log(message)
         self._text_worker = None
+        self._active_text_settings = None
+        self._text_active = False
+        self._sync_global_worker_status(status, message)
+
+    def _record_text_history(
+        self, status: HistoryStatus, *, result=None, error: str = ""
+    ) -> None:
+        settings = self._active_text_settings
+        if settings is None:
+            return
+        self.history_store.record(
+            mode="text",
+            source_label=self._active_text_source_label,
+            char_count=self._active_text_char_count,
+            model_id=settings.model_id,
+            provider_id=self.ctrl.provider_of_model(settings.model_id),
+            status=status,
+            result=result,
+            error=error,
+        )
+        self._refresh_history()
 
     # --- Preferences / lifecycle -------------------------------------------
 

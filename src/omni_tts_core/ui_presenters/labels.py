@@ -248,3 +248,14 @@ def format_result(result: GenerateSpeechResult) -> str:
         f"Hoàn tất {result.segment_count} đoạn, {result.duration_seconds:.1f} giây\n"
         f"Audio: {result.audio_path}{srt_line}"
     )
+
+
+def format_duration(seconds: float | int | None) -> str:
+    total = max(0, int(round(float(seconds or 0))))
+    if total <= 0:
+        return "—"
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"

@@ -27,6 +27,7 @@ class ProviderDescriptor:
     worker_name: str | None
     engine_factory: EngineFactory
     controls: frozenset[str] = frozenset()
+    max_parallel_jobs: int = 1
 
 
 def _omnivoice(spec: ModelSpec, cache: object | None) -> BaseTtsEngine:
@@ -70,7 +71,7 @@ PROVIDERS: dict[str, ProviderDescriptor] = {
     ),
     "piper": ProviderDescriptor(
         "piper", "Piper ONNX", "folder", "piper_worker", _simple(PiperSubprocessEngine),
-        frozenset({"speed", "punctuation_pauses"}),
+        frozenset({"speed", "punctuation_pauses"}), 2,
     ),
     "higgs_remote": ProviderDescriptor(
         "higgs_remote",
@@ -79,6 +80,7 @@ PROVIDERS: dict[str, ProviderDescriptor] = {
         None,
         _simple(HiggsRemoteEngine),
         frozenset({"higgs_remote", "higgs_script"}),
+        2,
     ),
 }
 

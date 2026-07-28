@@ -157,6 +157,7 @@ class TestFileQueueStore(unittest.TestCase):
                 output_paths=[split_audio, merged_audio, srt_path],
                 fingerprint="settings-1",
                 output_manifest=manifest,
+                duration_seconds=125.4,
             )
 
             restored = FileQueueStore(root / "queue.sqlite3").get(item.item_id)
@@ -164,6 +165,13 @@ class TestFileQueueStore(unittest.TestCase):
             self.assertEqual(restored.output_manifest.split_audio_paths, (split_audio,))
             self.assertEqual(restored.output_manifest.merged_audio_path, merged_audio)
             self.assertEqual(restored.output_manifest.srt_paths, (srt_path,))
+            self.assertAlmostEqual(restored.duration_seconds, 125.4)
+            self.assertEqual(
+                restored.output_manifest.preferred_audio_path(), merged_audio
+            )
+            self.assertEqual(
+                restored.output_manifest.preferred_srt_path(), srt_path
+            )
 
     def test_manifest_can_infer_legacy_flat_paths(self) -> None:
         root = Path("C:/out/story")

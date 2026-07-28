@@ -19,8 +19,10 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -29,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from omni_tts_core.pause_presets import PAUSE_PRESET_KEYS, PUNCTUATION_PAUSE_FIELDS
 from omni_tts_core.ui_presenters import control_policy, field_limits, model_groups
 from omni_tts_core.ui_presenters.control_policy import (
     NEUTRAL_EMOTION,
@@ -48,8 +51,10 @@ from omni_tts_ui_qt.pages.settings_sections import ChatterboxGroup, F5Group, Vie
 from omni_tts_ui_qt.widgets.common import (
     CollapsibleSection,
     PathBar,
+    RandomPauseEditor,
     dspin_for,
     make_combo,
+    pause_seconds_spin_for,
     spin_for,
 )
 from omni_tts_ui_qt.widgets.higgs_custom_voice_creator import (
@@ -128,8 +133,12 @@ class SettingsPanel(QScrollArea):
         self.device_note = self._hint()
         self.speed = dspin_for("speed", NEUTRAL_SPEED)
         self.pitch = dspin_for("pitch_shift", NEUTRAL_PITCH)
-        self.chunk_pause = spin_for("chunk_pause_ms", 120, "chunk_pause")
-        self.paragraph_pause = spin_for("paragraph_pause_ms", 600, "paragraph_pause")
+        self.chunk_pause = pause_seconds_spin_for(
+            "chunk_pause_ms", 120, "chunk_pause"
+        )
+        self.paragraph_pause = pause_seconds_spin_for(
+            "paragraph_pause_ms", 600, "paragraph_pause"
+        )
         self.max_chunk = spin_for("max_chunk_chars", 220, "max_chunk")
         form.addRow("Nhà cung cấp:", self.provider_combo)
         form.addRow("Model TTS:", self.model_combo)
@@ -142,8 +151,8 @@ class SettingsPanel(QScrollArea):
         form.addRow("Tốc độ đọc:", self.speed)
         self._pitch_row = form.rowCount()
         form.addRow("Pitch shift:", self.pitch)
-        form.addRow("Nghỉ giữa chunk kỹ thuật (ms):", self.chunk_pause)
-        form.addRow("Nghỉ giữa đoạn gốc (ms):", self.paragraph_pause)
+        form.addRow("Nghỉ giữa chunk kỹ thuật (giây):", self.chunk_pause)
+        form.addRow("Nghỉ giữa đoạn gốc (giây):", self.paragraph_pause)
         form.addRow("Ký tự tối đa mỗi đoạn nhỏ:", self.max_chunk)
         self._basic_form = form
         self._connect_all(self.language_combo, self.device_combo, self.speed, self.pitch,
@@ -163,28 +172,42 @@ class SettingsPanel(QScrollArea):
         self.punctuation_section.activation_changed.connect(self._emit_changed)
         self.punctuation_note = self._hint()
         self.punctuation_note.setText(
-            "Chỉ áp dụng cho provider có hỗ trợ; đặt 0 ms để bỏ nghỉ ở một loại dấu."
+            "Bỏ chọn Ngẫu nhiên để dùng một giá trị cố định như trước; bật để Core lấy từng lần nghỉ trong khoảng Min–Max."
         )
         self.punctuation_note.setToolTip(tooltip("punctuation_section"))
         form.addRow(self.punctuation_note)
-        self.sentence_pause = spin_for("sentence_pause_ms", 320, "sentence_pause")
-        self.comma_pause = spin_for("comma_pause_ms", 90, "comma_pause")
-        self.clause_pause = spin_for("clause_pause_ms", 180, "clause_pause")
-        self.ellipsis_pause = spin_for("ellipsis_pause_ms", 450, "ellipsis_pause")
-        form.addRow("Cuối câu · . ? ! (ms):", self.sentence_pause)
-        form.addRow("Dấu phẩy · , (ms):", self.comma_pause)
-        form.addRow("Chấm phẩy / hai chấm · ; : (ms):", self.clause_pause)
-        form.addRow("Dấu ba chấm · … / ... (ms):", self.ellipsis_pause)
-        reset = QPushButton("Đặt lại ngắt nghỉ mặc định")
-        reset.setToolTip(tooltip("punctuation_reset"))
-        reset.clicked.connect(self._restore_punctuation_defaults)
-        form.addRow(reset)
-        self._connect_all(
-            self.sentence_pause,
-            self.comma_pause,
-            self.clause_pause,
-            self.ellipsis_pause,
+        preset_row = QHBoxLayout()
+        self.pause_preset_combo = QComboBox()
+        self.pause_preset_save = QPushButton("Lưu preset…")
+        self.pause_preset_delete = QPushButton("Xóa preset")
+        preset_row.addWidget(QLabel("Preset:"))
+        preset_row.addWidget(self.pause_preset_combo, 1)
+        preset_row.addWidget(self.pause_preset_save)
+        preset_row.addWidget(self.pause_preset_delete)
+        form.addRow(preset_row)
+        self.pause_editors: dict[str, RandomPauseEditor] = {}
+        for spec in PUNCTUATION_PAUSE_FIELDS:
+            editor = RandomPauseEditor(
+                spec.label,
+                spec.fixed_field,
+                spec.minimum_field,
+                spec.maximum_field,
+                DEFAULT_GENERATION_PREFERENCES,
+                spec.tooltip_key,
+            )
+            editor.changed.connect(self._emit_changed)
+            self.pause_editors[spec.key] = editor
+            form.addRow(editor)
+        self.pause_preset_combo.currentIndexChanged.connect(
+            self._apply_selected_pause_preset
         )
+        self.pause_preset_save.clicked.connect(self._save_pause_preset)
+        self.pause_preset_delete.clicked.connect(self._delete_pause_preset)
+        self._refresh_pause_presets()
+        reset = QPushButton("Đặt lại toàn bộ khoảng nghỉ mặc định")
+        reset.setToolTip(tooltip("punctuation_reset"))
+        reset.clicked.connect(self._restore_pause_defaults)
+        form.addRow(reset)
 
     def _build_voice_source(self) -> None:
         self.voice_section, form = self._section("Nguồn giọng")
@@ -695,15 +718,131 @@ class SettingsPanel(QScrollArea):
         for attribute, field, _label, _tooltip in self._gpu_rows:
             self._set_number(getattr(self, attribute), field, DEFAULT_GENERATION_PREFERENCES)
 
-    def _restore_punctuation_defaults(self) -> None:
-        self.punctuation_section.set_active(True)
-        for field, widget in (
-            ("sentence_pause_ms", self.sentence_pause),
-            ("comma_pause_ms", self.comma_pause),
-            ("clause_pause_ms", self.clause_pause),
-            ("ellipsis_pause_ms", self.ellipsis_pause),
+    def _restore_pause_defaults(self) -> None:
+        self._apply_pause_values(DEFAULT_GENERATION_PREFERENCES)
+        self.pause_preset_combo.setCurrentIndex(0)
+
+    def _pause_values(self) -> dict[str, int | bool]:
+        values: dict[str, int | bool] = {
+            "punctuation_pause_enabled": self.punctuation_section.is_active(),
+            "chunk_pause_ms": self.chunk_pause.milliseconds(),
+            "paragraph_pause_ms": self.paragraph_pause.milliseconds(),
+        }
+        for spec in PUNCTUATION_PAUSE_FIELDS:
+            fixed, random_enabled, minimum, maximum = self.pause_editors[
+                spec.key
+            ].pause_values()
+            values.update(
+                {
+                    spec.fixed_field: fixed,
+                    spec.random_field: random_enabled,
+                    spec.minimum_field: minimum,
+                    spec.maximum_field: maximum,
+                }
+            )
+        return values
+
+    def _apply_pause_values(self, data: dict) -> None:
+        self.punctuation_section.set_active(
+            bool(data.get("punctuation_pause_enabled", True))
+        )
+        for spec in PUNCTUATION_PAUSE_FIELDS:
+            editor = self.pause_editors[spec.key]
+            editor.set_pause_values(
+                int(
+                    data.get(
+                        spec.fixed_field,
+                        DEFAULT_GENERATION_PREFERENCES[spec.fixed_field],
+                    )
+                ),
+                bool(
+                    data.get(
+                        spec.random_field,
+                        DEFAULT_GENERATION_PREFERENCES[spec.random_field],
+                    )
+                ),
+                int(
+                    data.get(
+                        spec.minimum_field,
+                        DEFAULT_GENERATION_PREFERENCES[spec.minimum_field],
+                    )
+                ),
+                int(
+                    data.get(
+                        spec.maximum_field,
+                        DEFAULT_GENERATION_PREFERENCES[spec.maximum_field],
+                    )
+                ),
+            )
+        self._set_pause(self.chunk_pause, "chunk_pause_ms", data)
+        self._set_pause(self.paragraph_pause, "paragraph_pause_ms", data)
+
+    def _refresh_pause_presets(self, selected_name: str | None = None) -> None:
+        self.pause_preset_combo.blockSignals(True)
+        self.pause_preset_combo.clear()
+        self.pause_preset_combo.addItem("— Chọn preset —", None)
+        for preset in self.ctrl.punctuation_pause_presets():
+            self.pause_preset_combo.addItem(preset.name, preset.name)
+        if selected_name:
+            index = self.pause_preset_combo.findData(selected_name)
+            if index >= 0:
+                self.pause_preset_combo.setCurrentIndex(index)
+        self.pause_preset_combo.blockSignals(False)
+        self.pause_preset_delete.setEnabled(
+            self.pause_preset_combo.currentData() is not None
+        )
+
+    def _apply_selected_pause_preset(self, *_args) -> None:
+        name = self.pause_preset_combo.currentData()
+        self.pause_preset_delete.setEnabled(name is not None)
+        if not name:
+            return
+        preset = next(
+            (
+                item
+                for item in self.ctrl.punctuation_pause_presets()
+                if item.name == name
+            ),
+            None,
+        )
+        if preset is None:
+            return
+        self._apply_pause_values(preset.values)
+        self._emit_changed()
+
+    def _save_pause_preset(self) -> None:
+        name, accepted = QInputDialog.getText(
+            self, "Lưu preset ngắt nghỉ", "Tên preset:"
+        )
+        if not accepted:
+            return
+        current_values = self._pause_values()
+        try:
+            preset = self.ctrl.save_punctuation_pause_preset(
+                name, {key: current_values[key] for key in PAUSE_PRESET_KEYS}
+            )
+        except Exception as error:
+            QMessageBox.warning(self, "Không lưu được preset", str(error))
+            return
+        self._refresh_pause_presets(preset.name)
+
+    def _delete_pause_preset(self) -> None:
+        name = self.pause_preset_combo.currentData()
+        if not name:
+            return
+        if (
+            QMessageBox.question(
+                self, "Xóa preset", f'Xóa preset "{name}"?'
+            )
+            != QMessageBox.StandardButton.Yes
         ):
-            self._set_number(widget, field, DEFAULT_GENERATION_PREFERENCES)
+            return
+        try:
+            self.ctrl.delete_punctuation_pause_preset(str(name))
+        except Exception as error:
+            QMessageBox.warning(self, "Không xóa được preset", str(error))
+            return
+        self._refresh_pause_presets()
 
     # --- Sidebar voice selection hooks -------------------------------------
 
@@ -739,6 +878,7 @@ class SettingsPanel(QScrollArea):
         cb_on = on(policy.chatterbox) if policy else False
         f5_seed = f5.seed.value()
         cb_seed = cb.seed.value()
+        pause_values = self._pause_values()
         return GenerationSettings(
             language=str(self.language_combo.currentData() or "vi"),
             model_id=self.current_model_id(),
@@ -782,13 +922,33 @@ class SettingsPanel(QScrollArea):
             gpu_maximum_encoder_utilization_percent=self.gpu_max_enc.value(),
             # Preserve the user's Piper choice while another provider is
             # selected. Core still gates the feature by provider capability.
-            punctuation_pause_enabled=self.punctuation_section.is_active(),
-            sentence_pause_ms=self.sentence_pause.value(),
-            comma_pause_ms=self.comma_pause.value(),
-            clause_pause_ms=self.clause_pause.value(),
-            ellipsis_pause_ms=self.ellipsis_pause.value(),
-            chunk_pause_ms=self.chunk_pause.value(),
-            paragraph_pause_ms=self.paragraph_pause.value(),
+            punctuation_pause_enabled=bool(pause_values["punctuation_pause_enabled"]),
+            sentence_pause_ms=int(pause_values["sentence_pause_ms"]),
+            sentence_pause_random_enabled=bool(
+                pause_values["sentence_pause_random_enabled"]
+            ),
+            sentence_pause_min_ms=int(pause_values["sentence_pause_min_ms"]),
+            sentence_pause_max_ms=int(pause_values["sentence_pause_max_ms"]),
+            comma_pause_ms=int(pause_values["comma_pause_ms"]),
+            comma_pause_random_enabled=bool(
+                pause_values["comma_pause_random_enabled"]
+            ),
+            comma_pause_min_ms=int(pause_values["comma_pause_min_ms"]),
+            comma_pause_max_ms=int(pause_values["comma_pause_max_ms"]),
+            clause_pause_ms=int(pause_values["clause_pause_ms"]),
+            clause_pause_random_enabled=bool(
+                pause_values["clause_pause_random_enabled"]
+            ),
+            clause_pause_min_ms=int(pause_values["clause_pause_min_ms"]),
+            clause_pause_max_ms=int(pause_values["clause_pause_max_ms"]),
+            ellipsis_pause_ms=int(pause_values["ellipsis_pause_ms"]),
+            ellipsis_pause_random_enabled=bool(
+                pause_values["ellipsis_pause_random_enabled"]
+            ),
+            ellipsis_pause_min_ms=int(pause_values["ellipsis_pause_min_ms"]),
+            ellipsis_pause_max_ms=int(pause_values["ellipsis_pause_max_ms"]),
+            chunk_pause_ms=self.chunk_pause.milliseconds(),
+            paragraph_pause_ms=self.paragraph_pause.milliseconds(),
             max_chunk_chars=self.max_chunk.value(),
             output_dir=self.output_path.value(),
             overwrite=self.overwrite.isChecked(),
@@ -847,17 +1007,7 @@ class SettingsPanel(QScrollArea):
                 self.speed.setValue(float(data.get("speed", NEUTRAL_SPEED)))
             if self._policy is None or self._policy.pitch:
                 self.pitch.setValue(float(data.get("pitch_shift", NEUTRAL_PITCH)))
-            self.punctuation_section.set_active(
-                bool(data.get("punctuation_pause_enabled", True))
-            )
-            self.sentence_pause.setValue(int(data.get("sentence_pause_ms", 320)))
-            self.comma_pause.setValue(int(data.get("comma_pause_ms", 90)))
-            self.clause_pause.setValue(int(data.get("clause_pause_ms", 180)))
-            self.ellipsis_pause.setValue(int(data.get("ellipsis_pause_ms", 450)))
-            self.chunk_pause.setValue(
-                int(data.get("chunk_pause_ms", data.get("sentence_pause_ms", 120)))
-            )
-            self.paragraph_pause.setValue(int(data.get("paragraph_pause_ms", 600)))
+            self._apply_pause_values(data)
             self.max_chunk.setValue(int(data.get("max_chunk_chars", 220)))
             self.output_path.set_value(data.get("output_dir") or "")
             self._set_combo(self.format_combo, data.get("output_audio_format", "wav"))
@@ -982,6 +1132,15 @@ class SettingsPanel(QScrollArea):
             return
         clamped = limit.clamp(float(value))
         widget.setValue(int(clamped) if limit.is_integer else clamped)
+
+    @staticmethod
+    def _set_pause(widget, field: str, data: dict) -> None:
+        """Restore a persisted millisecond value into a seconds-facing input."""
+        value = data.get(field)
+        if value is None:
+            return
+        clamped = field_limits.limit(field).clamp(float(value))
+        widget.set_milliseconds(clamped)
 
     def save_preferences(self, data: dict) -> None:
         data.update(self.current_settings().to_preferences())

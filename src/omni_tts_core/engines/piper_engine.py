@@ -25,6 +25,7 @@ from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
 from omni_tts_core.progress import check_cancel
 from omni_tts_core.text.punctuation_pauses import (
+    PauseRange,
     PunctuationPauseConfig,
     split_with_punctuation_pauses,
 )
@@ -220,6 +221,10 @@ class PiperSubprocessEngine(BaseTtsEngine):
                         comma_ms=request.comma_pause_ms,
                         clause_ms=request.clause_pause_ms,
                         ellipsis_ms=request.ellipsis_pause_ms,
+                        sentence_range=_request_pause_range(request, "sentence"),
+                        comma_range=_request_pause_range(request, "comma"),
+                        clause_range=_request_pause_range(request, "clause"),
+                        ellipsis_range=_request_pause_range(request, "ellipsis"),
                     )
                     item["segments"] = [
                         {
@@ -265,6 +270,15 @@ class PiperSubprocessEngine(BaseTtsEngine):
                 audio, sample_rate = sf.read(str(output_path), dtype="float32")
                 results.append(TtsEngineResult(audio=audio, sample_rate=int(sample_rate)))
             return results
+
+
+def _request_pause_range(request: TtsEngineRequest, prefix: str) -> PauseRange | None:
+    if not getattr(request, f"{prefix}_pause_random_enabled"):
+        return None
+    return PauseRange(
+        getattr(request, f"{prefix}_pause_min_ms"),
+        getattr(request, f"{prefix}_pause_max_ms"),
+    )
 
 
 def _clean_worker_error(message: str) -> str:

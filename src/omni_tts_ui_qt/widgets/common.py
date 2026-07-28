@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from omni_tts_core.ui_presenters import field_limits, tooltips
+from omni_tts_core.ui_presenters import field_limits, pause_units, tooltips
 
 
 class CollapsibleSection(QFrame):
@@ -148,6 +148,135 @@ def dspin_for(
     if tooltip_key:
         widget.setToolTip(tooltips.tooltip(tooltip_key))
     return widget
+
+
+class PauseSecondsSpinBox(QDoubleSpinBox):
+    """Seconds-facing input backed by the core millisecond contract."""
+
+    def __init__(self, field: str, parent=None) -> None:
+        super().__init__(parent)
+        self.field = field
+        limit = pause_units.seconds_limit(field)
+        self.setRange(limit.minimum, limit.maximum)
+        self.setSingleStep(limit.step)
+        self.setDecimals(limit.decimals)
+        self.setSuffix(" s")
+
+    def milliseconds(self) -> int:
+        return pause_units.seconds_to_milliseconds(self.value())
+
+    def set_milliseconds(self, value: float | int) -> None:
+        self.setValue(pause_units.milliseconds_to_seconds(value))
+
+    def textFromValue(self, value: float) -> str:  # noqa: N802
+        # Retain millisecond precision without forcing noisy trailing zeroes.
+        return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def pause_seconds_spin_for(
+    field: str,
+    value_ms: int | None = None,
+    tooltip_key: str = "",
+) -> PauseSecondsSpinBox:
+    widget = PauseSecondsSpinBox(field)
+    default_ms = value_ms if value_ms is not None else field_limits.default_of(field)
+    widget.set_milliseconds(default_ms or 0)
+    if tooltip_key:
+        widget.setToolTip(tooltips.tooltip(tooltip_key))
+    return widget
+
+
+class RandomPauseEditor(QWidget):
+    """Compact fixed-or-range pause editor; values remain milliseconds in Core."""
+
+    changed = Signal()
+
+    def __init__(
+        self,
+        label: str,
+        fixed_field: str,
+        minimum_field: str,
+        maximum_field: str,
+        defaults: dict,
+        tooltip_key: str,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        self.random_check = QCheckBox(label)
+        self.random_check.setToolTip(
+            "Bật để mỗi dấu được lấy một khoảng nghỉ ngẫu nhiên giữa Min và Max."
+        )
+        self.fixed = pause_seconds_spin_for(
+            fixed_field, defaults[fixed_field], tooltip_key
+        )
+        self.minimum = pause_seconds_spin_for(
+            minimum_field, defaults[minimum_field], tooltip_key
+        )
+        self.maximum = pause_seconds_spin_for(
+            maximum_field, defaults[maximum_field], tooltip_key
+        )
+        for spin in (self.fixed, self.minimum, self.maximum):
+            spin.setMaximumWidth(92)
+        self.fixed_label = QLabel("Cố định")
+        self.minimum_label = QLabel("Min")
+        self.maximum_label = QLabel("Max")
+        layout.addWidget(self.random_check, 1)
+        layout.addWidget(self.fixed_label)
+        layout.addWidget(self.fixed)
+        layout.addWidget(self.minimum_label)
+        layout.addWidget(self.minimum)
+        layout.addWidget(self.maximum_label)
+        layout.addWidget(self.maximum)
+        self.random_check.toggled.connect(self._sync_mode)
+        self.random_check.toggled.connect(self.changed)
+        self.fixed.valueChanged.connect(self.changed)
+        self.minimum.valueChanged.connect(self._minimum_changed)
+        self.maximum.valueChanged.connect(self._maximum_changed)
+        self._sync_mode(False)
+
+    def _sync_mode(self, random_enabled: bool) -> None:
+        self.fixed_label.setVisible(not random_enabled)
+        self.fixed.setVisible(not random_enabled)
+        for widget in (
+            self.minimum_label,
+            self.minimum,
+            self.maximum_label,
+            self.maximum,
+        ):
+            widget.setVisible(random_enabled)
+
+    def _minimum_changed(self, value: float) -> None:
+        if value > self.maximum.value():
+            self.maximum.setValue(value)
+        self.changed.emit()
+
+    def _maximum_changed(self, value: float) -> None:
+        if value < self.minimum.value():
+            self.minimum.setValue(value)
+        self.changed.emit()
+
+    def pause_values(self) -> tuple[int, bool, int, int]:
+        return (
+            self.fixed.milliseconds(),
+            self.random_check.isChecked(),
+            self.minimum.milliseconds(),
+            self.maximum.milliseconds(),
+        )
+
+    def set_pause_values(
+        self,
+        fixed_ms: int,
+        random_enabled: bool,
+        minimum_ms: int,
+        maximum_ms: int,
+    ) -> None:
+        self.fixed.set_milliseconds(fixed_ms)
+        self.minimum.set_milliseconds(minimum_ms)
+        self.maximum.set_milliseconds(maximum_ms)
+        self.random_check.setChecked(bool(random_enabled))
 
 
 def make_spin(minimum: int, maximum: int, value: int, step: int = 1) -> QSpinBox:

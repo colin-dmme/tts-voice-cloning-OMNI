@@ -74,6 +74,9 @@ class SettingsStateTest(unittest.TestCase):
             {
                 "punctuation_pause_enabled": False,
                 "sentence_pause_ms": 333,
+                "sentence_pause_random_enabled": True,
+                "sentence_pause_min_ms": 250,
+                "sentence_pause_max_ms": 390,
                 "comma_pause_ms": 88,
                 "clause_pause_ms": 177,
                 "ellipsis_pause_ms": 444,
@@ -83,6 +86,9 @@ class SettingsStateTest(unittest.TestCase):
         request = settings.to_request("xin chào")
         self.assertFalse(request.punctuation_pause_enabled)
         self.assertEqual(request.sentence_pause_ms, 333)
+        self.assertTrue(request.sentence_pause_random_enabled)
+        self.assertEqual(request.sentence_pause_min_ms, 250)
+        self.assertEqual(request.sentence_pause_max_ms, 390)
         self.assertEqual(request.comma_pause_ms, 88)
         self.assertEqual(request.clause_pause_ms, 177)
         self.assertEqual(request.ellipsis_pause_ms, 444)

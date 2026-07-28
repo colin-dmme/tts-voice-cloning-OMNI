@@ -30,6 +30,7 @@ from omni_tts_core.setup_tasks import SetupService
 from omni_tts_core.subtitles.srt_builder import write_srt
 from omni_tts_core.text.splitter import split_text
 from omni_tts_core.text.punctuation_pauses import (
+    PauseRange,
     PunctuationPauseConfig,
     pause_after_text,
 )
@@ -395,9 +396,21 @@ class TtsService:
                 "max_chunk_chars": request.max_chunk_chars,
                 "punctuation_pause_enabled": request.punctuation_pause_enabled,
                 "sentence_pause_ms": request.sentence_pause_ms,
+                "sentence_pause_random_enabled": request.sentence_pause_random_enabled,
+                "sentence_pause_min_ms": request.sentence_pause_min_ms,
+                "sentence_pause_max_ms": request.sentence_pause_max_ms,
                 "comma_pause_ms": request.comma_pause_ms,
+                "comma_pause_random_enabled": request.comma_pause_random_enabled,
+                "comma_pause_min_ms": request.comma_pause_min_ms,
+                "comma_pause_max_ms": request.comma_pause_max_ms,
                 "clause_pause_ms": request.clause_pause_ms,
+                "clause_pause_random_enabled": request.clause_pause_random_enabled,
+                "clause_pause_min_ms": request.clause_pause_min_ms,
+                "clause_pause_max_ms": request.clause_pause_max_ms,
                 "ellipsis_pause_ms": request.ellipsis_pause_ms,
+                "ellipsis_pause_random_enabled": request.ellipsis_pause_random_enabled,
+                "ellipsis_pause_min_ms": request.ellipsis_pause_min_ms,
+                "ellipsis_pause_max_ms": request.ellipsis_pause_max_ms,
                 "chunk_pause_ms": request.chunk_pause_ms,
                 "paragraph_pause_ms": _paragraph_pause_ms(request),
                 "unit_count": len(units),
@@ -465,9 +478,21 @@ class TtsService:
                     and _supports_punctuation_pauses(spec)
                 ),
                 sentence_pause_ms=request.sentence_pause_ms,
+                sentence_pause_random_enabled=request.sentence_pause_random_enabled,
+                sentence_pause_min_ms=request.sentence_pause_min_ms,
+                sentence_pause_max_ms=request.sentence_pause_max_ms,
                 comma_pause_ms=request.comma_pause_ms,
+                comma_pause_random_enabled=request.comma_pause_random_enabled,
+                comma_pause_min_ms=request.comma_pause_min_ms,
+                comma_pause_max_ms=request.comma_pause_max_ms,
                 clause_pause_ms=request.clause_pause_ms,
+                clause_pause_random_enabled=request.clause_pause_random_enabled,
+                clause_pause_min_ms=request.clause_pause_min_ms,
+                clause_pause_max_ms=request.clause_pause_max_ms,
                 ellipsis_pause_ms=request.ellipsis_pause_ms,
+                ellipsis_pause_random_enabled=request.ellipsis_pause_random_enabled,
+                ellipsis_pause_min_ms=request.ellipsis_pause_min_ms,
+                ellipsis_pause_max_ms=request.ellipsis_pause_max_ms,
                 cancel_event=cancel_event,
                 cached_prompt_path=cached_path,
                 status_callback=lambda message: emit_progress(
@@ -812,9 +837,21 @@ class TtsService:
                             and _supports_punctuation_pauses(spec)
                         ),
                         sentence_pause_ms=request.sentence_pause_ms,
+                        sentence_pause_random_enabled=request.sentence_pause_random_enabled,
+                        sentence_pause_min_ms=request.sentence_pause_min_ms,
+                        sentence_pause_max_ms=request.sentence_pause_max_ms,
                         comma_pause_ms=request.comma_pause_ms,
+                        comma_pause_random_enabled=request.comma_pause_random_enabled,
+                        comma_pause_min_ms=request.comma_pause_min_ms,
+                        comma_pause_max_ms=request.comma_pause_max_ms,
                         clause_pause_ms=request.clause_pause_ms,
+                        clause_pause_random_enabled=request.clause_pause_random_enabled,
+                        clause_pause_min_ms=request.clause_pause_min_ms,
+                        clause_pause_max_ms=request.clause_pause_max_ms,
                         ellipsis_pause_ms=request.ellipsis_pause_ms,
+                        ellipsis_pause_random_enabled=request.ellipsis_pause_random_enabled,
+                        ellipsis_pause_min_ms=request.ellipsis_pause_min_ms,
+                        ellipsis_pause_max_ms=request.ellipsis_pause_max_ms,
                         cancel_event=cancel_event,
                         cached_prompt_path=cached_path,
                         status_callback=lambda message: emit_progress(
@@ -1138,6 +1175,21 @@ def _punctuation_pause_config(
         comma_ms=request.comma_pause_ms,
         clause_ms=request.clause_pause_ms,
         ellipsis_ms=request.ellipsis_pause_ms,
+        sentence_range=_pause_range_for_request(request, "sentence"),
+        comma_range=_pause_range_for_request(request, "comma"),
+        clause_range=_pause_range_for_request(request, "clause"),
+        ellipsis_range=_pause_range_for_request(request, "ellipsis"),
+    )
+
+
+def _pause_range_for_request(
+    request: GenerateSpeechRequest, prefix: str
+) -> PauseRange | None:
+    if not getattr(request, f"{prefix}_pause_random_enabled"):
+        return None
+    return PauseRange(
+        getattr(request, f"{prefix}_pause_min_ms"),
+        getattr(request, f"{prefix}_pause_max_ms"),
     )
 
 

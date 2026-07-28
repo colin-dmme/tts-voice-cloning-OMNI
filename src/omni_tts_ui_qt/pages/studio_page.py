@@ -689,10 +689,37 @@ class StudioPage(QWidget):
     def _queue_context_menu(self, position) -> None:
         index = self.queue_table.indexAt(position)
         item = self.queue_model.item_at(index.row()) if index.isValid() else None
+        if item is None:
+            return
+        if not self.queue_table.selectionModel().isRowSelected(
+            index.row(), index.parent()
+        ):
+            self.queue_table.selectRow(index.row())
         menu = QMenu(self)
-        if item and item.status == FileQueueStatus.DONE:
+        menu.addAction(
+            "Mở file nguồn để sửa",
+            lambda: self._open_queue_path(
+                lambda: self.ctrl.open_source_file(item.source_path),
+                "Đã mở file nguồn",
+            ),
+        )
+        menu.addAction(
+            "Mở thư mục file nguồn",
+            lambda: self._open_queue_path(
+                lambda: self.ctrl.open_source_folder(item.source_path),
+                "Đã mở thư mục file nguồn",
+            ),
+        )
+        menu.addSeparator()
+        if item.status == FileQueueStatus.DONE:
             menu.addAction("▶ Phát audio", lambda: self._preview_queue_audio(item))
-            menu.addAction("Mở thư mục kết quả", lambda: self._open_result(item))
+            menu.addAction(
+                "Mở thư mục kết quả",
+                lambda: self._open_queue_path(
+                    lambda: self.ctrl.open_result_folder(item.output_manifest),
+                    "Đã mở thư mục kết quả",
+                ),
+            )
             menu.addAction(
                 "Copy đường dẫn audio",
                 lambda: self._copy_manifest_path(item.output_manifest, "audio"),
@@ -723,10 +750,13 @@ class StudioPage(QWidget):
     def _preview_queue_audio(self, item) -> None:
         self._play_audio(lambda: self.ctrl.play_queue_audio(item.output_manifest))
 
-    def _open_result(self, item) -> None:
-        paths = item.output_manifest.paths_for("all")
-        if paths:
-            open_path(paths[0])
+    def _open_queue_path(self, action, success_message: str) -> None:
+        try:
+            path = action()
+        except Exception as error:
+            QMessageBox.warning(self, "Không mở được đường dẫn", str(error))
+            return
+        self.context.log(f"{success_message}: {path}")
 
     def _copy_selected_queue_path(self, kind: str) -> None:
         item = self._selected_queue_item()

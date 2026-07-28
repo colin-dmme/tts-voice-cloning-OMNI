@@ -254,9 +254,21 @@ class GenerateSpeechRequest(BaseModel):
     gpu_maximum_encoder_utilization_percent: int | None = Field(default=None, ge=0, le=100)
     punctuation_pause_enabled: bool = True
     sentence_pause_ms: int = Field(default=320, ge=0, le=3000)
+    sentence_pause_random_enabled: bool = False
+    sentence_pause_min_ms: int = Field(default=260, ge=0, le=3000)
+    sentence_pause_max_ms: int = Field(default=380, ge=0, le=3000)
     comma_pause_ms: int = Field(default=90, ge=0, le=3000)
+    comma_pause_random_enabled: bool = False
+    comma_pause_min_ms: int = Field(default=70, ge=0, le=3000)
+    comma_pause_max_ms: int = Field(default=120, ge=0, le=3000)
     clause_pause_ms: int = Field(default=180, ge=0, le=3000)
+    clause_pause_random_enabled: bool = False
+    clause_pause_min_ms: int = Field(default=140, ge=0, le=3000)
+    clause_pause_max_ms: int = Field(default=220, ge=0, le=3000)
     ellipsis_pause_ms: int = Field(default=450, ge=0, le=3000)
+    ellipsis_pause_random_enabled: bool = False
+    ellipsis_pause_min_ms: int = Field(default=380, ge=0, le=3000)
+    ellipsis_pause_max_ms: int = Field(default=550, ge=0, le=3000)
     chunk_pause_ms: int = Field(default=120, ge=0, le=3000)
     paragraph_pause_ms: int = Field(default=600, ge=0, le=10000)
     srt_file_padding_ms: int = Field(default=0, ge=0, le=10000)
@@ -299,6 +311,18 @@ class GenerateSpeechRequest(BaseModel):
     @model_validator(mode="after")
     def sync_legacy_pause_field(self):
         self.srt_file_padding_ms = self.paragraph_pause_ms
+        return self
+
+    @model_validator(mode="after")
+    def validate_random_pause_ranges(self):
+        for prefix in ("sentence", "comma", "clause", "ellipsis"):
+            minimum = getattr(self, f"{prefix}_pause_min_ms")
+            maximum = getattr(self, f"{prefix}_pause_max_ms")
+            if minimum > maximum:
+                raise ValueError(
+                    f"{prefix}_pause_min_ms phải nhỏ hơn hoặc bằng "
+                    f"{prefix}_pause_max_ms"
+                )
         return self
 
     @model_validator(mode="after")

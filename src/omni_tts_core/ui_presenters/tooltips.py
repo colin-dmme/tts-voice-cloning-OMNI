@@ -58,12 +58,15 @@ TOOLTIPS: dict[str, str] = {
     ),
     "punctuation_section": (
         "Chỉ hiện khi provider có implementation đã kiểm thử. Piper ONNX hỗ trợ bằng "
-        "cách sinh từng vế rồi chèn đúng số mili-giây; tắt ACTIVE để giữ nguyên nhịp "
-        "mặc định của model."
+        "cách sinh từng vế rồi chèn khoảng lặng đã chọn. Mỗi loại dấu có thể dùng "
+        "một giá trị cố định hoặc lấy ngẫu nhiên riêng trong khoảng Min–Max; tắt "
+        "ACTIVE để giữ nguyên nhịp mặc định của model."
     ),
     "punctuation_reset": (
-        "Đặt lại ngắt nghỉ Piper: cuối câu 320 ms, dấu phẩy 90 ms, "
-        "chấm phẩy/hai chấm 180 ms, dấu ba chấm 450 ms và bật ACTIVE."
+        "Đặt lại toàn bộ khoảng nghỉ tiêu chuẩn: cuối câu 0.32 giây, dấu phẩy "
+        "0.09 giây, chấm phẩy/hai chấm 0.18 giây, dấu ba chấm 0.45 giây, "
+        "chunk kỹ thuật 0.12 giây, đoạn gốc 0.60 giây, tắt các khoảng ngẫu nhiên "
+        "và bật ACTIVE."
     ),
     "chunk_pause": (
         "Khoảng lặng kỹ thuật khi app buộc phải chia một câu quá dài thành nhiều chunk.\n"

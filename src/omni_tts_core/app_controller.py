@@ -17,6 +17,7 @@ from pathlib import Path
 from threading import Event, Lock
 from typing import Callable, Protocol
 
+from omni_tts_core.desktop_paths import DesktopPathService
 from omni_tts_core.file_queue import FileQueueOutputManifest, FileQueueStatus
 from omni_tts_core.higgs.endpoint_capabilities import (
     endpoint_capabilities,
@@ -30,6 +31,10 @@ from omni_tts_core.higgs.script import (
 from omni_tts_core.gpu_safety import gpu_temperature_guidance
 from omni_tts_core.generation_concurrency import GenerationCoordinator
 from omni_tts_core.media_player import MediaPlayerService
+from omni_tts_core.pause_presets import (
+    PunctuationPausePreset,
+    PunctuationPausePresetStore,
+)
 from omni_tts_core.progress import ProgressCallback, ProgressEvent, check_cancel
 from omni_tts_core.remote.higgs_sglang import EndpointCheckResult, HiggsSglangClient
 from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES, runtime_target_label
@@ -106,11 +111,15 @@ class AppController:
         safety_gate: SafetyGateProtocol | None = None,
         media_player: MediaPlayerService | None = None,
         generation_coordinator: GenerationCoordinator | None = None,
+        desktop_paths: DesktopPathService | None = None,
+        pause_presets: PunctuationPausePresetStore | None = None,
     ) -> None:
         self.service = service or TtsService()
         self.license_provider = license_provider or _default_license_provider()
         self.safety_gate = safety_gate
         self.media_player = media_player or MediaPlayerService()
+        self.desktop_paths = desktop_paths or DesktopPathService()
+        self.pause_presets = pause_presets or PunctuationPausePresetStore()
         self.generation_coordinator = generation_coordinator or GenerationCoordinator(
             self.service
         )
@@ -441,6 +450,29 @@ class AppController:
     def play_queue_audio(self, manifest: FileQueueOutputManifest) -> Path:
         """Open queue audio through the OS default player."""
         return self.media_player.play_manifest(manifest)
+
+    def open_source_file(self, source_path: Path) -> Path:
+        """Open a queued source with the operating system's default editor."""
+        return self.desktop_paths.open_source_file(source_path)
+
+    def open_source_folder(self, source_path: Path) -> Path:
+        """Reveal a queued source in its containing folder."""
+        return self.desktop_paths.open_source_folder(source_path)
+
+    def open_result_folder(self, manifest: FileQueueOutputManifest) -> Path:
+        """Reveal the preferred generated result instead of playing it."""
+        return self.desktop_paths.open_result_folder(manifest)
+
+    def punctuation_pause_presets(self) -> list[PunctuationPausePreset]:
+        return self.pause_presets.list_presets()
+
+    def save_punctuation_pause_preset(
+        self, name: str, values: dict[str, object]
+    ) -> PunctuationPausePreset:
+        return self.pause_presets.save(name, values)
+
+    def delete_punctuation_pause_preset(self, name: str) -> bool:
+        return self.pause_presets.delete(name)
 
     def install_gpu_for_model(self, model_id: str) -> str:
         return self.service.install_gpu_acceleration(model_id)

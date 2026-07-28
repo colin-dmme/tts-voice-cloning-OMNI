@@ -11,6 +11,18 @@ BOUND_FIELDS = (
     "speed",
     "pitch_shift",
     "sentence_pause_ms",
+    "sentence_pause_min_ms",
+    "sentence_pause_max_ms",
+    "comma_pause_ms",
+    "comma_pause_min_ms",
+    "comma_pause_max_ms",
+    "clause_pause_ms",
+    "clause_pause_min_ms",
+    "clause_pause_max_ms",
+    "ellipsis_pause_ms",
+    "ellipsis_pause_min_ms",
+    "ellipsis_pause_max_ms",
+    "chunk_pause_ms",
     "paragraph_pause_ms",
     "max_chunk_chars",
     "temperature",
@@ -72,7 +84,12 @@ class BoundsTest(unittest.TestCase):
             for raw in (limit.widget_minimum, limit.maximum):
                 value = limit.to_request_value(raw)
                 with self.subTest(field=field, value=value):
-                    GenerateSpeechRequest(text="xin chào", **{field: value})
+                    payload = {field: value}
+                    if field.endswith("_pause_min_ms"):
+                        payload[field.replace("_min_ms", "_max_ms")] = value
+                    elif field.endswith("_pause_max_ms"):
+                        payload[field.replace("_max_ms", "_min_ms")] = value
+                    GenerateSpeechRequest(text="xin chào", **payload)
 
 
 class SentinelTest(unittest.TestCase):

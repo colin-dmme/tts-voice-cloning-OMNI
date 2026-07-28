@@ -62,9 +62,21 @@ DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "gpu_maximum_encoder_utilization_percent": 5,
     "punctuation_pause_enabled": True,
     "sentence_pause_ms": 320,
+    "sentence_pause_random_enabled": False,
+    "sentence_pause_min_ms": 260,
+    "sentence_pause_max_ms": 380,
     "comma_pause_ms": 90,
+    "comma_pause_random_enabled": False,
+    "comma_pause_min_ms": 70,
+    "comma_pause_max_ms": 120,
     "clause_pause_ms": 180,
+    "clause_pause_random_enabled": False,
+    "clause_pause_min_ms": 140,
+    "clause_pause_max_ms": 220,
     "ellipsis_pause_ms": 450,
+    "ellipsis_pause_random_enabled": False,
+    "ellipsis_pause_min_ms": 380,
+    "ellipsis_pause_max_ms": 550,
     "chunk_pause_ms": 120,
     "paragraph_pause_ms": 600,
     "srt_file_padding_ms": 0,
@@ -149,9 +161,21 @@ class GenerationSettings:
     gpu_maximum_encoder_utilization_percent: int | None = None
     punctuation_pause_enabled: bool = True
     sentence_pause_ms: int = 320
+    sentence_pause_random_enabled: bool = False
+    sentence_pause_min_ms: int = 260
+    sentence_pause_max_ms: int = 380
     comma_pause_ms: int = 90
+    comma_pause_random_enabled: bool = False
+    comma_pause_min_ms: int = 70
+    comma_pause_max_ms: int = 120
     clause_pause_ms: int = 180
+    clause_pause_random_enabled: bool = False
+    clause_pause_min_ms: int = 140
+    clause_pause_max_ms: int = 220
     ellipsis_pause_ms: int = 450
+    ellipsis_pause_random_enabled: bool = False
+    ellipsis_pause_min_ms: int = 380
+    ellipsis_pause_max_ms: int = 550
     chunk_pause_ms: int = 120
     paragraph_pause_ms: int = 600
     srt_file_padding_ms: int = 0
@@ -234,9 +258,21 @@ class GenerationSettings:
             gpu_maximum_encoder_utilization_percent=self.gpu_maximum_encoder_utilization_percent,
             punctuation_pause_enabled=self.punctuation_pause_enabled,
             sentence_pause_ms=self.sentence_pause_ms,
+            sentence_pause_random_enabled=self.sentence_pause_random_enabled,
+            sentence_pause_min_ms=self.sentence_pause_min_ms,
+            sentence_pause_max_ms=self.sentence_pause_max_ms,
             comma_pause_ms=self.comma_pause_ms,
+            comma_pause_random_enabled=self.comma_pause_random_enabled,
+            comma_pause_min_ms=self.comma_pause_min_ms,
+            comma_pause_max_ms=self.comma_pause_max_ms,
             clause_pause_ms=self.clause_pause_ms,
+            clause_pause_random_enabled=self.clause_pause_random_enabled,
+            clause_pause_min_ms=self.clause_pause_min_ms,
+            clause_pause_max_ms=self.clause_pause_max_ms,
             ellipsis_pause_ms=self.ellipsis_pause_ms,
+            ellipsis_pause_random_enabled=self.ellipsis_pause_random_enabled,
+            ellipsis_pause_min_ms=self.ellipsis_pause_min_ms,
+            ellipsis_pause_max_ms=self.ellipsis_pause_max_ms,
             chunk_pause_ms=self.chunk_pause_ms,
             paragraph_pause_ms=self.paragraph_pause_ms,
             # Kept in sync with paragraph_pause_ms for parity with the legacy UI;

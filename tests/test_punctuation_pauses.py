@@ -8,6 +8,7 @@ import wave
 
 from omni_tts_core.service import _chunk_pause_values
 from omni_tts_core.text.punctuation_pauses import (
+    PauseRange,
     PunctuationPauseConfig,
     pause_after_text,
     split_with_punctuation_pauses,
@@ -63,8 +64,39 @@ class PunctuationSplitTest(unittest.TestCase):
         self.assertEqual(pause_after_text('“Được rồi!”', self.config), 320)
         self.assertEqual(pause_after_text("một ý chưa hết", self.config), None)
 
+    def test_enabled_ranges_sample_each_punctuation_type(self) -> None:
+        class _MaximumRng:
+            @staticmethod
+            def randint(_minimum: int, maximum: int) -> int:
+                return maximum
+
+        config = PunctuationPauseConfig(
+            sentence_ms=320,
+            comma_ms=90,
+            sentence_range=PauseRange(280, 390),
+            comma_range=PauseRange(70, 130),
+        )
+        result = split_with_punctuation_pauses(
+            "Một, hai! Xong", config, _MaximumRng()
+        )
+        self.assertEqual(
+            [(item.text, item.pause_after_ms) for item in result],
+            [("Một,", 130), ("hai!", 390), ("Xong", 0)],
+        )
+
+    def test_disabled_ranges_keep_legacy_fixed_values(self) -> None:
+        self.assertEqual(pause_after_text("Xin chào,", self.config), 90)
+
 
 class CoreChunkPauseTest(unittest.TestCase):
+    def test_request_rejects_an_inverted_random_range(self) -> None:
+        with self.assertRaisesRegex(ValueError, "sentence_pause_min_ms"):
+            GenerateSpeechRequest(
+                text="x",
+                sentence_pause_min_ms=500,
+                sentence_pause_max_ms=200,
+            )
+
     def test_piper_uses_terminal_punctuation_at_chunk_boundaries(self) -> None:
         request = GenerateSpeechRequest(
             text="x",
@@ -106,6 +138,18 @@ class CoreChunkPauseTest(unittest.TestCase):
             _chunk_pause_values(request, _Spec("piper"), ["Một.", "Hai."]),
             [77],
         )
+
+    def test_chunk_boundary_random_pause_stays_inside_configured_range(self) -> None:
+        request = GenerateSpeechRequest(
+            text="x",
+            model_id="piper",
+            sentence_pause_random_enabled=True,
+            sentence_pause_min_ms=275,
+            sentence_pause_max_ms=325,
+        )
+        pauses = _chunk_pause_values(request, _Spec("piper"), ["Một.", "Hai."])
+        self.assertGreaterEqual(pauses[0], 275)
+        self.assertLessEqual(pauses[0], 325)
 
 
 class _AudioChunk:

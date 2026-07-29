@@ -3,6 +3,40 @@
 Tất cả thay đổi đáng chú ý của Colin TTS Studio được ghi theo từng phiên bản
 trong file này. Dự án sử dụng phiên bản theo Semantic Versioning.
 
+## [0.3.1] - 2026-07-29
+
+### Added
+
+- Thêm `AuthoringControlScope` trung lập provider với quyền bật/tắt riêng cho
+  Emotion, Style, Pace, Pitch, Expressiveness, Pause và vocal SFX.
+- Thêm allow-list tới từng giá trị: có thể cho dùng Emotion nhưng cấm riêng
+  `elation`, hoặc chỉ cho phép nhịp/biểu cảm mà không dùng Emotion/Style/SFX.
+- Thêm các preset phạm vi do core cung cấp: Cân bằng, Chỉ nhịp & biểu cảm,
+  Không dùng cảm xúc và Chỉ khoảng nghỉ.
+- Thêm dialog phạm vi động lấy toàn bộ nhóm, giá trị, nhãn và tooltip từ
+  dialect metadata; GUI không chứa danh sách Higgs hoặc nhánh provider.
+- Thêm source lineage nối candidate đã render về nguồn, session và candidate
+  gốc; mở lại AI Director sau khi áp dụng sẽ tự dùng bản gốc và đúng lịch sử.
+- Thêm fallback phục hồi lời từ markup khi kết quả không còn khớp lineage
+  chính xác, kèm cảnh báo để người dùng kiểm tra.
+
+### Changed
+
+- Prompt AI chỉ công bố các feature/value đang được phép và đánh dấu rõ nhóm
+  bị tắt.
+- Core lọc lại mọi quyết định sau phản hồi AI; giá trị ngoài phạm vi bị loại và
+  được ghi vào warnings, nên không phụ thuộc AI tự tuân thủ prompt.
+- Preset, setting gần nhất và snapshot lịch sử giờ lưu cả control scope.
+- Nâng phiên bản package và ứng dụng từ `0.3.0` lên `0.3.1`.
+
+### Compatibility
+
+- Brief/preset `0.3.0` chưa có control scope được tự nâng lên phạm vi mặc định;
+  tùy chọn SFX cũ vẫn được chuyển đúng.
+- Provider không hỗ trợ authoring và pipeline tạo giọng cũ không thay đổi.
+- Runtime key, state, lineage và lịch sử tiếp tục nằm trong file cục bộ đã
+  ignore khỏi Git.
+
 ## [0.3.0] - 2026-07-29
 
 ### Added

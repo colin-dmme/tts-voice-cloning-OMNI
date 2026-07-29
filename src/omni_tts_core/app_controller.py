@@ -21,8 +21,10 @@ from omni_tts_core.authoring.capabilities import AuthoringPolicy
 from omni_tts_core.authoring.schemas import (
     AiProviderSettings,
     AuthoringBrief,
+    AuthoringControlScope,
     AuthoringPreset,
     AuthoringSession,
+    AuthoringSourceResolution,
     VoiceContext,
     VoicePresentation,
 )
@@ -212,6 +214,26 @@ class AppController:
     def authoring_brief_choices(self):
         return self.authoring.brief_choices()
 
+    def authoring_feature_descriptors(self, dialect_id: str):
+        return self.authoring.feature_descriptors(dialect_id)
+
+    def authoring_scope_presets(self, dialect_id: str):
+        return self.authoring.scope_presets(dialect_id)
+
+    def normalize_authoring_brief(
+        self,
+        brief: AuthoringBrief,
+        dialect_id: str,
+    ) -> AuthoringBrief:
+        return self.authoring.normalize_brief(brief, dialect_id)
+
+    def authoring_scope_summary(
+        self,
+        scope: AuthoringControlScope,
+        dialect_id: str,
+    ) -> str:
+        return self.authoring.scope_summary(scope, dialect_id)
+
     def authoring_ai_provider_choices(self) -> list[tuple[str, str]]:
         return self.authoring.ai_provider_choices()
 
@@ -294,6 +316,13 @@ class AppController:
             dialect_id=dialect_id,
             limit=limit,
         )
+
+    def resolve_authoring_source(
+        self,
+        current_text: str,
+        dialect_id: str,
+    ) -> AuthoringSourceResolution:
+        return self.authoring.resolve_source(current_text, dialect_id)
 
     def save_authoring_preset(
         self,

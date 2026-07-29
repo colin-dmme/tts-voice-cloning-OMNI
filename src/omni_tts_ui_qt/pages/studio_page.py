@@ -614,11 +614,18 @@ class StudioPage(QWidget):
             )
             self.context.show_page("ai_api")
             return
+        resolution = self.ctrl.resolve_authoring_source(
+            text,
+            policy.dialect_id,
+        )
+        if resolution.note:
+            self.context.log(f"[AI] {resolution.note}")
         dialog = AuthoringDirectorDialog(
             self.context,
-            source_text=text,
+            source_text=resolution.source_text,
             settings=settings,
             dialect_id=policy.dialect_id,
+            source_note=resolution.note,
             parent=self,
         )
         if (

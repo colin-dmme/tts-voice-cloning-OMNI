@@ -2,12 +2,37 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from omni_tts_core.authoring.schemas import AuthoringControlScope
+
 
 @dataclass(frozen=True)
 class AuthoringChoice:
     value: str
     label: str
     tooltip: str
+
+
+@dataclass(frozen=True)
+class AuthoringFeatureValue:
+    value: str
+    label: str
+    tooltip: str
+
+
+@dataclass(frozen=True)
+class AuthoringFeatureDescriptor:
+    key: str
+    label: str
+    description: str
+    values: tuple[AuthoringFeatureValue, ...]
+
+
+@dataclass(frozen=True)
+class AuthoringScopePreset:
+    preset_id: str
+    label: str
+    tooltip: str
+    scope: AuthoringControlScope
 
 
 CONTENT_TYPES = (

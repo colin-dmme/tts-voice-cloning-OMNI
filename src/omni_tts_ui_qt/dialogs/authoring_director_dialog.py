@@ -25,11 +25,15 @@ from PySide6.QtWidgets import (
 from omni_tts_core.authoring.schemas import (
     AuthoringBrief,
     AuthoringCandidate,
+    AuthoringControlScope,
     VoiceContext,
 )
 from omni_tts_core.ui_presenters.settings_state import GenerationSettings
 from omni_tts_ui_qt.background import AuthoringWorker
 from omni_tts_ui_qt.context import AppContext
+from omni_tts_ui_qt.dialogs.authoring_control_scope_dialog import (
+    AuthoringControlScopeDialog,
+)
 
 
 class AuthoringDirectorDialog(QDialog):
@@ -42,6 +46,7 @@ class AuthoringDirectorDialog(QDialog):
         source_text: str,
         settings: GenerationSettings,
         dialect_id: str,
+        source_note: str = "",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -50,6 +55,8 @@ class AuthoringDirectorDialog(QDialog):
         self.source_text = source_text
         self.settings = settings
         self.dialect_id = dialect_id
+        self.source_note = source_note
+        self._control_scope = AuthoringControlScope()
         self.selected_text = ""
         self._worker: AuthoringWorker | None = None
         self._closing_after_cancel = False
@@ -68,6 +75,15 @@ class AuthoringDirectorDialog(QDialog):
         lead.setWordWrap(True)
         lead.setObjectName("hint")
         outer.addWidget(lead)
+        if self.source_note:
+            source_note = QLabel(self.source_note)
+            source_note.setWordWrap(True)
+            source_note.setObjectName("hint")
+            source_note.setToolTip(
+                "AI luôn phân tích bản lời gốc, không phân tích lại các tag "
+                "đã chèn từ phương án trước."
+            )
+            outer.addWidget(source_note)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._build_brief_panel())
@@ -155,6 +171,24 @@ class AuthoringDirectorDialog(QDialog):
         voice_form.addRow("Mô tả bổ sung:", self.voice_description)
         layout.addWidget(voice_group)
 
+        scope_group = QGroupBox("Phạm vi AI được phép dùng")
+        scope_layout = QVBoxLayout(scope_group)
+        self.scope_summary = QLabel("")
+        self.scope_summary.setWordWrap(True)
+        self.scope_summary.setObjectName("hint")
+        self.scope_summary.setToolTip(
+            "Con số cho biết bao nhiêu giá trị đang được phép trong từng nhóm. "
+            "Core sẽ loại giá trị ngoài phạm vi dù AI vẫn trả về."
+        )
+        self.edit_scope_button = QPushButton("Chọn nhóm và giá trị…")
+        self.edit_scope_button.setToolTip(
+            "Bật/tắt từng nhóm hoặc cấm riêng từng giá trị trong nhóm."
+        )
+        self.edit_scope_button.clicked.connect(self._edit_control_scope)
+        scope_layout.addWidget(self.scope_summary)
+        scope_layout.addWidget(self.edit_scope_button)
+        layout.addWidget(scope_group)
+
         rules_group = QGroupBox("Quy tắc và thử nghiệm")
         rules = QVBoxLayout(rules_group)
         self.preserve_wording = QCheckBox(
@@ -172,7 +206,6 @@ class AuthoringDirectorDialog(QDialog):
         self.allow_punctuation.setToolTip(
             "Kiến trúc đã lưu tùy chọn này; phiên bản hiện tại vẫn ưu tiên nguyên văn."
         )
-        self.allow_sfx = QCheckBox("Cho phép SFX giọng nói khi có cue nguyên văn")
         count_row = QHBoxLayout()
         self.candidate_count = QSpinBox()
         self.candidate_count.setRange(1, 4)
@@ -187,7 +220,6 @@ class AuthoringDirectorDialog(QDialog):
         )
         rules.addWidget(self.preserve_wording)
         rules.addWidget(self.allow_punctuation)
-        rules.addWidget(self.allow_sfx)
         rules.addLayout(count_row)
         rules.addWidget(QLabel("Chỉ dẫn bổ sung:"))
         rules.addWidget(self.extra_direction)
@@ -284,12 +316,13 @@ class AuthoringDirectorDialog(QDialog):
             tag_density=str(self.tag_density.currentData()),
             preserve_wording=self.preserve_wording.isChecked(),
             allow_punctuation_changes=self.allow_punctuation.isChecked(),
-            allow_vocal_sfx=self.allow_sfx.isChecked(),
+            control_scope=self._control_scope,
             candidate_count=self.candidate_count.value(),
             extra_direction=self.extra_direction.toPlainText(),
         )
 
     def _set_brief(self, brief: AuthoringBrief) -> None:
+        brief = self.ctrl.normalize_authoring_brief(brief, self.dialect_id)
         self._set_combo(self.content_type, brief.content_type)
         self._set_combo(self.platform, brief.platform)
         self._set_combo(self.segment_role, brief.segment_role)
@@ -298,9 +331,29 @@ class AuthoringDirectorDialog(QDialog):
         self.audience.setText(brief.target_audience)
         self.preserve_wording.setChecked(True)
         self.allow_punctuation.setChecked(False)
-        self.allow_sfx.setChecked(brief.allow_vocal_sfx)
+        self._control_scope = brief.control_scope.model_copy(deep=True)
+        self._update_scope_summary()
         self.candidate_count.setValue(brief.candidate_count)
         self.extra_direction.setPlainText(brief.extra_direction)
+
+    def _edit_control_scope(self) -> None:
+        dialog = AuthoringControlScopeDialog(
+            descriptors=self.ctrl.authoring_feature_descriptors(self.dialect_id),
+            presets=self.ctrl.authoring_scope_presets(self.dialect_id),
+            current_scope=self._control_scope,
+            parent=self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._control_scope = dialog.selected_scope
+            self._update_scope_summary()
+
+    def _update_scope_summary(self) -> None:
+        self.scope_summary.setText(
+            self.ctrl.authoring_scope_summary(
+                self._control_scope,
+                self.dialect_id,
+            )
+        )
 
     @staticmethod
     def _set_combo(combo: QComboBox, value: str) -> None:

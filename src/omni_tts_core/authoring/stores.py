@@ -11,6 +11,7 @@ from omni_tts_core.authoring.schemas import (
     AuthoringBrief,
     AuthoringPreset,
     AuthoringSession,
+    AuthoringSourceLineage,
     VoiceContext,
 )
 from omni_tts_core.paths import project_path
@@ -147,21 +148,61 @@ class AuthoringStateStore:
             contexts[voice_key] = context.model_dump(mode="json")
             self._write_unlocked(payload)
 
+    def source_lineage(self, rendered_hash: str) -> AuthoringSourceLineage | None:
+        if not rendered_hash:
+            return None
+        payload = self._read()
+        for item in payload.get("source_lineage", []):
+            if str(item.get("rendered_hash", "")) != rendered_hash:
+                continue
+            try:
+                return AuthoringSourceLineage.model_validate(item)
+            except Exception:
+                return None
+        return None
+
+    def save_source_lineage(
+        self,
+        lineage: AuthoringSourceLineage,
+        *,
+        max_items: int = 200,
+    ) -> None:
+        with self._lock:
+            payload = self._read_unlocked()
+            items = [
+                item
+                for item in payload.get("source_lineage", [])
+                if str(item.get("rendered_hash", "")) != lineage.rendered_hash
+            ]
+            items.insert(0, lineage.model_dump(mode="json"))
+            payload["source_lineage"] = items[: max(1, max_items)]
+            self._write_unlocked(payload)
+
     def _read(self) -> dict[str, Any]:
         with self._lock:
             return self._read_unlocked()
 
     def _read_unlocked(self) -> dict[str, Any]:
         if not self.path.exists():
-            return {"schema_version": 1, "presets": [], "voice_contexts": {}}
+            return {
+                "schema_version": 2,
+                "presets": [],
+                "voice_contexts": {},
+                "source_lineage": [],
+            }
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
             return payload if isinstance(payload, dict) else {}
         except Exception:
-            return {"schema_version": 1, "presets": [], "voice_contexts": {}}
+            return {
+                "schema_version": 2,
+                "presets": [],
+                "voice_contexts": {},
+                "source_lineage": [],
+            }
 
     def _write_unlocked(self, payload: dict[str, Any]) -> None:
-        payload.setdefault("schema_version", 1)
+        payload["schema_version"] = max(2, int(payload.get("schema_version", 1)))
         _write_json(self.path, payload)
 
 

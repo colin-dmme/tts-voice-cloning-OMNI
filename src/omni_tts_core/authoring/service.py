@@ -10,10 +10,6 @@ from threading import Event
 from omni_tts_core.authoring.capabilities import AuthoringPolicy, build_authoring_policy
 from omni_tts_core.authoring.catalog import brief_choices
 from omni_tts_core.authoring.dialects.higgs import (
-    EXPRESSIVENESS_VALUES,
-    PACE_VALUES,
-    PAUSE_VALUES,
-    PITCH_VALUES,
     HiggsDialectAdapter,
     sentence_spans,
 )
@@ -31,8 +27,11 @@ from omni_tts_core.authoring.schemas import (
     AiProviderSettings,
     AuthoringBrief,
     AuthoringCandidate,
+    AuthoringControlScope,
     AuthoringPreset,
     AuthoringSession,
+    AuthoringSourceLineage,
+    AuthoringSourceResolution,
     PerformanceDecision,
     PerformancePlan,
     VoiceContext,
@@ -42,7 +41,6 @@ from omni_tts_core.authoring.stores import (
     AuthoringSessionStore,
     AuthoringStateStore,
 )
-from omni_tts_core.higgs.authoring_catalog import EMOTIONS, SOUND_EFFECTS, STYLES
 from omni_tts_core.provider_registry import ProviderDescriptor
 
 NoticeCallback = Callable[[str], None]
@@ -87,6 +85,48 @@ class AuthoringService:
     @staticmethod
     def ai_provider_choices() -> list[tuple[str, str]]:
         return ai_provider_choices()
+
+    def feature_descriptors(self, dialect_id: str):
+        return self._dialect(dialect_id).feature_descriptors()
+
+    def scope_presets(self, dialect_id: str):
+        return self._dialect(dialect_id).scope_presets()
+
+    def normalize_brief(
+        self,
+        brief: AuthoringBrief,
+        dialect_id: str,
+    ) -> AuthoringBrief:
+        dialect = self._dialect(dialect_id)
+        scope = dialect.normalize_scope(
+            brief.control_scope,
+            allow_vocal_sfx=brief.allow_vocal_sfx,
+        )
+        sfx = scope.selection("vocal_sfx")
+        return brief.model_copy(
+            update={
+                "control_scope": scope,
+                "allow_vocal_sfx": sfx.enabled and bool(sfx.allowed_values),
+            }
+        )
+
+    def scope_summary(
+        self,
+        scope: AuthoringControlScope,
+        dialect_id: str,
+    ) -> str:
+        normalized = self._dialect(dialect_id).normalize_scope(scope)
+        parts: list[str] = []
+        for descriptor in self.feature_descriptors(dialect_id):
+            selection = normalized.selection(descriptor.key)
+            if not selection.enabled:
+                parts.append(f"{descriptor.label}: tắt")
+            else:
+                parts.append(
+                    f"{descriptor.label}: "
+                    f"{len(selection.allowed_values)}/{len(descriptor.values)}"
+                )
+        return " · ".join(parts)
 
     # --- Provider settings and keys ---------------------------------------
 
@@ -218,6 +258,44 @@ class AuthoringService:
             ]
         return sessions[: max(1, limit)]
 
+    def resolve_source(
+        self,
+        current_text: str,
+        dialect_id: str,
+    ) -> AuthoringSourceResolution:
+        clean = current_text.strip()
+        current_hash = _text_hash(clean)
+        lineage = self.state_store.source_lineage(current_hash)
+        if lineage is not None and lineage.dialect_id == dialect_id:
+            return AuthoringSourceResolution(
+                source_text=lineage.source_text,
+                source_hash=lineage.source_hash,
+                mode="lineage",
+                note=(
+                    "Đã nhận diện đây là phương án AI từng áp dụng; "
+                    "AI sẽ dùng lại bản gốc và lịch sử tương ứng."
+                ),
+                session_id=lineage.session_id,
+                candidate_id=lineage.candidate_id,
+            )
+        dialect = self._dialect(dialect_id)
+        if _TAG_RE.search(clean):
+            recovered = dialect.recover_source(clean)
+            if recovered and recovered != clean:
+                return AuthoringSourceResolution(
+                    source_text=recovered,
+                    source_hash=_text_hash(recovered),
+                    mode="recovered_markup",
+                    note=(
+                        "Không thấy lineage chính xác; đã tách markup để phục hồi "
+                        "bản lời gần nhất. Hãy kiểm tra 'Xem bản gốc' trước khi tạo."
+                    ),
+                )
+        return AuthoringSourceResolution(
+            source_text=clean,
+            source_hash=current_hash,
+        )
+
     def save_preset(
         self,
         name: str,
@@ -249,17 +327,16 @@ class AuthoringService:
         clean_source = source_text.strip()
         if not clean_source:
             raise ValueError("Chưa có văn bản để AI phân tích.")
-        dialect = self._dialects.get(dialect_id)
-        if dialect is None:
-            raise ValueError(f"Chưa có authoring dialect adapter: {dialect_id}")
+        dialect = self._dialect(dialect_id)
         if self.active_key_count(self.settings().provider_id) <= 0:
             raise AuthoringProviderError(
                 "Chưa có Gemini API key active. Mở mục AI / API để cấu hình."
             )
 
+        brief = self.normalize_brief(brief, dialect_id)
         self.state_store.save_last_brief(brief)
         session = AuthoringSession(
-            source_hash=hashlib.sha256(clean_source.encode("utf-8")).hexdigest(),
+            source_hash=_text_hash(clean_source),
             source_text=clean_source,
             dialect_id=dialect_id,
             brief=brief,
@@ -284,6 +361,7 @@ class AuthoringService:
                 clean_source,
                 brief,
                 voice_context,
+                dialect.feature_descriptors(),
                 variant_index=index,
             )
             payload, _usage = provider.call_json(
@@ -313,6 +391,17 @@ class AuthoringService:
             )
         session = session.model_copy(update={"candidates": candidates})
         self.session_store.save(session)
+        for candidate in candidates:
+            self.state_store.save_source_lineage(
+                AuthoringSourceLineage(
+                    rendered_hash=_text_hash(candidate.rendered_text),
+                    source_hash=session.source_hash,
+                    source_text=clean_source,
+                    dialect_id=dialect_id,
+                    session_id=session.session_id,
+                    candidate_id=candidate.candidate_id,
+                )
+            )
         return session
 
     def _sanitize_plan(
@@ -338,7 +427,14 @@ class AuthoringService:
                 )
                 continue
             seen.add(decision.sentence_index)
-            cleaned.append(self._sanitize_decision(decision, brief))
+            sanitized = self._sanitize_decision(decision, brief)
+            cleaned.append(sanitized)
+            changed = self._changed_control_fields(decision, sanitized)
+            if changed:
+                warnings.append(
+                    f"Câu {decision.sentence_index + 1}: đã loại điều khiển "
+                    f"ngoài phạm vi ({', '.join(changed)})."
+                )
 
         ratios = {"very_light": 0.20, "light": 0.35, "medium": 0.55}
         max_decisions = max(1, math.ceil(sentence_count * ratios[brief.tag_density]))
@@ -363,26 +459,30 @@ class AuthoringService:
         decision: PerformanceDecision,
         brief: AuthoringBrief,
     ) -> PerformanceDecision:
+        scope = brief.control_scope
+
+        def permitted(feature: str, value: str, neutral: str) -> str:
+            if value == neutral:
+                return neutral
+            selection = scope.selection(feature)
+            if selection.enabled and value in selection.allowed_values:
+                return value
+            return neutral
+
         update = {
-            "emotion": decision.emotion if decision.emotion in EMOTIONS else "",
-            "style": decision.style if decision.style in STYLES else "",
-            "pace": decision.pace if decision.pace in PACE_VALUES else "default",
-            "pitch": decision.pitch if decision.pitch in PITCH_VALUES else "default",
-            "expressiveness": (
-                decision.expressiveness
-                if decision.expressiveness in EXPRESSIVENESS_VALUES
-                else "default"
+            "emotion": permitted("emotion", decision.emotion, ""),
+            "style": permitted("style", decision.style, ""),
+            "pace": permitted("pace", decision.pace, "default"),
+            "pitch": permitted("pitch", decision.pitch, "default"),
+            "expressiveness": permitted(
+                "expressiveness",
+                decision.expressiveness,
+                "default",
             ),
-            "pause_after": (
-                decision.pause_after if decision.pause_after in PAUSE_VALUES else "none"
-            ),
-            "sfx_before": (
-                decision.sfx_before
-                if brief.allow_vocal_sfx and decision.sfx_before in SOUND_EFFECTS
-                else ""
-            ),
-            "sfx_cue": decision.sfx_cue if brief.allow_vocal_sfx else "",
+            "pause_after": permitted("pause", decision.pause_after, "none"),
+            "sfx_before": permitted("vocal_sfx", decision.sfx_before, ""),
         }
+        update["sfx_cue"] = decision.sfx_cue if update["sfx_before"] else ""
         if brief.content_type == "science_explainer" and update["style"] in {
             "singing",
             "shouting",
@@ -406,6 +506,32 @@ class AuthoringService:
         return decision.model_copy(update=update)
 
     @staticmethod
+    def _changed_control_fields(
+        before: PerformanceDecision,
+        after: PerformanceDecision,
+    ) -> list[str]:
+        labels = {
+            "emotion": "cảm xúc",
+            "style": "phong cách",
+            "pace": "tốc độ",
+            "pitch": "cao độ",
+            "expressiveness": "độ biểu cảm",
+            "pause_after": "khoảng nghỉ",
+            "sfx_before": "SFX",
+        }
+        return [
+            label
+            for field, label in labels.items()
+            if getattr(before, field) != getattr(after, field)
+        ]
+
+    def _dialect(self, dialect_id: str):
+        dialect = self._dialects.get(dialect_id)
+        if dialect is None:
+            raise ValueError(f"Chưa có authoring dialect adapter: {dialect_id}")
+        return dialect
+
+    @staticmethod
     def _provider_descriptor(provider_id: str):
         descriptor = ai_provider_descriptor(provider_id)
         if descriptor is None:
@@ -417,3 +543,7 @@ def _same_spoken_text(source: str, rendered: str) -> bool:
     stripped = _TAG_RE.sub("", rendered)
     normalize = lambda value: re.sub(r"\s+", " ", value).strip()
     return normalize(source) == normalize(stripped)
+
+
+def _text_hash(text: str) -> str:
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()

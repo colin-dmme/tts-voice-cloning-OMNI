@@ -11,6 +11,30 @@ TagDensity = Literal["very_light", "light", "medium"]
 VoicePresentation = Literal["auto", "female", "male", "neutral"]
 
 
+class AuthoringFeatureSelection(BaseModel):
+    """Strict allow-list for one provider-neutral performance dimension."""
+
+    enabled: bool = True
+    allowed_values: list[str] = Field(default_factory=list)
+
+    @field_validator("allowed_values")
+    @classmethod
+    def normalize_values(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+
+class AuthoringControlScope(BaseModel):
+    """Dimensions and values an AI director is allowed to use."""
+
+    features: dict[str, AuthoringFeatureSelection] = Field(default_factory=dict)
+
+    def selection(self, feature_key: str) -> AuthoringFeatureSelection:
+        return self.features.get(
+            feature_key,
+            AuthoringFeatureSelection(enabled=False),
+        )
+
+
 class VoiceContext(BaseModel):
     """Resolved voice information supplied to an authoring model."""
 
@@ -53,6 +77,7 @@ class AuthoringBrief(BaseModel):
     preserve_wording: bool = True
     allow_punctuation_changes: bool = False
     allow_vocal_sfx: bool = False
+    control_scope: AuthoringControlScope = Field(default_factory=AuthoringControlScope)
     candidate_count: int = Field(default=2, ge=1, le=4)
     extra_direction: str = ""
 
@@ -132,6 +157,29 @@ class AuthoringSession(BaseModel):
     created_at: str = Field(
         default_factory=lambda: datetime.now().isoformat(timespec="seconds")
     )
+
+
+class AuthoringSourceLineage(BaseModel):
+    """Links a rendered candidate back to the immutable source it came from."""
+
+    rendered_hash: str
+    source_hash: str
+    source_text: str
+    dialect_id: str
+    session_id: str = ""
+    candidate_id: str = ""
+    updated_at: str = Field(
+        default_factory=lambda: datetime.now().isoformat(timespec="seconds")
+    )
+
+
+class AuthoringSourceResolution(BaseModel):
+    source_text: str
+    source_hash: str
+    mode: Literal["current", "lineage", "recovered_markup"] = "current"
+    note: str = ""
+    session_id: str = ""
+    candidate_id: str = ""
 
 
 class AuthoringPreset(BaseModel):

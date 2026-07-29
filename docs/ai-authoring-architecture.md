@@ -23,6 +23,31 @@ Hai registry độc lập:
 
 GUI chỉ đọc `AuthoringPolicy`, thu thập form và gọi `AppController`.
 
+## Control scope và cưỡng chế
+
+`AuthoringControlScope` là contract trung lập provider. Mỗi feature có:
+
+- `enabled`: AI có được dùng nhóm này hay không.
+- `allowed_values`: allow-list chính xác trong nhóm.
+
+Dialect adapter công bố `AuthoringFeatureDescriptor` gồm key trung lập, nhãn,
+tooltip và các giá trị hỗ trợ. Dialog chỉ dựng widget từ metadata đó. Khi thêm
+dialect mới, không thêm danh sách feature/value hay `if provider_id` vào GUI.
+
+Phạm vi được áp dụng hai lớp:
+
+```text
+AuthoringControlScope
+  -> prompt chỉ thấy feature/value được phép
+  -> AI trả PerformancePlan
+  -> core sanitizer loại mọi feature/value ngoài phạm vi
+  -> dialect render
+```
+
+Prompt là hướng dẫn; sanitizer mới là rào chắn quyết định. Scope nằm trong
+`AuthoringBrief`, vì vậy setting gần nhất, preset và mỗi session đều giữ đúng
+cấu hình để generate lại.
+
 ## Thêm một TTS provider có điều khiển cách diễn
 
 1. Tạo dialect adapter thực thi contract trong
@@ -78,10 +103,23 @@ Candidate lưu snapshot của brief, voice context, AI provider/model, prompt
 version, plan, kết quả render và validator messages. Regenerate không ghi đè
 candidate cũ.
 
+`AuthoringStateStore` còn lưu source lineage:
+
+```text
+hash(rendered candidate)
+  -> source text/hash + dialect + session ID + candidate ID
+```
+
+Khi ô Văn bản đang chứa một candidate đã áp dụng, Studio tra lineage trước khi
+mở Director. Vì vậy AI phân tích lại nguồn sạch và lịch sử được lọc theo nguồn
+đúng. Nếu lineage không còn khớp nhưng văn bản có markup, dialect có thể cung
+cấp `recover_source()` làm fallback có cảnh báo.
+
 ## Invariants
 
 - Renderer không được sửa spoken text của nguồn.
 - Chỉ dialect adapter sinh cú pháp provider.
+- Disabled feature hoặc value ngoài allow-list không được đi tới renderer.
 - Chỉ core quyết định capability/visibility.
 - API key value không xuất hiện trong log hoặc UI table.
 - Một lỗi model/config không được làm inactive API key tốt.

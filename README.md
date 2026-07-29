@@ -1,11 +1,13 @@
-# Colin TTS Local v0.3.0
+# Colin TTS Local v0.3.1
 
 App TTS local ưu tiên tiếng Việt, có lõi tách khỏi giao diện để sau này đổi Gradio sang CustomTkinter, PyQt6 hoặc giao diện khác mà không phải viết lại logic model.
 
-Phiên bản `0.3.0` bổ sung AI Performance Director cho tab Văn bản: Gemini đọc
-ngữ cảnh nội dung và profile giọng, tạo nhiều phương án diễn, sau đó dialect
-adapter mới chuyển kế hoạch trung lập thành Higgs Script. Gemini/API key được
-quản trị riêng trong trang **AI / API**, không trộn với provider TTS.
+Phiên bản `0.3.1` bổ sung rào chắn chi tiết cho AI Performance Director:
+người dùng có thể bật/tắt từng nhóm điều khiển, cấm riêng từng cảm xúc,
+phong cách, prosody hoặc SFX. Prompt và bộ lọc core cùng cưỡng chế phạm vi đó.
+Ứng dụng cũng nhận diện kết quả đã áp dụng để tự dùng lại văn bản gốc và đúng
+lịch sử thay vì phân tích chồng lên Higgs tags. Gemini/API key vẫn được quản
+trị riêng trong trang **AI / API**, không trộn với provider TTS.
 
 Tkinter và PySide6 phân biệt rõ **Giọng cố định** và **Clone từ Profile** theo
 contract của từng model. Catalog hiện có 33 model Piper tiếng Việt, tải/gỡ từng

@@ -207,7 +207,7 @@ class RandomPauseEditor(QWidget):
         layout.setSpacing(6)
         self.random_check = QCheckBox(label)
         self.random_check.setToolTip(
-            "Bật để mỗi dấu được lấy một khoảng nghỉ ngẫu nhiên giữa Min và Max."
+            "Bật để mỗi dấu hoặc ranh giới được lấy một khoảng nghỉ ngẫu nhiên giữa Min và Max."
         )
         self.fixed = pause_seconds_spin_for(
             fixed_field, defaults[fixed_field], tooltip_key
@@ -277,6 +277,19 @@ class RandomPauseEditor(QWidget):
         self.minimum.set_milliseconds(minimum_ms)
         self.maximum.set_milliseconds(maximum_ms)
         self.random_check.setChecked(bool(random_enabled))
+
+    def set_explanation_tooltip(self, text: str) -> None:
+        self.setToolTip(text)
+        for widget in (
+            self.random_check,
+            self.fixed_label,
+            self.fixed,
+            self.minimum_label,
+            self.minimum,
+            self.maximum_label,
+            self.maximum,
+        ):
+            widget.setToolTip(text)
 
 
 def make_spin(minimum: int, maximum: int, value: int, step: int = 1) -> QSpinBox:

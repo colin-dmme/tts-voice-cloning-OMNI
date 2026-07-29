@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import subprocess
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -303,6 +304,95 @@ class SplitBatchServiceTest(unittest.TestCase):
             self.assertEqual(sf.info(str(result.audio_path)).frames, 240 + 12000 + 240)
             self.assertIsNotNone(result.srt_path)
             self.assertIn("2\n00:00:00,510 -->", result.srt_path.read_text(encoding="utf-8"))
+
+    def test_random_paragraph_pause_is_shared_by_audio_and_srt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            spec = ModelSpec(
+                model_id="fake_qwen",
+                display_name="Fake Qwen",
+                provider="qwen",
+                model_type="tts",
+                local_path=root / "model",
+                hf_repo="fake/qwen",
+                language_priority="multilingual",
+                capabilities=ModelCapabilities(supported_languages=["en"]),
+            )
+            service = TtsService(
+                settings=DummySettings(root),
+                registry=FakeRegistry(spec),
+                storage=FakeStorage(),
+            )
+            service._engines[spec.model_id] = RecordingEngine()
+            request = GenerateSpeechRequest(
+                text="First paragraph.\n\nSecond paragraph.",
+                language="en",
+                model_id=spec.model_id,
+                paragraph_pause_random_enabled=True,
+                paragraph_pause_min_ms=250,
+                paragraph_pause_max_ms=350,
+                max_chunk_chars=80,
+                output_mode="merged",
+                output_dir=root,
+                output_stem="random_paragraph",
+                output_srt=True,
+            )
+
+            with patch(
+                "omni_tts_core.service._paragraph_pause_values",
+                return_value=[333],
+            ):
+                result = service.generate_audio(request)
+
+            # Two 10-ms clips plus the exact sampled 333-ms boundary pause.
+            self.assertEqual(sf.info(str(result.audio_path)).frames, 8_472)
+            self.assertIsNotNone(result.srt_path)
+            self.assertIn(
+                "2\n00:00:00,343 -->",
+                result.srt_path.read_text(encoding="utf-8"),
+            )
+
+    def test_piper_paragraph_boundary_does_not_stack_sentence_pause(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            spec = ModelSpec(
+                model_id="fake_piper",
+                display_name="Fake Piper",
+                provider="piper",
+                model_type="tts",
+                local_path=root / "model",
+                hf_repo="fake/piper",
+                language_priority="vi",
+                capabilities=ModelCapabilities(supported_languages=["vi"]),
+            )
+            service = TtsService(
+                settings=DummySettings(root),
+                registry=FakeRegistry(spec),
+                storage=FakeStorage(),
+            )
+            engine = RecordingEngine()
+            service._engines[spec.model_id] = engine
+            request = GenerateSpeechRequest(
+                text="Đoạn thứ nhất.\n\nĐoạn thứ hai.",
+                language="vi",
+                model_id=spec.model_id,
+                punctuation_pause_enabled=True,
+                sentence_pause_ms=100,
+                paragraph_pause_ms=500,
+                max_chunk_chars=80,
+                output_mode="merged",
+                output_dir=root,
+                output_stem="piper_no_stack",
+            )
+
+            result = service.generate_audio(request)
+
+            # Two 240-frame spoken clips plus exactly one 500-ms paragraph
+            # pause at 24 kHz. A stacked 100+500-ms pause would be 14,880 frames.
+            self.assertEqual(sf.info(str(result.audio_path)).frames, 12_480)
+            self.assertEqual(len(engine.batch_calls[0]), 2)
+            self.assertTrue(engine.batch_calls[0][0].punctuation_pause_enabled)
+            self.assertEqual(engine.batch_calls[0][0].sentence_pause_ms, 100)
 
     def test_merged_source_file_uses_paragraph_pause_between_blank_line_units(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

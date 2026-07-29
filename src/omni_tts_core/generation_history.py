@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 from uuid import uuid4
 
 from omni_tts_core.file_queue import FileQueueOutputManifest
@@ -42,6 +43,8 @@ class GenerationHistoryEntry:
     status: HistoryStatus
     duration_seconds: float
     output_manifest: FileQueueOutputManifest
+    settings_snapshot: dict[str, Any]
+    source_text: str
     error: str
     created_at: str
 
@@ -65,6 +68,8 @@ class GenerationHistoryStore:
         status: HistoryStatus,
         source_path: Path | None = None,
         result: GenerateSpeechResult | None = None,
+        settings_snapshot: dict[str, Any] | None = None,
+        source_text: str = "",
         error: str = "",
     ) -> GenerationHistoryEntry:
         manifest = result_output_manifest(result) if result is not None else FileQueueOutputManifest()
@@ -79,6 +84,8 @@ class GenerationHistoryStore:
             status=status,
             duration_seconds=max(0.0, float(result.duration_seconds if result is not None else 0.0)),
             output_manifest=manifest,
+            settings_snapshot=_normalized_snapshot(settings_snapshot),
+            source_text=str(source_text or ""),
             error=str(error or ""),
             created_at=datetime.now().isoformat(timespec="seconds"),
         )
@@ -88,8 +95,9 @@ class GenerationHistoryStore:
                 INSERT INTO generation_history (
                     history_id, mode, source_label, source_path, char_count,
                     model_id, provider_id, status, duration_seconds,
-                    output_manifest_json, error, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    output_manifest_json, settings_json, source_text,
+                    error, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry.history_id,
@@ -102,6 +110,8 @@ class GenerationHistoryStore:
                     entry.status.value,
                     entry.duration_seconds,
                     entry.output_manifest.to_json_text(),
+                    json.dumps(entry.settings_snapshot, ensure_ascii=False),
+                    entry.source_text,
                     entry.error,
                     entry.created_at,
                 ),
@@ -163,11 +173,15 @@ class GenerationHistoryStore:
                     status TEXT NOT NULL,
                     duration_seconds REAL NOT NULL DEFAULT 0,
                     output_manifest_json TEXT NOT NULL DEFAULT '{}',
+                    settings_json TEXT NOT NULL DEFAULT '{}',
+                    source_text TEXT NOT NULL DEFAULT '',
                     error TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 )
                 """
             )
+            _ensure_column(connection, "settings_json", "TEXT NOT NULL DEFAULT '{}'")
+            _ensure_column(connection, "source_text", "TEXT NOT NULL DEFAULT ''")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_generation_history_created "
                 "ON generation_history(created_at DESC)"
@@ -193,6 +207,33 @@ class GenerationHistoryStore:
             output_manifest=FileQueueOutputManifest.from_json_text(
                 row["output_manifest_json"]
             ),
+            settings_snapshot=_decode_snapshot(row["settings_json"]),
+            source_text=str(row["source_text"] or ""),
             error=row["error"],
             created_at=row["created_at"],
         )
+
+
+def _ensure_column(
+    connection: sqlite3.Connection, name: str, declaration: str
+) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(generation_history)")
+    }
+    if name not in columns:
+        connection.execute(
+            f"ALTER TABLE generation_history ADD COLUMN {name} {declaration}"
+        )
+
+
+def _normalized_snapshot(value: dict[str, Any] | None) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _decode_snapshot(value: str | None) -> dict[str, Any]:
+    try:
+        decoded = json.loads(value or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}

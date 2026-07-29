@@ -19,8 +19,15 @@ class PunctuationPausePresetStoreTest(unittest.TestCase):
                     "sentence_pause_random_enabled": True,
                     "sentence_pause_min_ms": 280,
                     "sentence_pause_max_ms": 410,
+                    "paragraph_pause_random_enabled": True,
+                    "paragraph_pause_min_ms": 250,
+                    "paragraph_pause_max_ms": 350,
                 },
             )
+            first = store.list_presets()[0]
+            self.assertTrue(first.values["paragraph_pause_random_enabled"])
+            self.assertEqual(first.values["paragraph_pause_min_ms"], 250)
+            self.assertEqual(first.values["paragraph_pause_max_ms"], 350)
             store.save("kể CHUYỆN", {"sentence_pause_ms": 333})
             presets = PunctuationPausePresetStore(path).list_presets()
             self.assertEqual(len(presets), 1)

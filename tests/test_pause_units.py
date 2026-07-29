@@ -14,6 +14,8 @@ class PauseUnitsTest(unittest.TestCase):
             "ellipsis_pause_ms": 0.45,
             "chunk_pause_ms": 0.12,
             "paragraph_pause_ms": 0.60,
+            "paragraph_pause_min_ms": 0.50,
+            "paragraph_pause_max_ms": 0.70,
             "sentence_pause_min_ms": 0.26,
             "sentence_pause_max_ms": 0.38,
         }

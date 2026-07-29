@@ -41,6 +41,9 @@ PUNCTUATION_PAUSE_FIELDS = (
     PunctuationPauseFieldSpec("clause", "Chấm phẩy / hai chấm · ; :", "clause_pause"),
     PunctuationPauseFieldSpec("ellipsis", "Dấu ba chấm · … / ...", "ellipsis_pause"),
 )
+PARAGRAPH_PAUSE_FIELD = PunctuationPauseFieldSpec(
+    "paragraph", "Nghỉ giữa đoạn gốc", "paragraph_pause"
+)
 
 PAUSE_PRESET_KEYS = (
     "punctuation_pause_enabled",
@@ -55,7 +58,10 @@ PAUSE_PRESET_KEYS = (
         )
     ),
     "chunk_pause_ms",
-    "paragraph_pause_ms",
+    PARAGRAPH_PAUSE_FIELD.fixed_field,
+    PARAGRAPH_PAUSE_FIELD.random_field,
+    PARAGRAPH_PAUSE_FIELD.minimum_field,
+    PARAGRAPH_PAUSE_FIELD.maximum_field,
 )
 
 
@@ -144,7 +150,7 @@ def normalize_pause_values(values: Mapping[str, Any]) -> dict[str, int | bool]:
             normalized[key] = bool(merged[key])
         else:
             normalized[key] = max(0, int(merged[key]))
-    for spec in PUNCTUATION_PAUSE_FIELDS:
+    for spec in (*PUNCTUATION_PAUSE_FIELDS, PARAGRAPH_PAUSE_FIELD):
         if normalized[spec.minimum_field] > normalized[spec.maximum_field]:
             raise OmniTtsError(f"{spec.label}: giá trị Min không được lớn hơn Max.")
     return normalized

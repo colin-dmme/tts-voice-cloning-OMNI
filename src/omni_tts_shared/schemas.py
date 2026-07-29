@@ -271,6 +271,9 @@ class GenerateSpeechRequest(BaseModel):
     ellipsis_pause_max_ms: int = Field(default=550, ge=0, le=3000)
     chunk_pause_ms: int = Field(default=120, ge=0, le=3000)
     paragraph_pause_ms: int = Field(default=600, ge=0, le=10000)
+    paragraph_pause_random_enabled: bool = False
+    paragraph_pause_min_ms: int = Field(default=500, ge=0, le=10000)
+    paragraph_pause_max_ms: int = Field(default=700, ge=0, le=10000)
     srt_file_padding_ms: int = Field(default=0, ge=0, le=10000)
     max_chunk_chars: int = Field(default=220, ge=60, le=800)
     output_dir: Path | None = None
@@ -315,7 +318,7 @@ class GenerateSpeechRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_random_pause_ranges(self):
-        for prefix in ("sentence", "comma", "clause", "ellipsis"):
+        for prefix in ("sentence", "comma", "clause", "ellipsis", "paragraph"):
             minimum = getattr(self, f"{prefix}_pause_min_ms")
             maximum = getattr(self, f"{prefix}_pause_max_ms")
             if minimum > maximum:

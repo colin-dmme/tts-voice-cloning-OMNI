@@ -21,6 +21,7 @@ from omni_tts_core.path_intake import parse_path_text
 from omni_tts_core.text.source_reader import SUPPORTED_TEXT_EXTENSIONS, count_source_text_chars
 from omni_tts_core.ui_presenters import results
 from omni_tts_core.ui_presenters.settings_state import GenerationSettings
+from omni_tts_shared.errors import OmniTtsError
 from omni_tts_ui_qt.background import GenerationWorker
 from omni_tts_ui_qt.context import AppContext
 
@@ -38,10 +39,11 @@ class QueueController(QObject):
         context: AppContext,
         history_store: GenerationHistoryStore | None = None,
         parent=None,
+        store: FileQueueStore | None = None,
     ) -> None:
         super().__init__(parent)
         self.context = context
-        self.store = FileQueueStore()
+        self.store = store or FileQueueStore()
         self.history_store = history_store or GenerationHistoryStore()
         self._worker: GenerationWorker | None = None
         self._active_settings: GenerationSettings | None = None
@@ -79,6 +81,26 @@ class QueueController(QObject):
 
     def add_from_text(self, text: str) -> None:
         self.add_paths(parse_path_text(text))
+
+    def prepare_source_for_rerun(self, source_path: Path) -> FileQueueItem:
+        """Add or reset one historical source so it is pending again."""
+        path = Path(source_path).expanduser().resolve(strict=False)
+        try:
+            char_count = count_source_text_chars(path)
+        except Exception as error:
+            raise OmniTtsError(f"Không đọc được file nguồn: {path}") from error
+        item, added = self.store.add(path, char_count)
+        if item.status == FileQueueStatus.RUNNING:
+            raise OmniTtsError("File này đang chạy trong hàng đợi.")
+        if not added:
+            self.store.reset([item.item_id])
+            self.store.refresh_source_metadata(item.item_id, char_count)
+        restored = self.store.get(item.item_id)
+        self.log.emit(
+            f"Đã đưa {path.name} vào hàng đợi với trạng thái chờ chạy."
+        )
+        self.items_changed.emit()
+        return restored
 
     def delete(self, item_ids: list[str]) -> None:
         removed = self.store.delete(item_ids)
@@ -239,6 +261,7 @@ class QueueController(QObject):
             provider_id=self.context.controller.provider_of_model(settings.model_id),
             status=status,
             result=event.result,
+            settings_snapshot=settings.to_snapshot(),
             error=event.error or (event.message if status != HistoryStatus.DONE else ""),
         )
         self.history_changed.emit()

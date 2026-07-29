@@ -31,7 +31,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from omni_tts_core.pause_presets import PAUSE_PRESET_KEYS, PUNCTUATION_PAUSE_FIELDS
+from omni_tts_core.pause_presets import (
+    PARAGRAPH_PAUSE_FIELD,
+    PAUSE_PRESET_KEYS,
+    PUNCTUATION_PAUSE_FIELDS,
+)
 from omni_tts_core.ui_presenters import control_policy, field_limits, model_groups
 from omni_tts_core.ui_presenters.control_policy import (
     NEUTRAL_EMOTION,
@@ -39,6 +43,7 @@ from omni_tts_core.ui_presenters.control_policy import (
     NEUTRAL_SPEED,
     GenerationControlPolicy,
 )
+from omni_tts_core.ui_presenters.pause_explanations import build_pause_explanation
 from omni_tts_core.ui_presenters.settings_state import (
     DEFAULT_GENERATION_PREFERENCES,
     GenerationSettings,
@@ -136,8 +141,14 @@ class SettingsPanel(QScrollArea):
         self.chunk_pause = pause_seconds_spin_for(
             "chunk_pause_ms", 120, "chunk_pause"
         )
-        self.paragraph_pause = pause_seconds_spin_for(
-            "paragraph_pause_ms", 600, "paragraph_pause"
+        paragraph = PARAGRAPH_PAUSE_FIELD
+        self.paragraph_pause_editor = RandomPauseEditor(
+            paragraph.label,
+            paragraph.fixed_field,
+            paragraph.minimum_field,
+            paragraph.maximum_field,
+            DEFAULT_GENERATION_PREFERENCES,
+            paragraph.tooltip_key,
         )
         self.max_chunk = spin_for("max_chunk_chars", 220, "max_chunk")
         form.addRow("Nhà cung cấp:", self.provider_combo)
@@ -152,11 +163,14 @@ class SettingsPanel(QScrollArea):
         self._pitch_row = form.rowCount()
         form.addRow("Pitch shift:", self.pitch)
         form.addRow("Nghỉ giữa chunk kỹ thuật (giây):", self.chunk_pause)
-        form.addRow("Nghỉ giữa đoạn gốc (giây):", self.paragraph_pause)
+        form.addRow(self.paragraph_pause_editor)
         form.addRow("Ký tự tối đa mỗi đoạn nhỏ:", self.max_chunk)
         self._basic_form = form
         self._connect_all(self.language_combo, self.device_combo, self.speed, self.pitch,
-                          self.chunk_pause, self.paragraph_pause, self.max_chunk)
+                          self.chunk_pause, self.max_chunk)
+        self.paragraph_pause_editor.changed.connect(self._emit_changed)
+        self.paragraph_pause_editor.changed.connect(self._refresh_pause_tooltips)
+        self.chunk_pause.valueChanged.connect(self._refresh_pause_tooltips)
 
     def _build_punctuation(self) -> None:
         self.punctuation_section, form = self._section(
@@ -170,6 +184,9 @@ class SettingsPanel(QScrollArea):
             self.punctuation_section.activation.setToolTip(tooltip("punctuation_section"))
         self.punctuation_section.setToolTip(tooltip("punctuation_section"))
         self.punctuation_section.activation_changed.connect(self._emit_changed)
+        self.punctuation_section.activation_changed.connect(
+            self._refresh_pause_tooltips
+        )
         self.punctuation_note = self._hint()
         self.punctuation_note.setText(
             "Bỏ chọn Ngẫu nhiên để dùng một giá trị cố định như trước; bật để Core lấy từng lần nghỉ trong khoảng Min–Max."
@@ -196,6 +213,7 @@ class SettingsPanel(QScrollArea):
                 spec.tooltip_key,
             )
             editor.changed.connect(self._emit_changed)
+            editor.changed.connect(self._refresh_pause_tooltips)
             self.pause_editors[spec.key] = editor
             form.addRow(editor)
         self.pause_preset_combo.currentIndexChanged.connect(
@@ -208,6 +226,7 @@ class SettingsPanel(QScrollArea):
         reset.setToolTip(tooltip("punctuation_reset"))
         reset.clicked.connect(self._restore_pause_defaults)
         form.addRow(reset)
+        self._refresh_pause_tooltips()
 
     def _build_voice_source(self) -> None:
         self.voice_section, form = self._section("Nguồn giọng")
@@ -723,10 +742,17 @@ class SettingsPanel(QScrollArea):
         self.pause_preset_combo.setCurrentIndex(0)
 
     def _pause_values(self) -> dict[str, int | bool]:
+        paragraph = PARAGRAPH_PAUSE_FIELD
+        paragraph_fixed, paragraph_random, paragraph_min, paragraph_max = (
+            self.paragraph_pause_editor.pause_values()
+        )
         values: dict[str, int | bool] = {
             "punctuation_pause_enabled": self.punctuation_section.is_active(),
             "chunk_pause_ms": self.chunk_pause.milliseconds(),
-            "paragraph_pause_ms": self.paragraph_pause.milliseconds(),
+            paragraph.fixed_field: paragraph_fixed,
+            paragraph.random_field: paragraph_random,
+            paragraph.minimum_field: paragraph_min,
+            paragraph.maximum_field: paragraph_max,
         }
         for spec in PUNCTUATION_PAUSE_FIELDS:
             fixed, random_enabled, minimum, maximum = self.pause_editors[
@@ -775,7 +801,54 @@ class SettingsPanel(QScrollArea):
                 ),
             )
         self._set_pause(self.chunk_pause, "chunk_pause_ms", data)
-        self._set_pause(self.paragraph_pause, "paragraph_pause_ms", data)
+        paragraph = PARAGRAPH_PAUSE_FIELD
+        self.paragraph_pause_editor.set_pause_values(
+            int(
+                data.get(
+                    paragraph.fixed_field,
+                    DEFAULT_GENERATION_PREFERENCES[paragraph.fixed_field],
+                )
+            ),
+            bool(
+                data.get(
+                    paragraph.random_field,
+                    DEFAULT_GENERATION_PREFERENCES[paragraph.random_field],
+                )
+            ),
+            int(
+                data.get(
+                    paragraph.minimum_field,
+                    DEFAULT_GENERATION_PREFERENCES[paragraph.minimum_field],
+                )
+            ),
+            int(
+                data.get(
+                    paragraph.maximum_field,
+                    DEFAULT_GENERATION_PREFERENCES[paragraph.maximum_field],
+                )
+            ),
+        )
+        self._refresh_pause_tooltips()
+
+    def _refresh_pause_tooltips(self, *_args) -> None:
+        if not hasattr(self, "pause_editors"):
+            return
+        explanation = build_pause_explanation(self._pause_values())
+        self.punctuation_section.setToolTip(explanation.section)
+        if self.punctuation_section.activation is not None:
+            self.punctuation_section.activation.setToolTip(explanation.section)
+        self.punctuation_note.setToolTip(explanation.section)
+        for spec in PUNCTUATION_PAUSE_FIELDS:
+            detail = getattr(explanation, spec.key)
+            self.pause_editors[spec.key].set_explanation_tooltip(
+                f"{tooltip(spec.tooltip_key)}\n\n{detail}"
+            )
+        self.chunk_pause.setToolTip(
+            f'{tooltip("chunk_pause")}\n\n{explanation.chunk}'
+        )
+        self.paragraph_pause_editor.set_explanation_tooltip(
+            f'{tooltip("paragraph_pause")}\n\n{explanation.paragraph}'
+        )
 
     def _refresh_pause_presets(self, selected_name: str | None = None) -> None:
         self.pause_preset_combo.blockSignals(True)
@@ -948,7 +1021,12 @@ class SettingsPanel(QScrollArea):
             ellipsis_pause_min_ms=int(pause_values["ellipsis_pause_min_ms"]),
             ellipsis_pause_max_ms=int(pause_values["ellipsis_pause_max_ms"]),
             chunk_pause_ms=self.chunk_pause.milliseconds(),
-            paragraph_pause_ms=self.paragraph_pause.milliseconds(),
+            paragraph_pause_ms=int(pause_values["paragraph_pause_ms"]),
+            paragraph_pause_random_enabled=bool(
+                pause_values["paragraph_pause_random_enabled"]
+            ),
+            paragraph_pause_min_ms=int(pause_values["paragraph_pause_min_ms"]),
+            paragraph_pause_max_ms=int(pause_values["paragraph_pause_max_ms"]),
             max_chunk_chars=self.max_chunk.value(),
             output_dir=self.output_path.value(),
             overwrite=self.overwrite.isChecked(),

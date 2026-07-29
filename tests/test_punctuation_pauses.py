@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import wave
 
-from omni_tts_core.service import _chunk_pause_values
+from omni_tts_core.service import _chunk_pause_values, _paragraph_pause_values
 from omni_tts_core.text.punctuation_pauses import (
     PauseRange,
     PunctuationPauseConfig,
@@ -87,6 +87,13 @@ class PunctuationSplitTest(unittest.TestCase):
     def test_disabled_ranges_keep_legacy_fixed_values(self) -> None:
         self.assertEqual(pause_after_text("Xin chào,", self.config), 90)
 
+    def test_final_sentence_before_paragraph_boundary_has_no_own_silence(self) -> None:
+        result = split_with_punctuation_pauses("Kết thúc đoạn.", self.config)
+        self.assertEqual(
+            [(item.text, item.pause_after_ms) for item in result],
+            [("Kết thúc đoạn.", 0)],
+        )
+
 
 class CoreChunkPauseTest(unittest.TestCase):
     def test_request_rejects_an_inverted_random_range(self) -> None:
@@ -96,6 +103,41 @@ class CoreChunkPauseTest(unittest.TestCase):
                 sentence_pause_min_ms=500,
                 sentence_pause_max_ms=200,
             )
+
+    def test_request_rejects_an_inverted_paragraph_random_range(self) -> None:
+        with self.assertRaisesRegex(ValueError, "paragraph_pause_min_ms"):
+            GenerateSpeechRequest(
+                text="x",
+                paragraph_pause_min_ms=700,
+                paragraph_pause_max_ms=500,
+            )
+
+    def test_paragraph_random_samples_once_per_boundary(self) -> None:
+        class _MaximumRng:
+            @staticmethod
+            def randint(_minimum: int, maximum: int) -> int:
+                return maximum
+
+        request = GenerateSpeechRequest(
+            text="x",
+            paragraph_pause_random_enabled=True,
+            paragraph_pause_min_ms=250,
+            paragraph_pause_max_ms=350,
+        )
+        self.assertEqual(
+            _paragraph_pause_values(request, 4, _MaximumRng()),
+            [350, 350, 350],
+        )
+
+    def test_paragraph_fixed_mode_keeps_legacy_value(self) -> None:
+        request = GenerateSpeechRequest(
+            text="x",
+            paragraph_pause_ms=280,
+            paragraph_pause_random_enabled=False,
+            paragraph_pause_min_ms=100,
+            paragraph_pause_max_ms=900,
+        )
+        self.assertEqual(_paragraph_pause_values(request, 3), [280, 280])
 
     def test_piper_uses_terminal_punctuation_at_chunk_boundaries(self) -> None:
         request = GenerateSpeechRequest(

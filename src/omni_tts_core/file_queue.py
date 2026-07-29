@@ -423,6 +423,23 @@ class FileQueueStore:
             )
             return cursor.rowcount
 
+    def refresh_source_metadata(self, item_id: str, char_count: int) -> None:
+        item = self.get(item_id)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE file_queue
+                SET char_count = ?, source_signature = ?
+                WHERE item_id = ? AND status != ?
+                """,
+                (
+                    max(0, int(char_count)),
+                    source_signature(item.source_path),
+                    item_id,
+                    FileQueueStatus.RUNNING.value,
+                ),
+            )
+
     def delete(self, item_ids: Iterable[str]) -> int:
         ids = _unique_ids(item_ids)
         if not ids:

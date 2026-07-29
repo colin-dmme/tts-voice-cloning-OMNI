@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -34,14 +36,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from omni_tts_core.file_queue import STATUS_LABELS, FileQueueStatus
+from omni_tts_core.file_queue import (
+    STATUS_LABELS,
+    FileQueueStatus,
+    FileQueueStore,
+)
 from omni_tts_core.generation_history import (
     GenerationHistoryStore,
     HistoryStatus,
 )
+from omni_tts_core.history_restore import (
+    build_history_restore_plan,
+    restore_setting_mismatches,
+)
 from omni_tts_core.path_intake import parse_path_text
 from omni_tts_core.text.source_reader import SUPPORTED_TEXT_EXTENSIONS
 from omni_tts_core.ui_presenters import labels
+from omni_tts_core.ui_presenters.history_details import format_history_settings
 from omni_tts_core.ui_presenters.search import matches_search
 from omni_tts_ui_qt.background import GenerationWorker
 from omni_tts_ui_qt.context import AppContext
@@ -90,7 +101,12 @@ class _DropTableView(QTableView):
 
 
 class StudioPage(QWidget):
-    def __init__(self, context: AppContext) -> None:
+    def __init__(
+        self,
+        context: AppContext,
+        history_store: GenerationHistoryStore | None = None,
+        queue_store: FileQueueStore | None = None,
+    ) -> None:
         super().__init__()
         self.context = context
         self.ctrl = context.controller
@@ -99,13 +115,16 @@ class StudioPage(QWidget):
         self._active_text_settings = None
         self._active_text_char_count = 0
         self._active_text_source_label = ""
+        self._active_text_source_text = ""
         self._current_model_id = ""
         self._queue_status_message = ""
         self._queue_active = False
         self._text_active = False
 
-        self.history_store = GenerationHistoryStore()
-        self.queue = QueueController(context, self.history_store)
+        self.history_store = history_store or GenerationHistoryStore()
+        self.queue = QueueController(
+            context, self.history_store, store=queue_store
+        )
         self.settings_panel = SettingsPanel(context)
         context.register_settings_provider(self.settings_panel.current_settings)
 
@@ -468,6 +487,9 @@ class StudioPage(QWidget):
         self.history_table.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
+        self.history_table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
         history_header = self.history_table.horizontalHeader()
         history_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         history_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -493,6 +515,9 @@ class StudioPage(QWidget):
         self.history_clear_button.clicked.connect(self._clear_history)
         self.history_table.doubleClicked.connect(
             lambda _index: self._preview_history_audio()
+        )
+        self.history_table.customContextMenuRequested.connect(
+            self._history_context_menu
         )
         self.history_table.selectionModel().selectionChanged.connect(
             self._update_history_output_buttons
@@ -843,6 +868,124 @@ class StudioPage(QWidget):
                 lambda: self.ctrl.play_queue_audio(entry.output_manifest)
             )
 
+    def _history_context_menu(self, position) -> None:
+        index = self.history_table.indexAt(position)
+        entry = self.history_model.item_at(index.row()) if index.isValid() else None
+        if entry is None:
+            return
+        if not self.history_table.selectionModel().isRowSelected(
+            index.row(), index.parent()
+        ):
+            self.history_table.selectRow(index.row())
+        menu = QMenu(self)
+        menu.addAction(
+            "Xem toàn bộ setting đã dùng",
+            lambda: self._show_history_settings(entry),
+        )
+        if entry.mode == "file":
+            menu.addAction(
+                "Mở file nguồn để sửa",
+                lambda: self._open_queue_path(
+                    lambda: self.ctrl.open_source_file(entry.source_path),
+                    "Đã mở file nguồn",
+                ),
+            )
+            menu.addAction(
+                "Mở thư mục file nguồn",
+                lambda: self._open_queue_path(
+                    lambda: self.ctrl.open_source_folder(entry.source_path),
+                    "Đã mở thư mục file nguồn",
+                ),
+            )
+            menu.addAction(
+                "Khôi phục vào Hàng đợi file",
+                lambda: self._restore_history_entry(entry),
+            )
+        else:
+            menu.addAction(
+                "Khôi phục vào tab Văn bản",
+                lambda: self._restore_history_entry(entry),
+            )
+        if not entry.output_manifest.is_empty():
+            menu.addSeparator()
+            menu.addAction(
+                "▶ Phát audio", lambda: self._play_history_entry(entry)
+            )
+            menu.addAction(
+                "Mở thư mục kết quả",
+                lambda: self._open_queue_path(
+                    lambda: self.ctrl.open_result_folder(entry.output_manifest),
+                    "Đã mở thư mục kết quả",
+                ),
+            )
+            menu.addAction(
+                "Copy đường dẫn audio",
+                lambda: self._copy_manifest_path(entry.output_manifest, "audio"),
+            )
+            menu.addAction(
+                "Copy đường dẫn SRT",
+                lambda: self._copy_manifest_path(entry.output_manifest, "srt"),
+            )
+        menu.addSeparator()
+        menu.addAction("Xóa khỏi lịch sử", self._delete_history_selected)
+        menu.exec(self.history_table.viewport().mapToGlobal(position))
+
+    def _play_history_entry(self, entry) -> None:
+        self._play_audio(lambda: self.ctrl.play_queue_audio(entry.output_manifest))
+
+    def _show_history_settings(self, entry) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Setting lịch sử · {entry.source_label}")
+        dialog.resize(760, 620)
+        layout = QVBoxLayout(dialog)
+        content = QPlainTextEdit()
+        content.setReadOnly(True)
+        content.setPlainText(format_history_settings(entry))
+        layout.addWidget(content, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
+
+    def _restore_history_entry(self, entry) -> None:
+        try:
+            plan = build_history_restore_plan(entry)
+            self.settings_panel.load_preferences(plan.settings.to_snapshot())
+            actual = self.settings_panel.current_settings()
+            mismatches = restore_setting_mismatches(plan.settings, actual)
+            if mismatches:
+                raise ValueError(
+                    "Không thể áp dụng chính xác các setting: "
+                    + ", ".join(mismatches)
+                )
+            if plan.mode == "file" and plan.source_path is not None:
+                item = self.queue.prepare_source_for_rerun(plan.source_path)
+                self.tabs.setCurrentIndex(1)
+                self._refresh_queue()
+                self._select_queue_item(item.item_id)
+                message = (
+                    f"Đã khôi phục setting và đưa {plan.source_label} vào hàng đợi."
+                )
+            else:
+                self.text_input.setPlainText(plan.source_text)
+                self.output_stem.setText(plan.settings.output_stem or "")
+                self.tabs.setCurrentIndex(0)
+                self.text_input.setFocus()
+                message = "Đã khôi phục nội dung và toàn bộ setting vào tab Văn bản."
+        except Exception as error:
+            QMessageBox.warning(self, "Không khôi phục được lịch sử", str(error))
+            return
+        self._on_settings_changed()
+        self.context.log(message)
+
+    def _select_queue_item(self, item_id: str) -> None:
+        for row in range(self.queue_model.rowCount()):
+            item = self.queue_model.item_at(row)
+            if item is not None and item.item_id == item_id:
+                self.queue_table.selectRow(row)
+                self.queue_table.scrollTo(self.queue_model.index(row, 0))
+                break
+
     def _copy_selected_history_path(self, kind: str) -> None:
         entry = self._selected_history_entry()
         if entry is not None:
@@ -930,6 +1073,7 @@ class StudioPage(QWidget):
         self._active_text_settings = settings
         self._active_text_char_count = len(text)
         self._active_text_source_label = stem or "Văn bản trực tiếp"
+        self._active_text_source_text = text
         self._last_text_result = None
         self.text_preview_button.setEnabled(False)
         self._text_worker = GenerationWorker(self.ctrl, "text", settings, text=text)
@@ -1019,6 +1163,8 @@ class StudioPage(QWidget):
             provider_id=self.ctrl.provider_of_model(settings.model_id),
             status=status,
             result=result,
+            settings_snapshot=settings.to_snapshot(),
+            source_text=self._active_text_source_text,
             error=error,
         )
         self._refresh_history()

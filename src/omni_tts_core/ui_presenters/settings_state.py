@@ -79,6 +79,9 @@ DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "ellipsis_pause_max_ms": 550,
     "chunk_pause_ms": 120,
     "paragraph_pause_ms": 600,
+    "paragraph_pause_random_enabled": False,
+    "paragraph_pause_min_ms": 500,
+    "paragraph_pause_max_ms": 700,
     "srt_file_padding_ms": 0,
     "max_chunk_chars": 220,
     "overwrite": False,
@@ -178,6 +181,9 @@ class GenerationSettings:
     ellipsis_pause_max_ms: int = 550
     chunk_pause_ms: int = 120
     paragraph_pause_ms: int = 600
+    paragraph_pause_random_enabled: bool = False
+    paragraph_pause_min_ms: int = 500
+    paragraph_pause_max_ms: int = 700
     srt_file_padding_ms: int = 0
     max_chunk_chars: int = 220
     output_dir: Path | None = None
@@ -275,6 +281,9 @@ class GenerationSettings:
             ellipsis_pause_max_ms=self.ellipsis_pause_max_ms,
             chunk_pause_ms=self.chunk_pause_ms,
             paragraph_pause_ms=self.paragraph_pause_ms,
+            paragraph_pause_random_enabled=self.paragraph_pause_random_enabled,
+            paragraph_pause_min_ms=self.paragraph_pause_min_ms,
+            paragraph_pause_max_ms=self.paragraph_pause_max_ms,
             # Kept in sync with paragraph_pause_ms for parity with the legacy UI;
             # a coordinated fix would decouple these two knobs.
             srt_file_padding_ms=self.paragraph_pause_ms,
@@ -350,3 +359,37 @@ class GenerationSettings:
                 value = str(value)
             payload[key] = value
         return payload
+
+    def to_snapshot(self) -> dict[str, Any]:
+        """Serialize every generation field for an exact history restore."""
+        return {
+            key: _snapshot_value(value)
+            for key, value in asdict(self).items()
+        }
+
+    @classmethod
+    def from_snapshot(cls, data: dict[str, Any]) -> "GenerationSettings":
+        """Restore a full history snapshot while tolerating older schemas."""
+        if not isinstance(data, dict):
+            return cls()
+        field_names = {field.name for field in fields(cls)}
+        kwargs: dict[str, Any] = {}
+        for key, value in data.items():
+            if key not in field_names:
+                continue
+            if key in {"output_dir", "reference_audio_path"}:
+                text = str(value or "").strip()
+                kwargs[key] = Path(text) if text else None
+            else:
+                kwargs[key] = value
+        return cls(**kwargs)
+
+
+def _snapshot_value(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _snapshot_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_snapshot_value(item) for item in value]
+    return value

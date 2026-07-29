@@ -81,6 +81,10 @@ class SettingsStateTest(unittest.TestCase):
                 "clause_pause_ms": 177,
                 "ellipsis_pause_ms": 444,
                 "chunk_pause_ms": 111,
+                "paragraph_pause_ms": 280,
+                "paragraph_pause_random_enabled": True,
+                "paragraph_pause_min_ms": 250,
+                "paragraph_pause_max_ms": 350,
             }
         )
         request = settings.to_request("xin chào")
@@ -93,11 +97,34 @@ class SettingsStateTest(unittest.TestCase):
         self.assertEqual(request.clause_pause_ms, 177)
         self.assertEqual(request.ellipsis_pause_ms, 444)
         self.assertEqual(request.chunk_pause_ms, 111)
+        self.assertEqual(request.paragraph_pause_ms, 280)
+        self.assertTrue(request.paragraph_pause_random_enabled)
+        self.assertEqual(request.paragraph_pause_min_ms, 250)
+        self.assertEqual(request.paragraph_pause_max_ms, 350)
 
     def test_old_sentence_pause_migrates_to_chunk_pause(self) -> None:
         settings = GenerationSettings.from_preferences({"sentence_pause_ms": 350})
         self.assertEqual(settings.sentence_pause_ms, 350)
         self.assertEqual(settings.chunk_pause_ms, 350)
+
+    def test_full_history_snapshot_round_trips_every_dataclass_field(self) -> None:
+        settings = GenerationSettings(
+            model_id="piper_ngoc_huyen",
+            voice_source_mode="profile",
+            voice_profile_id="voice-1",
+            reference_audio_path=Path("C:/voice.wav"),
+            reference_text="Nội dung mẫu",
+            speed=1.15,
+            sentence_pause_random_enabled=True,
+            sentence_pause_min_ms=260,
+            sentence_pause_max_ms=280,
+            output_dir=Path("C:/out"),
+            output_stem="chapter-1",
+        )
+
+        restored = GenerationSettings.from_snapshot(settings.to_snapshot())
+
+        self.assertEqual(restored, settings)
 
 
 if __name__ == "__main__":

@@ -3,58 +3,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from omni_tts_core.higgs.authoring_catalog import (
+    EMOTIONS,
+    PROSODY,
+    SOUND_EFFECTS,
+    STYLES,
+)
 from omni_tts_core.text.splitter import split_text
 from omni_tts_core.text.vi_normalizer import normalize_vietnamese_text
 from omni_tts_shared.schemas import HiggsTtsOptions
 
-
-EMOTIONS = (
-    "elation",
-    "amusement",
-    "enthusiasm",
-    "determination",
-    "pride",
-    "contentment",
-    "affection",
-    "relief",
-    "contemplation",
-    "confusion",
-    "surprise",
-    "awe",
-    "longing",
-    "arousal",
-    "anger",
-    "fear",
-    "disgust",
-    "bitterness",
-    "sadness",
-    "shame",
-    "helplessness",
-)
-STYLES = ("singing", "shouting", "whispering")
-SOUND_EFFECTS = (
-    "cough",
-    "laughter",
-    "crying",
-    "screaming",
-    "burping",
-    "humming",
-    "sigh",
-    "sniff",
-    "sneeze",
-)
-PROSODY = (
-    "speed_very_slow",
-    "speed_slow",
-    "speed_fast",
-    "speed_very_fast",
-    "pause",
-    "long_pause",
-    "pitch_low",
-    "pitch_high",
-    "expressive_high",
-    "expressive_low",
-)
 
 TAG_PATTERN = re.compile(
     r"<\|(?P<category>[a-z][a-z0-9_]*):(?P<value>[a-z][a-z0-9_]*)\|>",

@@ -60,7 +60,8 @@ TOOLTIPS: dict[str, str] = {
         "Chỉ hiện khi provider có implementation đã kiểm thử. Piper ONNX hỗ trợ bằng "
         "cách sinh từng vế rồi chèn khoảng lặng đã chọn. Mỗi loại dấu có thể dùng "
         "một giá trị cố định hoặc lấy ngẫu nhiên riêng trong khoảng Min–Max; tắt "
-        "ACTIVE để giữ nguyên nhịp mặc định của model."
+        "ACTIVE để giữ nguyên nhịp mặc định của model. Ở ranh giới dòng trống, "
+        "nghỉ đoạn gốc thay thế nghỉ cuối câu; hai mức không cộng dồn."
     ),
     "punctuation_reset": (
         "Đặt lại toàn bộ khoảng nghỉ tiêu chuẩn: cuối câu 0.32 giây, dấu phẩy "
@@ -71,11 +72,12 @@ TOOLTIPS: dict[str, str] = {
     "chunk_pause": (
         "Khoảng lặng kỹ thuật khi app buộc phải chia một câu quá dài thành nhiều chunk.\n"
         "Đây không phải nghỉ theo dấu câu. Với Piper, nếu chunk kết thúc bằng dấu câu "
-        "thì app ưu tiên đúng mức của dấu đó."
+        "thì app dùng mức của dấu đó thay cho mức chunk; hai mức không cộng dồn."
     ),
     "paragraph_pause": (
         "Khoảng lặng giữa các đoạn gốc (cách nhau bằng dòng trống) khi ghép file tổng "
-        "hoặc dựng timeline SRT."
+        "hoặc dựng timeline SRT. Nếu đoạn trước kết thúc bằng dấu cuối câu, chỉ dùng "
+        "nghỉ đoạn gốc tại ranh giới này; không cộng thêm nghỉ cuối câu."
     ),
     "max_chunk": (
         "App tự chia văn bản trước khi đưa vào model — đây KHÔNG phải model tự cắt.\n"

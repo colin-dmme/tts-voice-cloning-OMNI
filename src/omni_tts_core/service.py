@@ -4,7 +4,6 @@ from pathlib import Path
 from threading import Event, Lock
 
 from omni_tts_core.audio.wav_tools import (
-    concatenate_segments,
     concatenate_segments_with_pauses,
     duration_seconds,
     read_audio_mono,
@@ -32,6 +31,7 @@ from omni_tts_core.text.splitter import split_text
 from omni_tts_core.text.punctuation_pauses import (
     PauseRange,
     PunctuationPauseConfig,
+    RandomSource,
     pause_after_text,
 )
 from omni_tts_core.text.source_reader import read_source_text, read_source_units, text_units_from_blank_lines
@@ -413,6 +413,9 @@ class TtsService:
                 "ellipsis_pause_max_ms": request.ellipsis_pause_max_ms,
                 "chunk_pause_ms": request.chunk_pause_ms,
                 "paragraph_pause_ms": _paragraph_pause_ms(request),
+                "paragraph_pause_random_enabled": request.paragraph_pause_random_enabled,
+                "paragraph_pause_min_ms": request.paragraph_pause_min_ms,
+                "paragraph_pause_max_ms": request.paragraph_pause_max_ms,
                 "unit_count": len(units),
                 "chunk_count": len(chunks),
                 "units": [
@@ -529,7 +532,7 @@ class TtsService:
         current_seconds = 0.0
         sample_rate = 24000
         chunk_cursor = 0
-        paragraph_pause_seconds = _paragraph_pause_ms(request) / 1000
+        paragraph_pauses_ms = _paragraph_pause_values(request, len(units))
 
         for unit_index, unit in enumerate(units):
             unit_chunks = unit["chunks"]
@@ -567,13 +570,18 @@ class TtsService:
                 )
             )
             if unit_index < len(units) - 1:
-                current_seconds += paragraph_pause_seconds
+                current_seconds += paragraph_pauses_ms[unit_index] / 1000
 
         check_cancel(cancel_event)
         audio_label = _audio_format_label(request.output_audio_format)
         save_message = f"Đang lưu {audio_label} và SRT..." if request.output_srt else f"Đang lưu {audio_label}..."
         emit_progress(progress_callback, save_message, len(chunks), len(chunks))
-        combined = concatenate_segments(paragraph_audio_segments, sample_rate, _paragraph_pause_ms(request), 0)
+        combined = concatenate_segments_with_pauses(
+            paragraph_audio_segments,
+            sample_rate,
+            paragraph_pauses_ms,
+            0,
+        )
         save_audio(audio_path, combined, sample_rate, request.output_audio_format, request.mp3_bitrate_kbps)
         if request.output_srt and srt_path is not None:
             write_srt(srt_path, timings)
@@ -985,13 +993,16 @@ class TtsService:
         total_segments = sum(saved_segment_counts.values())
         if len(audio_paths) != len(split_jobs):
             raise ConfigError("Không lưu đủ số file audio đã tách.")
+        paragraph_pauses_ms = _paragraph_pause_values(request, len(split_jobs))
 
         srt_path = None
         if request.output_srt:
             srt_path = output_dir / f"{output_stem}.srt"
             write_srt(
                 srt_path,
-                _split_timeline_segments(split_jobs, saved_durations, _paragraph_pause_ms(request)),
+                _split_timeline_segments(
+                    split_jobs, saved_durations, paragraph_pauses_ms
+                ),
             )
 
         joined_audio_path = None
@@ -1003,6 +1014,7 @@ class TtsService:
                 batch_results,
                 joined_audio_path,
                 request,
+                paragraph_pauses_ms,
             )
 
         return GenerateSpeechResult(
@@ -1063,6 +1075,7 @@ class TtsService:
         batch_results: list[TtsEngineResult],
         output_path: Path,
         request: GenerateSpeechRequest,
+        paragraph_pauses_ms: list[int],
     ) -> float:
         audio_segments = []
         sample_rate = 24000
@@ -1074,7 +1087,12 @@ class TtsService:
                 raise ConfigError("Không thể nối file tổng vì sample rate các file audio không khớp.")
             sample_rate = current_rate
             audio_segments.append(combined)
-        combined = concatenate_segments(audio_segments, sample_rate, _paragraph_pause_ms(request), 0)
+        combined = concatenate_segments_with_pauses(
+            audio_segments,
+            sample_rate,
+            paragraph_pauses_ms,
+            0,
+        )
         save_audio(output_path, combined, sample_rate, request.output_audio_format, request.mp3_bitrate_kbps)
         return duration_seconds(combined, sample_rate)
 
@@ -1082,11 +1100,10 @@ class TtsService:
 def _split_timeline_segments(
     split_jobs: list[dict],
     durations: dict[int, float],
-    paragraph_pause_ms: int,
+    paragraph_pauses_ms: list[int],
 ) -> list[SegmentTiming]:
     segments: list[SegmentTiming] = []
     current_seconds = 0.0
-    padding_seconds = max(0, paragraph_pause_ms) / 1000
     for index, job in enumerate(split_jobs, start=1):
         duration = durations.get(index, 0.0)
         unit = job["unit"]
@@ -1098,7 +1115,9 @@ def _split_timeline_segments(
                 end_seconds=current_seconds + duration,
             )
         )
-        current_seconds += duration + padding_seconds
+        current_seconds += duration
+        if index <= len(paragraph_pauses_ms):
+            current_seconds += max(0, paragraph_pauses_ms[index - 1]) / 1000
     return segments
 
 
@@ -1160,6 +1179,22 @@ def _chunks_for_provider(
 
 def _paragraph_pause_ms(request: GenerateSpeechRequest) -> int:
     return max(0, int(request.paragraph_pause_ms))
+
+
+def _paragraph_pause_values(
+    request: GenerateSpeechRequest,
+    unit_count: int,
+    rng: RandomSource | None = None,
+) -> list[int]:
+    """Resolve one pause per paragraph boundary for both audio and timeline."""
+    boundary_count = max(0, int(unit_count) - 1)
+    if not request.paragraph_pause_random_enabled:
+        return [_paragraph_pause_ms(request)] * boundary_count
+    pause_range = PauseRange(
+        request.paragraph_pause_min_ms,
+        request.paragraph_pause_max_ms,
+    )
+    return [pause_range.sample(rng) for _ in range(boundary_count)]
 
 
 def _supports_punctuation_pauses(spec: ModelSpec) -> bool:

@@ -84,6 +84,11 @@ class HistoryTableModel(QAbstractTableModel):
             return QColor(_STATUS_COLORS.get(item.status, "#e4e4ef"))
         if role == Qt.ItemDataRole.ToolTipRole:
             details = [str(item.source_path or item.source_label)]
+            details.append(
+                "Có snapshot setting · Chuột phải để xem/khôi phục"
+                if item.settings_snapshot
+                else "Lịch sử cũ · Chưa có snapshot setting để khôi phục"
+            )
             if item.error:
                 details.append(item.error)
             return "\n".join(details)

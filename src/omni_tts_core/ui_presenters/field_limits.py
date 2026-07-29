@@ -37,6 +37,8 @@ _PRESENTATION: dict[str, tuple[float, int]] = {
     "ellipsis_pause_max_ms": (10, 0),
     "chunk_pause_ms": (10, 0),
     "paragraph_pause_ms": (50, 0),
+    "paragraph_pause_min_ms": (10, 0),
+    "paragraph_pause_max_ms": (10, 0),
     "max_chunk_chars": (20, 0),
     "temperature": (0.05, 2),
     "top_k": (10, 0),

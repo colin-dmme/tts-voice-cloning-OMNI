@@ -44,6 +44,10 @@ config/generation_history.sqlite3
 config/generation_history.sqlite3-shm
 config/generation_history.sqlite3-wal
 config/punctuation_pause_presets.json
+config/authoring_ai.json
+config/authoring_ai_keys.json
+config/authoring_state.json
+config/authoring_sessions.json
 
 # Git-backed portable user state lives in user_state/ and is intentionally tracked.
 !user_state/

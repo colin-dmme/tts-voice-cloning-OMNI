@@ -3,6 +3,50 @@
 Tất cả thay đổi đáng chú ý của Colin TTS Studio được ghi theo từng phiên bản
 trong file này. Dự án sử dụng phiên bản theo Semantic Versioning.
 
+## [0.3.0] - 2026-07-29
+
+### Added
+
+- Thêm nền tảng AI authoring độc lập với provider TTS: AI tạo
+  `PerformancePlan` trung lập, dialect adapter mới chuyển sang cú pháp provider.
+- Thêm `HiggsDialectAdapter` cho Emotion, Style, Pace, Pitch, Expressiveness,
+  Pause và vocal SFX; renderer luôn dùng lại nguyên văn nguồn.
+- Thêm AI Performance Director trong tab Văn bản, chỉ xuất hiện khi model TTS
+  khai báo authoring capability.
+- Thêm khai báo loại nội dung, nền tảng, vai trò đoạn, đối tượng nghe, phong
+  cách, mật độ tag, SFX và chỉ dẫn riêng.
+- Thêm Voice Context: đọc profile giọng đang chọn, hỗ trợ khai báo nam/nữ/trung
+  tính và mô tả chất giọng; mô tả được nhớ riêng theo profile/voice ID.
+- Thêm tạo 1–4 phương án, giải thích từng quyết định, cảnh báo validator, tạo
+  lại theo cùng setting, so sánh và áp dụng có Undo.
+- Thêm preset có tên, preset theo profile giọng, lưu setting gần nhất và lịch
+  sử candidate theo hash văn bản.
+- Thêm trang **AI / API** quản lý AI provider, model, endpoint, timeout, retry,
+  API key pool, nhập JSON, test kết nối và lấy danh sách model.
+- Thêm Gemini OpenAI-compatible adapter, key rotation, quota/auth
+  classification, retry server-busy, heartbeat, cancel và log không chứa giá
+  trị API key.
+- Thêm one-time importer tương thích `key_pool.json` của dự án
+  `rewrite-truyen-dai`, có chống trùng bằng fingerprint.
+- Thêm tài liệu mở rộng provider/dialect tại
+  `docs/ai-authoring-architecture.md`.
+
+### Changed
+
+- Mở rộng `ProviderDescriptor` bằng `authoring_dialect` và
+  `authoring_features`; GUI không kiểm tra trực tiếp `provider_id`.
+- Chuyển mô tả delivery tag Higgs về ngữ nghĩa đặt ở đầu câu; Pause/SFX vẫn là
+  điều khiển theo vị trí.
+- Nâng phiên bản package và ứng dụng từ `0.2.0` lên `0.3.0`.
+
+### Compatibility
+
+- Provider không khai báo authoring capability giữ nguyên giao diện và pipeline
+  tạo giọng cũ.
+- API key, preset và lịch sử AI nằm trong file runtime cục bộ đã ignore khỏi
+  Git; `user_state` và cấu hình TTS cũ không thay đổi.
+- Higgs Script toolbar thủ công vẫn hoạt động độc lập với AI Director.
+
 ## [0.2.0] - 2026-07-27
 
 ### Added

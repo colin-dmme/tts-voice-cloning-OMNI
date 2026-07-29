@@ -17,6 +17,17 @@ from pathlib import Path
 from threading import Event, Lock
 from typing import Callable, Protocol
 
+from omni_tts_core.authoring.capabilities import AuthoringPolicy
+from omni_tts_core.authoring.schemas import (
+    AiProviderSettings,
+    AuthoringBrief,
+    AuthoringPreset,
+    AuthoringSession,
+    VoiceContext,
+    VoicePresentation,
+)
+from omni_tts_core.authoring.service import AuthoringService
+from omni_tts_core.authoring.voice_context import VoiceContextResolver
 from omni_tts_core.desktop_paths import DesktopPathService
 from omni_tts_core.file_queue import FileQueueOutputManifest, FileQueueStatus
 from omni_tts_core.higgs.endpoint_capabilities import (
@@ -35,6 +46,7 @@ from omni_tts_core.pause_presets import (
     PunctuationPausePreset,
     PunctuationPausePresetStore,
 )
+from omni_tts_core.provider_registry import provider_descriptor
 from omni_tts_core.progress import ProgressCallback, ProgressEvent, check_cancel
 from omni_tts_core.remote.higgs_sglang import EndpointCheckResult, HiggsSglangClient
 from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES, runtime_target_label
@@ -113,6 +125,7 @@ class AppController:
         generation_coordinator: GenerationCoordinator | None = None,
         desktop_paths: DesktopPathService | None = None,
         pause_presets: PunctuationPausePresetStore | None = None,
+        authoring_service: AuthoringService | None = None,
     ) -> None:
         self.service = service or TtsService()
         self.license_provider = license_provider or _default_license_provider()
@@ -120,6 +133,10 @@ class AppController:
         self.media_player = media_player or MediaPlayerService()
         self.desktop_paths = desktop_paths or DesktopPathService()
         self.pause_presets = pause_presets or PunctuationPausePresetStore()
+        self.authoring = authoring_service or AuthoringService()
+        self.voice_context_resolver = VoiceContextResolver(
+            self.authoring.state_store
+        )
         self.generation_coordinator = generation_coordinator or GenerationCoordinator(
             self.service
         )
@@ -184,6 +201,170 @@ class AppController:
             supports_sampling=self.service.supports_vieneu_sampling(model_id),
             supports_f5=self.service.supports_f5_settings(model_id),
             supports_chatterbox=self.service.supports_chatterbox_settings(model_id),
+        )
+
+    # --- Provider-neutral AI authoring ------------------------------------
+
+    def authoring_policy(self, model_id: str) -> AuthoringPolicy:
+        provider_id = self.provider_of_model(model_id)
+        return self.authoring.policy(provider_descriptor(provider_id))
+
+    def authoring_brief_choices(self):
+        return self.authoring.brief_choices()
+
+    def authoring_ai_provider_choices(self) -> list[tuple[str, str]]:
+        return self.authoring.ai_provider_choices()
+
+    def authoring_ai_settings(self) -> AiProviderSettings:
+        return self.authoring.settings()
+
+    def save_authoring_ai_settings(
+        self, payload: AiProviderSettings | dict
+    ) -> AiProviderSettings:
+        return self.authoring.save_settings(payload)
+
+    def authoring_model_choices(self, provider_id: str | None = None) -> list[str]:
+        return self.authoring.model_choices(provider_id)
+
+    def authoring_model_supports_temperature(
+        self, model: str, provider_id: str | None = None
+    ) -> bool:
+        return self.authoring.model_supports_temperature(model, provider_id)
+
+    def authoring_keys(
+        self, provider_id: str = "gemini"
+    ) -> list[dict[str, str]]:
+        return self.authoring.safe_keys(provider_id)
+
+    def authoring_active_key_count(self, provider_id: str = "gemini") -> int:
+        return self.authoring.active_key_count(provider_id)
+
+    def add_authoring_key(
+        self, name: str, value: str, provider_id: str = "gemini"
+    ) -> bool:
+        return self.authoring.add_key(name, value, provider_id)
+
+    def update_authoring_key(
+        self,
+        old_name: str,
+        new_name: str,
+        value: str,
+        provider_id: str = "gemini",
+    ) -> bool:
+        return self.authoring.update_key(
+            old_name, new_name, value, provider_id
+        )
+
+    def remove_authoring_key(
+        self, name: str, provider_id: str = "gemini"
+    ) -> bool:
+        return self.authoring.remove_key(name, provider_id)
+
+    def reset_authoring_key(
+        self, name: str, provider_id: str = "gemini"
+    ) -> bool:
+        return self.authoring.reset_key(name, provider_id)
+
+    def import_authoring_keys(
+        self, path: Path, provider_id: str = "gemini"
+    ):
+        return self.authoring.import_keys(path, provider_id)
+
+    def test_authoring_connection(self) -> str:
+        return self.authoring.test_connection()
+
+    def refresh_authoring_models(self) -> list[str]:
+        return self.authoring.refresh_models()
+
+    def last_authoring_brief(self) -> AuthoringBrief:
+        return self.authoring.last_brief()
+
+    def authoring_presets(self) -> list[AuthoringPreset]:
+        return self.authoring.presets()
+
+    def recent_authoring_sessions(
+        self,
+        *,
+        source_text: str = "",
+        dialect_id: str = "",
+        limit: int = 20,
+    ) -> list[AuthoringSession]:
+        return self.authoring.recent_sessions(
+            source_text=source_text,
+            dialect_id=dialect_id,
+            limit=limit,
+        )
+
+    def save_authoring_preset(
+        self,
+        name: str,
+        brief: AuthoringBrief,
+        *,
+        voice_profile_id: str = "",
+        dialect_id: str = "",
+    ) -> AuthoringPreset:
+        return self.authoring.save_preset(
+            name,
+            brief,
+            voice_profile_id=voice_profile_id,
+            dialect_id=dialect_id,
+        )
+
+    def resolve_authoring_voice_context(
+        self,
+        settings: GenerationSettings,
+        *,
+        presentation: VoicePresentation = "auto",
+        description: str = "",
+        remember: bool = False,
+    ) -> VoiceContext:
+        profile = None
+        if settings.voice_source_mode == "profile" and settings.voice_profile_id:
+            profile = self.service.get_voice_profile(settings.voice_profile_id)
+        fixed_voice_id = ""
+        if profile is None:
+            fixed_voice_id = (
+                settings.higgs_voice
+                or settings.speaker_id
+                or "default"
+            )
+        return self.voice_context_resolver.resolve(
+            profile=profile,
+            fixed_voice_id=fixed_voice_id,
+            presentation=presentation,
+            description=description,
+            remember=remember,
+        )
+
+    def generate_authoring_candidates(
+        self,
+        source_text: str,
+        brief: AuthoringBrief | dict,
+        voice_context: VoiceContext | dict,
+        dialect_id: str,
+        *,
+        parent_candidate_id: str = "",
+        on_notice: Callable[[str], None] | None = None,
+        cancel_event: Event | None = None,
+    ) -> AuthoringSession:
+        resolved_brief = (
+            brief
+            if isinstance(brief, AuthoringBrief)
+            else AuthoringBrief.model_validate(brief)
+        )
+        resolved_voice = (
+            voice_context
+            if isinstance(voice_context, VoiceContext)
+            else VoiceContext.model_validate(voice_context)
+        )
+        return self.authoring.generate(
+            source_text,
+            resolved_brief,
+            resolved_voice,
+            dialect_id,
+            parent_candidate_id=parent_candidate_id,
+            on_notice=on_notice,
+            cancel_event=cancel_event,
         )
 
     # --- Runtime devices ----------------------------------------------------

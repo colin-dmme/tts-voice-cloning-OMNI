@@ -64,6 +64,57 @@ class FunctionTask(QRunnable):
             self.signals.completed.emit(result)
 
 
+class AuthoringWorker(QThread):
+    """Cancellable AI-authoring worker; never touches a widget directly."""
+
+    completed = Signal(object)  # AuthoringSession
+    failed = Signal(str)
+    notice = Signal(str)
+    cancelled = Signal()
+
+    def __init__(
+        self,
+        controller: AppController,
+        *,
+        source_text: str,
+        brief,
+        voice_context,
+        dialect_id: str,
+        parent_candidate_id: str = "",
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._controller = controller
+        self._source_text = source_text
+        self._brief = brief
+        self._voice_context = voice_context
+        self._dialect_id = dialect_id
+        self._parent_candidate_id = parent_candidate_id
+        self._cancel_event = Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
+
+    def run(self) -> None:
+        try:
+            result = self._controller.generate_authoring_candidates(
+                self._source_text,
+                self._brief,
+                self._voice_context,
+                self._dialect_id,
+                parent_candidate_id=self._parent_candidate_id,
+                on_notice=self.notice.emit,
+                cancel_event=self._cancel_event,
+            )
+        except Exception as error:
+            if self._cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.failed.emit(str(error))
+        else:
+            self.completed.emit(result)
+
+
 class GenerationWorker(QThread):
     progress_event = Signal(object)  # ProgressEvent
     file_event = Signal(object)  # FileGenerationEvent

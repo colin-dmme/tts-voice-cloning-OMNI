@@ -11,6 +11,7 @@ from omni_tts_core.app_controller import AppController
 from omni_tts_core.hardware_monitor import HardwareProbe
 from omni_tts_core.safety_coordinator import SafetyGate
 from omni_tts_ui_qt.main_window import MainWindow
+from omni_tts_ui_qt.pages.ai_api_page import AiApiPage
 from omni_tts_ui_qt.pages.contact_page import ContactPage
 from omni_tts_ui_qt.pages.license_page import LicensePage
 from omni_tts_ui_qt.pages.models_page import ModelsPage
@@ -25,6 +26,7 @@ def _page_factories():
         ("studio", "Studio", "🎙", StudioPage),
         ("models", "Model", "📦", ModelsPage),
         ("voices", "Giọng", "🗣", VoicesPage),
+        ("ai_api", "AI / API", "✨", AiApiPage),
         ("license", "Bản quyền", "🔑", LicensePage),
         ("contact", "Liên hệ", "✉", ContactPage),
     ]

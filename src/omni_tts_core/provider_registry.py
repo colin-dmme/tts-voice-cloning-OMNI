@@ -28,6 +28,11 @@ class ProviderDescriptor:
     engine_factory: EngineFactory
     controls: frozenset[str] = frozenset()
     max_parallel_jobs: int = 1
+    # Optional provider-neutral authoring contract.  A future TTS provider only
+    # declares its dialect/features and supplies an adapter; GUI code never
+    # branches on provider_id.
+    authoring_dialect: str | None = None
+    authoring_features: frozenset[str] = frozenset()
 
 
 def _omnivoice(spec: ModelSpec, cache: object | None) -> BaseTtsEngine:
@@ -81,6 +86,18 @@ PROVIDERS: dict[str, ProviderDescriptor] = {
         _simple(HiggsRemoteEngine),
         frozenset({"higgs_remote", "higgs_script"}),
         2,
+        "higgs_v1",
+        frozenset(
+            {
+                "emotion",
+                "style",
+                "pace",
+                "pitch",
+                "expressiveness",
+                "pause",
+                "vocal_sfx",
+            }
+        ),
     ),
 }
 

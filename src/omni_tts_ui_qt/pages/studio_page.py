@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -56,11 +57,15 @@ from omni_tts_core.ui_presenters.history_details import format_history_settings
 from omni_tts_core.ui_presenters.search import matches_search
 from omni_tts_ui_qt.background import GenerationWorker
 from omni_tts_ui_qt.context import AppContext
+from omni_tts_ui_qt.dialogs.authoring_director_dialog import (
+    AuthoringDirectorDialog,
+)
 from omni_tts_ui_qt.models.queue_model import ProgressBarDelegate, QueueTableModel
 from omni_tts_ui_qt.models.history_model import HistoryTableModel
 from omni_tts_ui_qt.pages.queue_controller import QueueController
 from omni_tts_ui_qt.pages.settings_panel import SettingsPanel
 from omni_tts_ui_qt.widgets.higgs_script_toolbar import HiggsScriptToolbar
+from omni_tts_ui_qt.widgets.authoring_assist_bar import AuthoringAssistBar
 from omni_tts_ui_qt.widgets.common import open_path
 
 _FILTERS = [
@@ -295,6 +300,14 @@ class StudioPage(QWidget):
         layout = QVBoxLayout(widget)
         self.text_input = QPlainTextEdit()
         self.text_input.setPlaceholderText("Nhập nội dung cần đọc…")
+        self.authoring_assist_bar = AuthoringAssistBar()
+        self.authoring_assist_bar.setVisible(False)
+        self.authoring_assist_bar.director_requested.connect(
+            self._open_authoring_director
+        )
+        self.authoring_assist_bar.configure_requested.connect(
+            lambda: self.context.show_page("ai_api")
+        )
         self.higgs_script_toolbar = HiggsScriptToolbar()
         self.higgs_script_toolbar.setVisible(False)
         self.higgs_script_toolbar.token_requested.connect(
@@ -336,6 +349,7 @@ class StudioPage(QWidget):
         self.text_progress_bar.setVisible(False)
         text_progress_row.addWidget(self.text_job_label, 1)
         text_progress_row.addWidget(self.text_progress_bar, 1)
+        layout.addWidget(self.authoring_assist_bar)
         layout.addWidget(self.higgs_script_toolbar)
         layout.addWidget(self.text_input, 1)
         layout.addLayout(stem_row)
@@ -569,6 +583,57 @@ class StudioPage(QWidget):
             self.settings_panel.current_model_id()
         )
         self.higgs_script_toolbar.setVisible(bool(policy.higgs_script))
+        authoring_policy = self.ctrl.authoring_policy(
+            self.settings_panel.current_model_id()
+        )
+        self.authoring_assist_bar.apply_policy(authoring_policy)
+
+    def _open_authoring_director(self) -> None:
+        text = self.text_input.toPlainText()
+        if not text.strip():
+            QMessageBox.information(
+                self,
+                "AI đạo diễn",
+                "Hãy nhập nội dung cần đọc trước khi phân tích.",
+            )
+            return
+        settings = self.settings_panel.current_settings()
+        policy = self.ctrl.authoring_policy(settings.model_id)
+        if not policy.supported:
+            QMessageBox.information(
+                self,
+                "AI đạo diễn",
+                policy.tooltip,
+            )
+            return
+        if not policy.configured:
+            QMessageBox.information(
+                self,
+                "Chưa cấu hình Gemini",
+                policy.tooltip,
+            )
+            self.context.show_page("ai_api")
+            return
+        dialog = AuthoringDirectorDialog(
+            self.context,
+            source_text=text,
+            settings=settings,
+            dialect_id=policy.dialect_id,
+            parent=self,
+        )
+        if (
+            dialog.exec() == QDialog.DialogCode.Accepted
+            and dialog.selected_text
+        ):
+            cursor = self.text_input.textCursor()
+            cursor.beginEditBlock()
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.insertText(dialog.selected_text)
+            cursor.endEditBlock()
+            self.text_input.setTextCursor(cursor)
+            self.context.log(
+                "Đã áp dụng phương án AI vào tab Văn bản; có thể Undo để quay lại."
+            )
 
     def _insert_higgs_token(self, token: str) -> None:
         cursor = self.text_input.textCursor()

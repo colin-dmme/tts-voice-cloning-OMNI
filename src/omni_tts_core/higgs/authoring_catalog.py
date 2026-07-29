@@ -36,8 +36,8 @@ class HiggsTagGroup:
 
 
 _DELIVERY_USAGE = (
-    "đặt trước câu hoặc đoạn cần điều khiển; hiệu lực tiếp tục cho tới "
-    "khi có tag cùng loại mới."
+    "đặt ở đầu câu cần điều khiển. Nếu câu tiếp theo cần sắc thái khác, "
+    "hãy đặt tag mới ở đầu câu đó."
 )
 _SFX_USAGE = (
     "chèn sát ngay trước từ tượng thanh tương ứng, không để khoảng trắng; "

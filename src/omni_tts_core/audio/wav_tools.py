@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -102,6 +103,29 @@ def save_audio(
         save_mp3(path, audio, sample_rate, mp3_bitrate_kbps)
         return
     save_wav(path, audio, sample_rate)
+
+
+def save_audio_atomic(
+    path: Path,
+    audio: np.ndarray,
+    sample_rate: int,
+    output_format: str = "wav",
+    mp3_bitrate_kbps: int = 192,
+) -> None:
+    """Encode an audio artifact privately, then publish it atomically."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{path.stem}.",
+        suffix=path.suffix,
+        dir=path.parent,
+        delete=False,
+    ) as handle:
+        temp_path = Path(handle.name)
+    try:
+        save_audio(temp_path, audio, sample_rate, output_format, mp3_bitrate_kbps)
+        os.replace(str(temp_path), str(path))
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def save_mp3(path: Path, audio: np.ndarray, sample_rate: int, bitrate_kbps: int = 192) -> None:

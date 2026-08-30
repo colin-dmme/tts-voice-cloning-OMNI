@@ -95,6 +95,32 @@ class StreamingEngine:
         return results
 
 
+class PartialStreamingEngine:
+    """Expose a short callback artifact, then return the full batch result."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def generate(self, request):
+        raise AssertionError("split output should use generate_batch")
+
+    def generate_batch(self, requests, progress_callback=None, chunk_callback=None):
+        chunk_dir = self.root / "partial_chunks"
+        chunk_dir.mkdir()
+        results = []
+        for index, _request in enumerate(requests):
+            short = np.zeros(240, dtype=np.float32)
+            full = np.zeros(2400, dtype=np.float32)
+            path = chunk_dir / f"chunk_{index:03d}.wav"
+            sf.write(str(path), short, 24000)
+            if chunk_callback is not None:
+                chunk_callback(index, path)
+            if progress_callback is not None:
+                progress_callback(index + 1, len(requests))
+            results.append(TtsEngineResult(audio=full, sample_rate=24000))
+        return results
+
+
 class StemSuffixServiceTest(unittest.TestCase):
     def _service(self, root: Path) -> tuple[TtsService, ModelSpec]:
         spec = ModelSpec(
@@ -327,7 +353,7 @@ class SplitBatchServiceTest(unittest.TestCase):
             self.assertIn("2\n00:00:00,510 -->", srt_text)
             self.assertIn("This sentence is intentionally long", srt_text)
 
-    def test_split_source_file_writes_completed_units_during_batch(self) -> None:
+    def test_split_source_file_defers_production_outputs_until_batch_finishes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             source = root / "stream.srt"
@@ -371,9 +397,52 @@ class SplitBatchServiceTest(unittest.TestCase):
 
             result = service.generate_from_source_file(source, request, output_dir=root)
 
-            self.assertTrue(engine.first_output_seen_before_return)
+            self.assertFalse(engine.first_output_seen_before_return)
             self.assertEqual(len(result.item_audio_paths), 2)
             self.assertTrue(expected_first_output.exists())
+
+    def test_split_source_file_reconciles_partial_callback_from_final_batch_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "partial.srt"
+            source.write_text(
+                "1\n00:00:00,000 --> 00:00:01,000\nOnly line.",
+                encoding="utf-8",
+            )
+            spec = ModelSpec(
+                model_id="fake_qwen",
+                display_name="Fake Qwen",
+                provider="qwen",
+                model_type="tts",
+                local_path=root / "model",
+                hf_repo="fake/qwen",
+                language_priority="en",
+                capabilities=ModelCapabilities(supported_languages=["en"]),
+            )
+            service = TtsService(
+                settings=DummySettings(root),
+                registry=FakeRegistry(spec),
+                storage=FakeStorage(),
+            )
+            service._engines[spec.model_id] = PartialStreamingEngine(root)
+
+            request = GenerateSpeechRequest(
+                text="file input",
+                language="en",
+                model_id=spec.model_id,
+                max_chunk_chars=80,
+                output_mode="split",
+                output_srt=True,
+                join_split_output_audio=True,
+            )
+
+            result = service.generate_from_source_file(source, request, output_dir=root)
+
+            split_info = sf.info(str(result.item_audio_paths[0]))
+            joined_info = sf.info(str(result.audio_path))
+            self.assertAlmostEqual(split_info.duration, 0.1)
+            self.assertAlmostEqual(joined_info.duration, 0.1)
+            self.assertIn("00:00:00,100", result.srt_path.read_text(encoding="utf-8"))
 
     def test_split_source_file_can_write_joined_audio_for_timeline_srt(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

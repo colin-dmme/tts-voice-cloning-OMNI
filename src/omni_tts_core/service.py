@@ -7,7 +7,7 @@ from omni_tts_core.audio.wav_tools import (
     concatenate_segments_with_pauses,
     duration_seconds,
     read_audio_mono,
-    save_audio,
+    save_audio_atomic,
 )
 from omni_tts_core.chunk_join import resolve_chunk_join_policy
 from omni_tts_core.config import AppSettings
@@ -846,7 +846,13 @@ class TtsService:
             request.output_srt,
             request.output_audio_format,
         )
-        save_audio(audio_path, combined, sample_rate, request.output_audio_format, request.mp3_bitrate_kbps)
+        save_audio_atomic(
+            audio_path,
+            combined,
+            sample_rate,
+            request.output_audio_format,
+            request.mp3_bitrate_kbps,
+        )
         if request.output_srt and srt_path is not None:
             write_srt(srt_path, timings)
 
@@ -1248,10 +1254,13 @@ class TtsService:
             0,
             len(engine_requests),
         )
-        saved_audio_paths: dict[int, Path] = {}
+        # Chunk callbacks are progress/checkpoint notifications only.  They
+        # must never publish production split files because a callback may be
+        # delivered before the engine has returned its authoritative results.
+        published_chunk_paths: dict[int, Path] = {}
         saved_durations: dict[int, float] = {}
         saved_segment_counts: dict[int, int] = {}
-        chunk_paths: dict[int, Path] = {}
+        saved_audio_paths: dict[int, Path] = {}
 
         def remember_saved(
             job_index: int,
@@ -1263,36 +1272,11 @@ class TtsService:
             saved_durations[job_index] = audio_duration
             saved_segment_counts[job_index] = segment_count
 
-        def save_ready_jobs_from_chunk_paths() -> None:
-            for job_index, job in enumerate(split_jobs, start=1):
-                if job_index in saved_audio_paths:
-                    continue
-                start_index = job["start_index"]
-                paths = []
-                for chunk_index in range(start_index, start_index + job["count"]):
-                    path = chunk_paths.get(chunk_index)
-                    if path is None:
-                        break
-                    paths.append(path)
-                else:
-                    check_cancel(cancel_event)
-                    job_results = [_read_tts_result(path) for path in paths]
-                    audio_path, audio_duration, segment_count = self._save_split_job_outputs(
-                        job,
-                        job_results,
-                        request,
-                    )
-                    remember_saved(job_index, audio_path, audio_duration, segment_count)
-                    emit_progress(
-                        progress_callback,
-                        f"Hoàn tất file {job_index}/{len(split_jobs)}.",
-                        job_index,
-                        len(split_jobs),
-                    )
-
         def on_chunk_ready(chunk_index: int, path: Path) -> None:
-            chunk_paths[chunk_index] = path
-            save_ready_jobs_from_chunk_paths()
+            # Keep this for observability and future explicit preview support,
+            # but do not read or encode the file here.  The worker callback is
+            # not the authoritative final-result boundary.
+            published_chunk_paths[chunk_index] = path
 
         def on_batch_progress(done: int, total: int) -> None:
             emit_progress(
@@ -1311,9 +1295,10 @@ class TtsService:
         if len(batch_results) != len(engine_requests):
             raise ConfigError("Engine trả về số đoạn audio không khớp với yêu cầu.")
 
+        # Always reconcile every split job from the authoritative batch
+        # results.  A callback may have observed a partially written file, so
+        # no callback-created artifact or duration is trusted for production.
         for job_index, job in enumerate(split_jobs, start=1):
-            if job_index in saved_audio_paths:
-                continue
             check_cancel(cancel_event)
             emit_progress(
                 progress_callback,
@@ -1347,16 +1332,6 @@ class TtsService:
             raise ConfigError("Không lưu đủ số file audio đã tách.")
         paragraph_pauses_ms = _paragraph_pause_values(request, len(split_jobs))
 
-        srt_path = None
-        if request.output_srt:
-            srt_path = output_dir / f"{output_stem}.srt"
-            write_srt(
-                srt_path,
-                _split_timeline_segments(
-                    split_jobs, saved_durations, paragraph_pauses_ms
-                ),
-            )
-
         joined_audio_path = None
         joined_duration = None
         if request.join_split_output_audio:
@@ -1371,6 +1346,22 @@ class TtsService:
                 request,
                 paragraph_pauses_ms,
             )
+
+        timeline_segments = _split_timeline_segments(
+            split_jobs, saved_durations, paragraph_pauses_ms
+        )
+        if joined_duration is not None and timeline_segments:
+            timeline_delta = abs(timeline_segments[-1].end_seconds - joined_duration)
+            if timeline_delta > 0.5:
+                raise ConfigError(
+                    "Timeline SRT không khớp duration audio tổng sau finalization "
+                    f"(lệch {timeline_delta:.3f}s)."
+                )
+
+        srt_path = None
+        if request.output_srt:
+            srt_path = output_dir / f"{output_stem}.srt"
+            write_srt(srt_path, timeline_segments)
 
         return GenerateSpeechResult(
             job_id=job_id,
@@ -1405,7 +1396,13 @@ class TtsService:
         audio_path = job["audio_path"]
         if request.append_stem_suffix:
             audio_path = _with_duration_suffix(audio_path, audio_duration)
-        save_audio(audio_path, combined, sample_rate, request.output_audio_format, request.mp3_bitrate_kbps)
+        save_audio_atomic(
+            audio_path,
+            combined,
+            sample_rate,
+            request.output_audio_format,
+            request.mp3_bitrate_kbps,
+        )
 
         return audio_path, audio_duration, segment_count
 
@@ -1457,7 +1454,13 @@ class TtsService:
             paragraph_pauses_ms,
             0,
         )
-        save_audio(output_path, combined, sample_rate, request.output_audio_format, request.mp3_bitrate_kbps)
+        save_audio_atomic(
+            output_path,
+            combined,
+            sample_rate,
+            request.output_audio_format,
+            request.mp3_bitrate_kbps,
+        )
         return duration_seconds(combined, sample_rate)
 
 

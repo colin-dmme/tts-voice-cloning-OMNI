@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import wave
 from collections import OrderedDict
@@ -64,24 +65,33 @@ def _synthesize(payload: dict) -> None:
     for chunk in payload.get("chunks") or []:
         output_path = Path(chunk["output_path"])
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with wave.open(str(output_path), "wb") as wav_file:
-            segments = chunk.get("segments")
-            if isinstance(segments, list) and segments:
-                _synthesize_segments(
-                    voice,
-                    segments,
-                    wav_file,
-                    synthesis_config,
-                    fallback_sentence_pause_ms=max(
-                        0, int(payload.get("sentence_pause_ms") or 0)
-                    ),
-                )
-            else:
-                voice.synthesize_wav(
-                    str(chunk["text"]),
-                    wav_file,
-                    syn_config=synthesis_config,
-                )
+        part_path = output_path.with_name(output_path.name + ".part")
+        part_path.unlink(missing_ok=True)
+        try:
+            with wave.open(str(part_path), "wb") as wav_file:
+                segments = chunk.get("segments")
+                if isinstance(segments, list) and segments:
+                    _synthesize_segments(
+                        voice,
+                        segments,
+                        wav_file,
+                        synthesis_config,
+                        fallback_sentence_pause_ms=max(
+                            0, int(payload.get("sentence_pause_ms") or 0)
+                        ),
+                    )
+                else:
+                    voice.synthesize_wav(
+                        str(chunk["text"]),
+                        wav_file,
+                        syn_config=synthesis_config,
+                    )
+            # The final name is published only after Wave_write has closed and
+            # patched its header.  Readers therefore never observe a growing
+            # production WAV as if it were complete.
+            os.replace(str(part_path), str(output_path))
+        finally:
+            part_path.unlink(missing_ok=True)
 
 
 def _synthesize_segments(

@@ -33,7 +33,21 @@ class PauseExplanationTest(unittest.TestCase):
         )
         self.assertIn("Ngắt nghỉ theo dấu câu đang tắt", explanation.section)
         self.assertIn("nghỉ đoạn gốc 0,3 giây", explanation.section)
-        self.assertIn("Ranh giới chunk dùng 0,12 giây", explanation.section)
+        self.assertIn("chèn khoảng lặng cố định 0,12 giây", explanation.section)
+
+    def test_each_chunk_join_mode_has_an_unambiguous_explanation(self) -> None:
+        auto = build_pause_explanation({"chunk_join_mode": "auto"})
+        crossfade = build_pause_explanation(
+            {"chunk_join_mode": "crossfade", "chunk_crossfade_ms": 80}
+        )
+        direct = build_pause_explanation({"chunk_join_mode": "direct"})
+        silence = build_pause_explanation(
+            {"chunk_join_mode": "silence", "chunk_pause_ms": 210}
+        )
+        self.assertIn("AUTO theo chính sách của provider", auto.section)
+        self.assertIn("crossfade 0,08 giây", crossfade.section)
+        self.assertIn("không chèn khoảng lặng và không crossfade", direct.section)
+        self.assertIn("0,21 giây", silence.section)
 
     def test_random_paragraph_range_is_explained_without_stacking(self) -> None:
         explanation = build_pause_explanation(

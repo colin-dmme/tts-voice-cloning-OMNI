@@ -6,7 +6,7 @@ set HF_HOME=%CD%\.hf_cache
 set HF_HUB_CACHE=%CD%\.hf_cache\hub
 set HF_HUB_DISABLE_SYMLINKS_WARNING=1
 
-echo Installing VieNeu-TTS worker with CUDA support (GTX 1080 Ti / Pascal+)...
+echo Installing VieNeu v2 worker with CUDA support (GTX 1080 Ti / Pascal+)...
 echo Requires: NVIDIA GPU with CUDA 11.x driver (Pascal / Turing / Ampere)
 echo.
 
@@ -27,7 +27,7 @@ uv pip install --python "%PY%" --force-reinstall torch torchaudio --index-url ht
 :: VieNeu package. CUDA acceleration is guaranteed for torch/ONNX modes.
 :: GGUF CUDA additionally needs a compatible local llama-cpp-python CUDA wheel.
 echo [2/6] Installing VieNeu package...
-uv pip install --python "%PY%" --force-reinstall "vieneu>=3.2.3" --extra-index-url https://pnnbao97.github.io/llama-cpp-python-v0.3.16/cpu/
+uv pip install --python "%PY%" --force-reinstall "vieneu==3.2.3" --extra-index-url https://pnnbao97.github.io/llama-cpp-python-v0.3.16/cpu/
 if errorlevel 1 (
     exit /b 1
 )

@@ -7,7 +7,7 @@ GenerateSpeechRequest. Any GUI binds its widgets to these fields and calls
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,7 @@ from omni_tts_shared.schemas import (
     HiggsTtsOptions,
     RemoteEndpointOptions,
 )
+from omni_tts_shared.pronunciation import PronunciationSelection
 
 
 # Default preference values for every generation field. Window/layout keys are
@@ -26,6 +27,8 @@ DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "voice_source_mode": "fixed",
     "voice_profile_id": None,
     "speaker_id": None,
+    "designed_voice_id": None,
+    "omnivoice_num_step": None,
     "output_dir": "",
     "output_stem": "",
     "speed": 1.0,
@@ -35,6 +38,9 @@ DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "codec_repo": None,
     "temperature": None,
     "top_k": None,
+    "piper_noise_scale": 0.667,
+    "piper_noise_w": 0.8,
+    "piper_seed": None,
     "f5_nfe_step": None,
     "f5_cfg_strength": None,
     "f5_sway_sampling_coef": None,
@@ -77,7 +83,9 @@ DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "ellipsis_pause_random_enabled": False,
     "ellipsis_pause_min_ms": 380,
     "ellipsis_pause_max_ms": 550,
+    "chunk_join_mode": "auto",
     "chunk_pause_ms": 120,
+    "chunk_crossfade_ms": 80,
     "paragraph_pause_ms": 600,
     "paragraph_pause_random_enabled": False,
     "paragraph_pause_min_ms": 500,
@@ -115,6 +123,9 @@ DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "higgs_pitch": "",
     "higgs_expressiveness": "",
     "higgs_delivery_tags": "",
+    "pronunciation_enabled": False,
+    "pronunciation_preset_ids": [],
+    "provider_options": {},
 }
 
 # Keys that carry a filesystem path and round-trip as strings in preferences.
@@ -130,6 +141,8 @@ class GenerationSettings:
     reference_audio_path: Path | None = None
     reference_text: str = ""
     speaker_id: str | None = None
+    designed_voice_id: str | None = None
+    omnivoice_num_step: int | None = None
     speed: float = 1.0
     pitch_shift: float = 0.0
     emotion: str = "natural"
@@ -137,6 +150,9 @@ class GenerationSettings:
     codec_repo: str | None = None
     temperature: float | None = None
     top_k: int | None = None
+    piper_noise_scale: float = 0.667
+    piper_noise_w: float = 0.8
+    piper_seed: int | None = None
     f5_nfe_step: int | None = None
     f5_cfg_strength: float | None = None
     f5_sway_sampling_coef: float | None = None
@@ -179,7 +195,9 @@ class GenerationSettings:
     ellipsis_pause_random_enabled: bool = False
     ellipsis_pause_min_ms: int = 380
     ellipsis_pause_max_ms: int = 550
+    chunk_join_mode: str = "auto"
     chunk_pause_ms: int = 120
+    chunk_crossfade_ms: int = 80
     paragraph_pause_ms: int = 600
     paragraph_pause_random_enabled: bool = False
     paragraph_pause_min_ms: int = 500
@@ -188,6 +206,9 @@ class GenerationSettings:
     max_chunk_chars: int = 220
     output_dir: Path | None = None
     output_stem: str | None = None
+    # Transient per-generation flag (not persisted in the shared preferences):
+    # append a "_{voice}_{duration}" suffix to the output filename.
+    append_stem_suffix: bool = False
     overwrite: bool = False
     split_output: bool = True
     output_audio_format: str = "wav"
@@ -219,6 +240,9 @@ class GenerationSettings:
     higgs_pitch: str = ""
     higgs_expressiveness: str = ""
     higgs_delivery_tags: str = ""
+    pronunciation_enabled: bool = False
+    pronunciation_preset_ids: list[str] = field(default_factory=list)
+    provider_options: dict[str, Any] = field(default_factory=dict)
 
     def to_request(self, text: str) -> GenerateSpeechRequest:
         return GenerateSpeechRequest(
@@ -230,6 +254,8 @@ class GenerationSettings:
             reference_audio_path=self.reference_audio_path,
             reference_text=self.reference_text.strip() or None,
             speaker_id=self.speaker_id,
+            designed_voice_id=self.designed_voice_id,
+            omnivoice_num_step=self.omnivoice_num_step,
             speed=self.speed,
             pitch_shift=self.pitch_shift,
             emotion=self.emotion,
@@ -237,6 +263,9 @@ class GenerationSettings:
             codec_repo=self.codec_repo,
             temperature=self.temperature,
             top_k=self.top_k,
+            piper_noise_scale=self.piper_noise_scale,
+            piper_noise_w=self.piper_noise_w,
+            piper_seed=self.piper_seed,
             f5_nfe_step=self.f5_nfe_step,
             f5_cfg_strength=self.f5_cfg_strength,
             f5_sway_sampling_coef=self.f5_sway_sampling_coef,
@@ -279,7 +308,9 @@ class GenerationSettings:
             ellipsis_pause_random_enabled=self.ellipsis_pause_random_enabled,
             ellipsis_pause_min_ms=self.ellipsis_pause_min_ms,
             ellipsis_pause_max_ms=self.ellipsis_pause_max_ms,
+            chunk_join_mode=self.chunk_join_mode,
             chunk_pause_ms=self.chunk_pause_ms,
+            chunk_crossfade_ms=self.chunk_crossfade_ms,
             paragraph_pause_ms=self.paragraph_pause_ms,
             paragraph_pause_random_enabled=self.paragraph_pause_random_enabled,
             paragraph_pause_min_ms=self.paragraph_pause_min_ms,
@@ -290,6 +321,7 @@ class GenerationSettings:
             max_chunk_chars=self.max_chunk_chars,
             output_dir=self.output_dir,
             output_stem=self.output_stem,
+            append_stem_suffix=self.append_stem_suffix,
             overwrite=self.overwrite,
             output_mode="split" if self.split_output else "merged",
             output_audio_format=self.output_audio_format,
@@ -325,6 +357,11 @@ class GenerationSettings:
                 expressiveness=self.higgs_expressiveness,
                 delivery_tags=self.higgs_delivery_tags,
             ),
+            pronunciation=PronunciationSelection(
+                enabled=self.pronunciation_enabled,
+                preset_ids=list(self.pronunciation_preset_ids),
+            ),
+            provider_options=dict(self.provider_options),
         )
 
     @classmethod
@@ -333,6 +370,10 @@ class GenerationSettings:
         saved = {key: value for key, value in data.items() if key in merged}
         if "chunk_pause_ms" not in saved and "sentence_pause_ms" in saved:
             saved["chunk_pause_ms"] = saved["sentence_pause_ms"]
+        if "chunk_join_mode" not in saved and "chunk_pause_ms" in saved:
+            saved["chunk_join_mode"] = (
+                "crossfade" if int(saved["chunk_pause_ms"] or 0) == 0 else "silence"
+            )
         merged.update(saved)
         field_names = {field.name for field in fields(cls)}
         kwargs: dict[str, Any] = {}

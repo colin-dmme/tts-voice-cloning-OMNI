@@ -136,18 +136,18 @@ tts_models:
       install_note: "Cài Piper worker một lần, sau đó tải riêng package giọng."
 
   vieneu_v3_turbo:
-    display_name: "VieNeu TTS v3 Turbo 48 kHz"
+    display_name: "VieNeu v3 Turbo 3.3 · 48 kHz"
     provider: "vieneu"
     model_type: "tts"
-    local_path: "engines/vieneu_worker/.venv"
+    local_path: "engines/vieneu_v3_worker/.venv"
     hf_repo: "pnnbao-ump/VieNeu-TTS-v3-Turbo"
     language_priority: "vi-en"
     required: false
     voice_input:
       modes: ["fixed", "profile"]
       default_mode: "fixed"
-      fixed_label: "Giọng dựng sẵn VieNeu v3"
-      fixed_tooltip: "10 giọng 48 kHz tích hợp sẵn, ổn định và không cần audio mẫu."
+      fixed_label: "20 giọng dựng sẵn VieNeu v3.3"
+      fixed_tooltip: "20 giọng 48 kHz chính thức trong VieNeu SDK 3.3.0; không cần audio mẫu."
       profile_label: "Clone từ Profile (3-5 giây)"
       profile_tooltip: "Chỉ khi chọn chế độ này app mới đọc audio mẫu trong Profile."
     capabilities:
@@ -159,6 +159,10 @@ tts_models:
       supports_pitch_shift: false
       supports_emotion: false
     runtime:
+      worker_name: "vieneu_v3_worker"
+      worker_label: "VieNeu v3"
+      base_installer_windows: "install_vieneu_v3_worker.bat"
+      gpu_installer_windows: "install_vieneu_v3_worker_cuda.bat"
       vieneu_mode: "v3turbo"
       backbone_repo: "pnnbao-ump/VieNeu-TTS-v3-Turbo"
       moss_tokenizer: "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano"
@@ -171,6 +175,8 @@ tts_models:
       max_batch_size: 16
       temperature: 0.8
       top_k: 25
+      repetition_window: 64
+      denoise_reference: true
       download_allow_patterns:
         - "update/*"
         - "onnx_int8/*"
@@ -180,23 +186,29 @@ tts_models:
         - "special_tokens_map.json"
         - "denoiser.onnx"
         - "speaker_encoder.onnx"
-    default_voice_preset: "Phạm Tuyên"
+    default_voice_preset: "Adam"
     voice_presets:
-      "Minh Đức": "Minh Đức - Nam Bắc, tin tức"
-      "Phạm Tuyên": "Phạm Tuyên - Nam Bắc, tự nhiên (mặc định)"
-      "Thái Sơn": "Thái Sơn - Nam miền Nam, kể chuyện"
-      "Xuân Vĩnh": "Xuân Vĩnh - Nam miền Nam, tự nhiên"
-      "Thanh Bình": "Thanh Bình - Nam Bắc, kể chuyện"
-      "Trúc Ly": "Trúc Ly - Nữ Bắc, tự nhiên"
-      "Ngọc Linh": "Ngọc Linh - Nữ Bắc, kể chuyện"
-      "Đoan Trang": "Đoan Trang - Nữ Bắc, tự nhiên"
-      "Mai Anh": "Mai Anh - Nữ Bắc, tin tức"
-      "Thục Đoan": "Thục Đoan - Nữ miền Nam, kể chuyện"
-      "Minh Triết": "Minh Triết - Nam miền Nam, tin tức"
-      "Thùy Dung": "Thùy Dung - Nữ miền Nam, tin tức"
-      "Quang Sơn": "Quang Sơn - Nam miền Trung, tự nhiên"
-      "Ngọc Trân": "Ngọc Trân - Nữ miền Trung, tự nhiên"
-    notes: "VieNeu v3 Turbo 0.1B, 48 kHz; ONNX CPU hoặc PyTorch GPU tự động, batch tối đa 16 trong app."
+      "Minh Đức": "Minh Đức · Nam · Bắc · Tin tức"
+      "Phạm Tuyên": "Phạm Tuyên · Nam · Bắc · Tự nhiên"
+      "Thái Sơn": "Thái Sơn · Nam · Nam · Kể chuyện"
+      "Xuân Vĩnh": "Xuân Vĩnh · Nam · Nam · Tự nhiên"
+      "Thanh Bình": "Thanh Bình · Nam · Bắc · Kể chuyện"
+      "Trúc Ly": "Trúc Ly · Nữ · Bắc · Tự nhiên"
+      "Ngọc Linh": "Ngọc Linh · Nữ · Bắc · Kể chuyện"
+      "Đoan Trang": "Đoan Trang · Nữ · Bắc · Tự nhiên"
+      "Mai Anh": "Mai Anh · Nữ · Bắc · Tin tức"
+      "Thục Đoan": "Thục Đoan · Nữ · Nam · Kể chuyện"
+      "Minh Triết": "Minh Triết · Nam · Nam · Tin tức"
+      "Thùy Dung": "Thùy Dung · Nữ · Nam · Tin tức"
+      "Quang Sơn": "Quang Sơn · Nam · Trung · Tự nhiên"
+      "Ngọc Trân": "Ngọc Trân · Nữ · Trung · Tự nhiên"
+      "Mỹ Duyên": "Mỹ Duyên · Nữ · Nam · Đọc truyện"
+      "Quỳnh Anh": "Quỳnh Anh · Nữ · Bắc · Đọc truyện"
+      "Đức Trí": "Đức Trí · Nam · Nam · Đọc truyện"
+      "Kim Thanh": "Kim Thanh · Nữ · Nam · Đọc truyện"
+      "Ngọc Huyền": "Ngọc Huyền · Nữ · Bắc · Tự nhiên"
+      "Adam": "Adam · Nam · Nam · Tự nhiên (mặc định SDK 3.3)"
+    notes: "VieNeu SDK 3.3.0, 48 kHz; Auto dùng CPU ONNX INT8, GPU PyTorch dành cho batch dài; worker độc lập với VieNeu v2."
     ref_audio_hints:
       min_seconds: 3.0
       max_seconds: 8.0
@@ -204,21 +216,22 @@ tts_models:
       optimal_max_seconds: 5.0
       needs_transcript: false
     catalog_info:
-      category: "official-gpu"
+      category: "official-cpu"
       origin: "official"
       family: "VieNeu"
-      variant: "v3 Turbo 48 kHz"
-      variant_badge: "v3 48k"
+      variant: "v3 Turbo 3.3 · 48 kHz"
+      variant_badge: "v3.3 48k"
       source_repo: "pnnbao-ump/VieNeu-TTS-v3-Turbo"
       risk: "test"
-      description: "Model 0.1B 48 kHz có 10 giọng dựng sẵn, clone tức thời và batch generation."
-      highlight: "Ưu tiên chất lượng/tốc độ cân bằng"
+      description: "VieNeu v3 Turbo 3.3 chạy CPU ONNX INT8 hoặc GPU PyTorch, có 20 giọng dựng sẵn, clone 3-8 giây và batch generation."
+      highlight: "20 giọng · CPU ONNX nhẹ · GPU batch"
       quality_score: 5
       speed_score: 5
       vram_mb: 5000
       ram_mb: 6000
+      hardware_label: "CPU ONNX INT8 mặc định · GPU PyTorch tùy chọn (~5 GB VRAM)"
       recommend_for: "Narration chất lượng cao, podcast nhiều chunk, A/B với Piper CPU"
-      install_note: "Cài/cập nhật VieNeu worker >=3.2.3 rồi tải model."
+      install_note: "Cài worker VieNeu v3 độc lập; CPU không cần PyTorch, GPU là tùy chọn cho batch dài."
 
   omnivoice_vietnamese:
     display_name: "OmniVoice Vietnamese (splendor1811)"
@@ -395,6 +408,7 @@ tts_models:
     capabilities:
       supported_languages: ["auto", "vi", "en"]
       supports_voice_profile: true
+      supports_voice_design: true
       supports_reference_text: true
       supports_speed: true
       supports_pitch_shift: false
@@ -1554,6 +1568,204 @@ tts_models:
       ram_mb: 1200
       recommend_for: "Máy yếu, clone giọng nhanh từ mẫu ngắn, cần điều chỉnh tốc độ"
       install_note: "install_valtec_worker.bat"
+
+  kokoro_82m_v1_timestamped_onnx:
+    display_name: "Kokoro 82M v1.0 Timestamped · ONNX Community · 54 giọng"
+    provider: "kokoro_onnx"
+    model_type: "tts"
+    local_path: "models/kokoro/onnx-community/kokoro-82m-v1-timestamped"
+    hf_repo: "onnx-community/Kokoro-82M-v1.0-ONNX-timestamped"
+    language_priority: "multilingual"
+    required: false
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Voice Kokoro (onnx-community)"
+      fixed_tooltip: "54 voice embedding từ bản chuyển đổi ONNX Community; không dùng Profile giọng."
+    capabilities:
+      supported_languages: ["en", "es", "fr", "hi", "it", "ja", "pt", "zh"]
+      supports_voice_profile: false
+      supports_voice_presets: true
+      supports_reference_text: false
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    default_voice_preset: "af_heart"
+    voice_presets:
+      af_heart: "US Female · Heart"
+      af_alloy: "US Female · Alloy"
+      af_aoede: "US Female · Aoede"
+      af_bella: "US Female · Bella"
+      af_jessica: "US Female · Jessica"
+      af_kore: "US Female · Kore"
+      af_nicole: "US Female · Nicole"
+      af_nova: "US Female · Nova"
+      af_river: "US Female · River"
+      af_sarah: "US Female · Sarah"
+      af_sky: "US Female · Sky"
+      am_adam: "US Male · Adam"
+      am_echo: "US Male · Echo"
+      am_eric: "US Male · Eric"
+      am_fenrir: "US Male · Fenrir"
+      am_liam: "US Male · Liam"
+      am_michael: "US Male · Michael"
+      am_onyx: "US Male · Onyx"
+      am_puck: "US Male · Puck"
+      am_santa: "US Male · Santa"
+      bf_alice: "British Female · Alice"
+      bf_emma: "British Female · Emma"
+      bf_isabella: "British Female · Isabella"
+      bf_lily: "British Female · Lily"
+      bm_daniel: "British Male · Daniel"
+      bm_fable: "British Male · Fable"
+      bm_george: "British Male · George"
+      bm_lewis: "British Male · Lewis"
+      ef_dora: "Spanish Female · Dora"
+      em_alex: "Spanish Male · Alex"
+      em_santa: "Spanish Male · Santa"
+      ff_siwis: "French Female · Siwis"
+      hf_alpha: "Hindi Female · Alpha"
+      hf_beta: "Hindi Female · Beta"
+      hm_omega: "Hindi Male · Omega"
+      hm_psi: "Hindi Male · Psi"
+      if_sara: "Italian Female · Sara"
+      im_nicola: "Italian Male · Nicola"
+      jf_alpha: "Japanese Female · Alpha"
+      jf_gongitsune: "Japanese Female · Gongitsune"
+      jf_nezumi: "Japanese Female · Nezumi"
+      jf_tebukuro: "Japanese Female · Tebukuro"
+      jm_kumo: "Japanese Male · Kumo"
+      pf_dora: "Portuguese Female · Dora"
+      pm_alex: "Portuguese Male · Alex"
+      pm_santa: "Portuguese Male · Santa"
+      zf_xiaobei: "Chinese Female · Xiaobei"
+      zf_xiaoni: "Chinese Female · Xiaoni"
+      zf_xiaoxiao: "Chinese Female · Xiaoxiao"
+      zf_xiaoyi: "Chinese Female · Xiaoyi"
+      zm_yunjian: "Chinese Male · Yunjian"
+      zm_yunxi: "Chinese Male · Yunxi"
+      zm_yunxia: "Chinese Male · Yunxia"
+      zm_yunyang: "Chinese Male · Yunyang"
+    runtime:
+      worker_name: "kokoro_worker"
+      worker_label: "Kokoro ONNX · onnx-community"
+      cpu_only: true
+      model_file: "onnx/model.onnx"
+      config_file: "config.json"
+      voices_dir: "voices"
+      combined_voices_file: ".omni-cache/voices-v1.0.bin"
+      required_files:
+        - "voices/af_heart.bin"
+        - "voices/zm_yunyang.bin"
+      language_map:
+        en: "en-us"
+        es: "es"
+        fr: "fr-fr"
+        hi: "hi"
+        it: "it"
+        ja: "ja"
+        pt: "pt-br"
+        zh: "cmn"
+      download_allow_patterns:
+        - "onnx/model.onnx"
+        - "config.json"
+        - "voices/*.bin"
+    notes: "Kokoro 82M v1.0 bản timestamped do onnx-community chuyển đổi; 54 giọng, CPU ONNX, không hỗ trợ tiếng Việt."
+    catalog_info:
+      category: "community-cpu"
+      origin: "community"
+      family: "Kokoro"
+      variant: "82M v1.0 Timestamped ONNX"
+      variant_badge: "ONNX · 54 Voices"
+      source_repo: "onnx-community/Kokoro-82M-v1.0-ONNX-timestamped"
+      base_model: "hexgrad/Kokoro-82M"
+      risk: "stable"
+      description: "Bản ONNX đa giọng cho Anh, Nhật, Trung, Tây Ban Nha, Pháp, Hindi, Ý và Bồ Đào Nha."
+      highlight: "54 giọng · CPU ONNX"
+      quality_score: 4
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 1000
+      recommend_for: "Audio tiếng Anh/Á/Âu nhanh trên CPU; không dùng cho tiếng Việt"
+      install_note: "Cài Kokoro worker một lần rồi tải model từ onnx-community."
+
+  supertonic_3_official_onnx:
+    display_name: "Supertonic 3 · ONNX Official · 31 ngôn ngữ"
+    provider: "supertonic"
+    model_type: "tts"
+    local_path: "models/supertonic/supertone/supertonic-3"
+    hf_repo: "Supertone/supertonic-3"
+    language_priority: "multilingual-vi"
+    required: false
+    voice_input:
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "Voice Style Supertonic Official"
+      fixed_tooltip: "10 voice style chính thức F1–F5 và M1–M5; không dùng Profile giọng."
+    capabilities:
+      supported_languages: ["ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hi", "hr", "hu", "id", "it", "ja", "ko", "lt", "lv", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "vi"]
+      supports_voice_profile: false
+      supports_voice_presets: true
+      supports_reference_text: false
+      supports_speed: true
+      supports_pitch_shift: false
+      supports_emotion: false
+    default_voice_preset: "M1"
+    voice_presets:
+      F1: "Official Female · F1"
+      F2: "Official Female · F2"
+      F3: "Official Female · F3"
+      F4: "Official Female · F4"
+      F5: "Official Female · F5"
+      M1: "Official Male · M1"
+      M2: "Official Male · M2"
+      M3: "Official Male · M3"
+      M4: "Official Male · M4"
+      M5: "Official Male · M5"
+    runtime:
+      worker_name: "supertonic_worker"
+      worker_label: "Supertonic 3 · Supertone Official"
+      cpu_only: true
+      model_file: "onnx/text_encoder.onnx"
+      config_file: "config.json"
+      required_files:
+        - "onnx/duration_predictor.onnx"
+        - "onnx/vector_estimator.onnx"
+        - "onnx/vocoder.onnx"
+        - "onnx/tts.json"
+        - "onnx/unicode_indexer.json"
+        - "voice_styles/F1.json"
+        - "voice_styles/F2.json"
+        - "voice_styles/F3.json"
+        - "voice_styles/F4.json"
+        - "voice_styles/F5.json"
+        - "voice_styles/M1.json"
+        - "voice_styles/M2.json"
+        - "voice_styles/M3.json"
+        - "voice_styles/M4.json"
+        - "voice_styles/M5.json"
+      download_allow_patterns:
+        - "config.json"
+        - "onnx/*.onnx"
+        - "onnx/*.json"
+        - "voice_styles/*.json"
+    notes: "Supertonic 3 chính thức, chạy ONNX CPU, 31 ngôn ngữ gồm tiếng Việt và 10 voice style dựng sẵn."
+    catalog_info:
+      category: "official-cpu"
+      origin: "official"
+      family: "Supertonic"
+      variant: "Supertonic 3 ONNX"
+      variant_badge: "Official · 31 Languages"
+      source_repo: "Supertone/supertonic-3"
+      risk: "stable"
+      description: "Model ONNX chính thức hỗ trợ 31 ngôn ngữ, đọc tiếng Việt và chạy hoàn toàn cục bộ trên CPU."
+      highlight: "Official · tiếng Việt · CPU"
+      quality_score: 4
+      speed_score: 5
+      vram_mb: 0
+      ram_mb: 1500
+      recommend_for: "TTS đa ngôn ngữ, đặc biệt cần tiếng Việt, chạy nhanh và ổn định trên CPU"
+      install_note: "Cài Supertonic worker một lần rồi tải model chính thức từ Supertone."
 
   higgs_tts3_remote:
     display_name: "Higgs TTS 3 · Remote GPU"

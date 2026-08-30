@@ -19,6 +19,7 @@ class ModelSpec:
     local_path: Path
     hf_repo: str
     language_priority: str
+    source_kind: str = "huggingface"
     required: bool = False
     notes: str = ""
     runtime: dict[str, Any] = field(default_factory=dict)
@@ -96,6 +97,7 @@ class ModelRegistry:
             local_path=resolve_model_path(str(raw["local_path"])),
             hf_repo=str(raw["hf_repo"]),
             language_priority=str(raw.get("language_priority", "multilingual")),
+            source_kind=str(raw.get("source_kind", "huggingface")).strip().lower(),
             required=bool(raw.get("required", False)),
             notes=str(raw.get("notes", "")),
             runtime=dict(raw.get("runtime", {}) or {}),
@@ -121,6 +123,8 @@ def _voice_input_from_capabilities(capabilities: ModelCapabilities) -> VoiceInpu
         modes.append("fixed")
     if capabilities.supports_voice_profile:
         modes.append("profile")
+    if capabilities.supports_voice_design:
+        modes.append("design")
     default_mode = "profile" if capabilities.requires_voice_profile else "fixed"
     return VoiceInputConfig(modes=modes, default_mode=default_mode)
 

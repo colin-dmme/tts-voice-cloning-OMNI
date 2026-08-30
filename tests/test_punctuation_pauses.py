@@ -6,7 +6,12 @@ import tempfile
 import unittest
 import wave
 
-from omni_tts_core.service import _chunk_pause_values, _paragraph_pause_values
+from omni_tts_core.service import (
+    _chunk_crossfade_ms,
+    _chunk_pause_values,
+    _chunks_for_provider,
+    _paragraph_pause_values,
+)
 from omni_tts_core.text.punctuation_pauses import (
     PauseRange,
     PunctuationPauseConfig,
@@ -143,6 +148,7 @@ class CoreChunkPauseTest(unittest.TestCase):
         request = GenerateSpeechRequest(
             text="x",
             model_id="piper",
+            chunk_join_mode="auto",
             chunk_pause_ms=120,
             sentence_pause_ms=320,
             comma_pause_ms=90,
@@ -170,9 +176,58 @@ class CoreChunkPauseTest(unittest.TestCase):
         )
         self.assertEqual(pauses, [120, 120])
 
+    def test_vieneu_auto_delegates_chunking_to_the_sdk(self) -> None:
+        text = "Câu thứ nhất rất dài. Câu thứ hai cũng rất dài."
+        self.assertEqual(
+            _chunks_for_provider(
+                text,
+                "vi",
+                20,
+                provider="vieneu",
+                chunk_join_mode="auto",
+            ),
+            [text],
+        )
+
+    def test_vieneu_custom_silence_keeps_core_chunking(self) -> None:
+        chunks = _chunks_for_provider(
+            "Câu thứ nhất rất dài. Câu thứ hai cũng rất dài.",
+            "vi",
+            20,
+            provider="vieneu",
+            chunk_join_mode="silence",
+        )
+        self.assertGreater(len(chunks), 1)
+
+    def test_crossfade_and_direct_never_insert_silence(self) -> None:
+        crossfade = GenerateSpeechRequest(
+            text="x",
+            chunk_join_mode="crossfade",
+            chunk_crossfade_ms=80,
+        )
+        direct = GenerateSpeechRequest(text="x", chunk_join_mode="direct")
+        chunks = ["Một.", "Hai."]
+        spec = _Spec("vieneu")
+        self.assertEqual(_chunk_pause_values(crossfade, spec, chunks), [0])
+        self.assertEqual(_chunk_crossfade_ms(crossfade, spec), 80)
+        self.assertEqual(_chunk_pause_values(direct, spec, chunks), [0])
+        self.assertEqual(_chunk_crossfade_ms(direct, spec), 0)
+
+    def test_request_defaults_to_auto_but_migrates_old_join_contract(self) -> None:
+        self.assertEqual(GenerateSpeechRequest(text="x").chunk_join_mode, "auto")
+        self.assertEqual(
+            GenerateSpeechRequest(text="x", chunk_pause_ms=120).chunk_join_mode,
+            "silence",
+        )
+        self.assertEqual(
+            GenerateSpeechRequest(text="x", chunk_pause_ms=0).chunk_join_mode,
+            "crossfade",
+        )
+
     def test_disabling_punctuation_falls_back_to_chunk_pause(self) -> None:
         request = GenerateSpeechRequest(
             text="x",
+            chunk_join_mode="auto",
             punctuation_pause_enabled=False,
             chunk_pause_ms=77,
         )
@@ -185,6 +240,7 @@ class CoreChunkPauseTest(unittest.TestCase):
         request = GenerateSpeechRequest(
             text="x",
             model_id="piper",
+            chunk_join_mode="auto",
             sentence_pause_random_enabled=True,
             sentence_pause_min_ms=275,
             sentence_pause_max_ms=325,

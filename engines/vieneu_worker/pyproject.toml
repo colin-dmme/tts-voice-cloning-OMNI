@@ -1,9 +1,11 @@
 [project]
 name = "vieneu-worker"
 version = "0.1.0"
-description = "Isolated VieNeu-TTS worker for Omni TTS Local."
+description = "Isolated VieNeu v2 worker for Omni TTS Local."
 requires-python = ">=3.10,<3.13"
 dependencies = [
+    # uv.lock keeps the VieNeu v2 runtime on 3.2.3; the Windows installers also
+    # re-apply that exact version so v3 packages never leak into this worker.
     "vieneu>=3.2.3",
     "neucodec>=0.0.5",
     "soundfile>=0.12.1",

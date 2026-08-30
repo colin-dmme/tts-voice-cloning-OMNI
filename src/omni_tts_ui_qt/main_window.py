@@ -102,6 +102,12 @@ class MainWindow(QMainWindow):
         self.page_title.setObjectName("pageTitle")
         self.safety_chip = SafetyChip()
         self.hardware_bar = HardwareBar()
+        self.release_vram_button = QPushButton("Giải phóng VRAM")
+        self.release_vram_button.setToolTip(
+            "Đóng model đang thường trú trong VRAM (OmniVoice / VieNeu v3 turbo…). "
+            "Lần tạo tiếp theo sẽ tự nạp lại."
+        )
+        self.release_vram_button.clicked.connect(self._release_vram)
         self.chart_toggle = QPushButton("Biểu đồ nhiệt")
         self.chart_toggle.setCheckable(True)
         self.chart_toggle.setChecked(bool(self._prefs_data.get("chart_visible", True)))
@@ -110,6 +116,7 @@ class MainWindow(QMainWindow):
         header.addStretch()
         header.addWidget(self.safety_chip)
         header.addWidget(self.hardware_bar, 1)
+        header.addWidget(self.release_vram_button)
         header.addWidget(self.chart_toggle)
         outer.addLayout(header)
 
@@ -188,6 +195,26 @@ class MainWindow(QMainWindow):
         self.temperature_chart.setVisible(visible)
         self._prefs_data["chart_visible"] = visible
 
+    def _release_vram(self) -> None:
+        if self._busy_pages():
+            QMessageBox.information(
+                self,
+                "Đang chạy tác vụ",
+                "Có tác vụ đang chạy. Hãy đợi hoàn tất hoặc bấm Hủy trước khi "
+                "giải phóng VRAM.",
+            )
+            return
+        try:
+            released = self.context.controller.release_vram()
+        except Exception as error:
+            self.log(f"Giải phóng VRAM thất bại: {error}")
+            QMessageBox.warning(self, "Không giải phóng được VRAM", str(error))
+            return
+        if released:
+            self.log("Đã giải phóng VRAM cho model: " + ", ".join(released))
+        else:
+            self.log("Không có model nào đang chiếm VRAM để giải phóng.")
+
     def log(self, message: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
         self.log_view.appendPlainText(f"[{stamp}] {message}")
@@ -244,4 +271,8 @@ class MainWindow(QMainWindow):
         self._prefs_data["window_geometry_b64"] = bytes(self.saveGeometry().toBase64()).decode("ascii")
         self._prefs_data["window_state_b64"] = bytes(self.saveState().toBase64()).decode("ascii")
         self._prefs.save(self._prefs_data)
+        try:
+            self.context.controller.release_vram()
+        except Exception:
+            pass
         super().closeEvent(event)

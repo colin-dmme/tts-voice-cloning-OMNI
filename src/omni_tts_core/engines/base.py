@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from typing import Callable
+from typing import Any
 
 import numpy as np
 from omni_tts_shared.schemas import HiggsTtsOptions, RemoteEndpointOptions
@@ -19,10 +20,18 @@ class TtsEngineRequest:
     speed: float
     pitch_shift: float
     emotion: str = "natural"
+    # OmniVoice Voice Design description; when set the engine synthesises from it
+    # instead of a reference/preset.
+    instruct: str | None = None
+    # OmniVoice diffusion steps (None = model default).
+    num_step: int | None = None
     runtime_target: str = "auto"
     codec_repo: str | None = None
     temperature: float | None = None
     top_k: int | None = None
+    piper_noise_scale: float = 0.667
+    piper_noise_w: float = 0.8
+    piper_seed: int | None = None
     f5_nfe_step: int | None = None
     f5_cfg_strength: float | None = None
     f5_sway_sampling_coef: float | None = None
@@ -70,6 +79,7 @@ class TtsEngineRequest:
     status_callback: Callable[[str], None] | None = None
     remote_endpoint: RemoteEndpointOptions | None = None
     higgs: HiggsTtsOptions | None = None
+    provider_options: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +95,16 @@ BatchChunkCallback = Callable[[int, Path], None]
 class BaseTtsEngine:
     def generate(self, request: TtsEngineRequest) -> TtsEngineResult:
         raise NotImplementedError
+
+    def close(self) -> None:
+        """Release any resident model / worker and free its VRAM.
+
+        Default no-op: one-shot subprocess engines (qwen, valtec, f5, chatterbox,
+        vieneu v2) already free VRAM when each worker process exits, and remote
+        engines hold none. Engines that keep a model resident — in-process
+        (OmniVoice) or a persistent worker (VieNeu v3 turbo) — override this.
+        """
+        return None
 
     def generate_batch(
         self,

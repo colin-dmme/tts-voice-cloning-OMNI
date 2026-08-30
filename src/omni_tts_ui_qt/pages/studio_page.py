@@ -7,20 +7,21 @@ request building in the core AppController.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -33,12 +34,14 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableView,
     QTabWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from omni_tts_core.file_queue import (
     STATUS_LABELS,
+    FileQueuePronunciationMode,
     FileQueueStatus,
     FileQueueStore,
 )
@@ -51,9 +54,20 @@ from omni_tts_core.history_restore import (
     restore_setting_mismatches,
 )
 from omni_tts_core.path_intake import parse_path_text
+from omni_tts_core.text.output_naming import default_stem_from_text
 from omni_tts_core.text.source_reader import SUPPORTED_TEXT_EXTENSIONS
 from omni_tts_core.ui_presenters import labels
+from omni_tts_core.ui_presenters.pronunciation import (
+    analysis_details,
+    analysis_summary,
+    preset_label,
+)
+from omni_tts_core.ui_presenters.history_columns import (
+    history_language_label,
+    history_voice_label,
+)
 from omni_tts_core.ui_presenters.history_details import format_history_settings
+from omni_tts_core.ui_presenters.results import result_output_manifest
 from omni_tts_core.ui_presenters.search import matches_search
 from omni_tts_ui_qt.background import GenerationWorker
 from omni_tts_ui_qt.context import AppContext
@@ -77,6 +91,26 @@ _FILTERS = [
     ("Đã hủy", FileQueueStatus.CANCELLED.value),
     ("Gián đoạn", FileQueueStatus.INTERRUPTED.value),
     ("Cần chạy lại", FileQueueStatus.OUTDATED.value),
+]
+
+# History filters. Time values are "look back N hours" (0 = no limit).
+_HISTORY_TIME_FILTERS = [
+    ("Mọi lúc", 0),
+    ("Hôm nay", 24),
+    ("3 ngày", 72),
+    ("7 ngày", 168),
+    ("30 ngày", 720),
+]
+_HISTORY_STATUS_FILTERS = [
+    ("Mọi trạng thái", "all"),
+    ("Thành công", HistoryStatus.DONE.value),
+    ("Lỗi", HistoryStatus.FAILED.value),
+    ("Đã hủy", HistoryStatus.CANCELLED.value),
+]
+_HISTORY_TYPE_FILTERS = [
+    ("Mọi loại", "all"),
+    ("Văn bản", "text"),
+    ("File", "file"),
 ]
 
 
@@ -125,6 +159,7 @@ class StudioPage(QWidget):
         self._queue_status_message = ""
         self._queue_active = False
         self._text_active = False
+        self._queue_pronunciation_preset_names: dict[str, str] = {}
 
         self.history_store = history_store or GenerationHistoryStore()
         self.queue = QueueController(
@@ -151,6 +186,7 @@ class StudioPage(QWidget):
         self._load_preferences()
         self._refresh_sidebar()
         self._sync_higgs_script_toolbar()
+        self._refresh_queue_pronunciation_choices()
         self._refresh_queue()
 
     # --- Sidebar ------------------------------------------------------------
@@ -319,6 +355,16 @@ class StudioPage(QWidget):
         self.higgs_script_toolbar.preview_requested.connect(
             self._preview_higgs_requests
         )
+        pronunciation_row = QHBoxLayout()
+        self.pronunciation_status = QLabel("Không dùng preset cách đọc.")
+        self.pronunciation_status.setObjectName("hint")
+        self.pronunciation_status.setWordWrap(True)
+        pronunciation_manage = QPushButton("Quản lý cách đọc…")
+        pronunciation_manage.clicked.connect(
+            lambda: self.context.show_page("pronunciation")
+        )
+        pronunciation_row.addWidget(self.pronunciation_status, 1)
+        pronunciation_row.addWidget(pronunciation_manage)
         stem_row = QHBoxLayout()
         self.output_stem = QLineEdit()
         self.output_stem.setPlaceholderText("Tên file xuất (tùy chọn)")
@@ -330,6 +376,34 @@ class StudioPage(QWidget):
         self.text_cancel_button.setEnabled(False)
         stem_row.addWidget(self.generate_button)
         stem_row.addWidget(self.text_cancel_button)
+        # Per-text output folder override. Empty = fall back to the global
+        # "Đầu ra" setting (which itself defaults to the job folder).
+        dir_row = QHBoxLayout()
+        self.text_output_dir = QLineEdit()
+        self.text_output_dir.setPlaceholderText(
+            "Nơi lưu (để trống = theo cài đặt Đầu ra)"
+        )
+        self.text_output_dir.setToolTip(
+            "Thư mục lưu audio cho lần tạo từ Văn bản này. "
+            "Để trống sẽ dùng thư mục ở mục Đầu ra bên phải."
+        )
+        self.text_output_browse = QPushButton("Chọn…")
+        dir_row.addWidget(QLabel("Nơi lưu:"))
+        dir_row.addWidget(self.text_output_dir, 1)
+        dir_row.addWidget(self.text_output_browse)
+        # Auto-suffix. When the name is left blank it is always applied; when the
+        # user types a name, this checkbox decides.
+        self.text_suffix_check = QCheckBox("Thêm hậu tố: giọng + thời lượng")
+        self.text_suffix_check.setChecked(True)
+        self.text_suffix_check.setToolTip(
+            "Thêm vào cuối tên file: tên profile/giọng đang dùng và thời lượng "
+            "audio (định dạng giờ-phút-giây, ví dụ 01m23s).\n"
+            "Khi để trống ô Tên file, hậu tố luôn được thêm; khi bạn tự đặt tên, "
+            "checkbox này quyết định có thêm hay không."
+        )
+        suffix_row = QHBoxLayout()
+        suffix_row.addWidget(self.text_suffix_check)
+        suffix_row.addStretch()
         self.result_view = QPlainTextEdit()
         self.result_view.setReadOnly(True)
         self.result_view.setMaximumHeight(140)
@@ -341,7 +415,25 @@ class StudioPage(QWidget):
         self.text_preview_button.setToolTip(
             "Mở file audio kết quả bằng trình nghe nhạc mặc định của Windows."
         )
+        self.text_open_folder_button = QPushButton("📂 Mở thư mục")
+        self.text_open_folder_button.setEnabled(False)
+        self.text_open_folder_button.setToolTip(
+            "Mở thư mục chứa file audio kết quả trong Windows Explorer."
+        )
+        self.text_copy_path_button = QPushButton("⧉ Copy path")
+        self.text_copy_path_button.setEnabled(False)
+        self.text_copy_path_button.setToolTip(
+            "Copy đường dẫn file audio kết quả vào clipboard."
+        )
+        self.text_copy_content_button = QPushButton("⧉ Copy content")
+        self.text_copy_content_button.setEnabled(False)
+        self.text_copy_content_button.setToolTip(
+            "Copy đúng đoạn văn bản đã dùng để tạo file audio đang nghe thử."
+        )
         result_header.addWidget(self.text_preview_button)
+        result_header.addWidget(self.text_open_folder_button)
+        result_header.addWidget(self.text_copy_path_button)
+        result_header.addWidget(self.text_copy_content_button)
         text_progress_row = QHBoxLayout()
         self.text_job_label = QLabel("Sẵn sàng")
         self.text_job_label.setObjectName("hint")
@@ -351,15 +443,59 @@ class StudioPage(QWidget):
         text_progress_row.addWidget(self.text_progress_bar, 1)
         layout.addWidget(self.authoring_assist_bar)
         layout.addWidget(self.higgs_script_toolbar)
+        layout.addLayout(pronunciation_row)
         layout.addWidget(self.text_input, 1)
         layout.addLayout(stem_row)
+        layout.addLayout(dir_row)
+        layout.addLayout(suffix_row)
         layout.addLayout(text_progress_row)
         layout.addLayout(result_header)
         layout.addWidget(self.result_view)
         self.generate_button.clicked.connect(self._generate_text)
         self.text_cancel_button.clicked.connect(self._cancel_text)
         self.text_preview_button.clicked.connect(self._preview_text_audio)
+        self.text_open_folder_button.clicked.connect(self._open_text_result_folder)
+        self.text_copy_path_button.clicked.connect(self._copy_text_result_path)
+        self.text_copy_content_button.clicked.connect(self._copy_text_result_content)
+        self.text_output_browse.clicked.connect(self._browse_text_output_dir)
+        self.text_input.textChanged.connect(self._update_stem_placeholder)
+        self.text_input.textChanged.connect(self._schedule_pronunciation_preview)
         return widget
+
+    def _browse_text_output_dir(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self, "Chọn thư mục lưu audio", self.text_output_dir.text()
+        )
+        if selected:
+            self.text_output_dir.setText(selected)
+
+    def _update_stem_placeholder(self) -> None:
+        """Show the auto-derived filename so the user knows the default stem."""
+        preview = default_stem_from_text(self.text_input.toPlainText())
+        self.output_stem.setPlaceholderText(
+            f"Tự động: {preview}" if preview else "Tên file xuất (tùy chọn)"
+        )
+
+    def _open_text_result_folder(self) -> None:
+        if self._last_text_result is None:
+            return
+        manifest = result_output_manifest(self._last_text_result)
+        self._open_queue_path(
+            lambda: self.ctrl.open_result_folder(manifest),
+            "Đã mở thư mục kết quả",
+        )
+
+    def _copy_text_result_path(self) -> None:
+        if self._last_text_result is None:
+            return
+        self._copy_manifest_path(result_output_manifest(self._last_text_result), "audio")
+
+    def _copy_text_result_content(self) -> None:
+        """Copy the exact text that produced the audio currently previewable."""
+        if self._last_text_result is None or not self._active_text_source_text:
+            return
+        QApplication.clipboard().setText(self._active_text_source_text)
+        self.context.log("Đã copy nội dung văn bản của kết quả.")
 
     def _build_queue_tab(self) -> QWidget:
         widget = QWidget()
@@ -396,20 +532,47 @@ class StudioPage(QWidget):
         filter_row.addWidget(self.clear_button)
         layout.addLayout(filter_row)
 
+        pronunciation_row = QHBoxLayout()
+        self.queue_pronunciation_combo = QComboBox()
+        self.queue_pronunciation_combo.setToolTip(
+            "Theo Studio: dùng preset đang bật bên phải. Tắt: bỏ cách đọc riêng. "
+            "Preset riêng: ghim preset cho các file đã chọn, không phụ thuộc Studio."
+        )
+        self.queue_pronunciation_selected = QPushButton("Áp dụng + quét mục chọn")
+        self.queue_pronunciation_all = QPushButton("Áp dụng + quét tất cả")
+        queue_pronunciation_manage = QPushButton("Quản lý preset…")
+        self.queue_pronunciation_selected.clicked.connect(
+            lambda: self._apply_queue_pronunciation(False)
+        )
+        self.queue_pronunciation_all.clicked.connect(
+            lambda: self._apply_queue_pronunciation(True)
+        )
+        queue_pronunciation_manage.clicked.connect(
+            lambda: self.context.show_page("pronunciation")
+        )
+        pronunciation_row.addWidget(QLabel("Cách đọc:"))
+        pronunciation_row.addWidget(self.queue_pronunciation_combo, 1)
+        pronunciation_row.addWidget(self.queue_pronunciation_selected)
+        pronunciation_row.addWidget(self.queue_pronunciation_all)
+        pronunciation_row.addWidget(queue_pronunciation_manage)
+        layout.addLayout(pronunciation_row)
+
         self.queue_model = QueueTableModel()
         self.queue_table = _DropTableView()
         self.queue_table.setModel(self.queue_model)
         self.queue_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.queue_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.queue_table.setItemDelegateForColumn(3, ProgressBarDelegate(self.queue_table))
+        self.queue_table.setItemDelegateForColumn(5, ProgressBarDelegate(self.queue_table))
         self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header = self.queue_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.queue_table, 1)
         self.queue_summary = QLabel("")
         self.queue_summary.setObjectName("hint")
@@ -453,7 +616,7 @@ class StudioPage(QWidget):
         self.queue_copy_srt_button.clicked.connect(
             lambda: self._copy_selected_queue_path("srt")
         )
-        self.queue_table.paths_dropped.connect(self.queue.add_paths)
+        self.queue_table.paths_dropped.connect(self.queue.add_paths_async)
         self.queue_table.customContextMenuRequested.connect(self._queue_context_menu)
         self.queue_table.doubleClicked.connect(self._preview_queue_index)
         self.queue_table.selectionModel().selectionChanged.connect(
@@ -464,9 +627,30 @@ class StudioPage(QWidget):
     def _build_history_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        filter_row = QHBoxLayout()
+        self.history_time_filter = QComboBox()
+        for label, hours in _HISTORY_TIME_FILTERS:
+            self.history_time_filter.addItem(label, hours)
+        self.history_time_filter.setToolTip("Lọc lịch sử theo khoảng thời gian.")
+        self.history_status_filter = QComboBox()
+        for label, value in _HISTORY_STATUS_FILTERS:
+            self.history_status_filter.addItem(label, value)
+        self.history_status_filter.setToolTip("Lọc theo trạng thái xử lý.")
+        self.history_type_filter = QComboBox()
+        for label, value in _HISTORY_TYPE_FILTERS:
+            self.history_type_filter.addItem(label, value)
+        self.history_type_filter.setToolTip("Lọc theo nguồn: Văn bản hay File.")
+        filter_row.addWidget(QLabel("Thời gian:"))
+        filter_row.addWidget(self.history_time_filter)
+        filter_row.addWidget(QLabel("Trạng thái:"))
+        filter_row.addWidget(self.history_status_filter)
+        filter_row.addWidget(QLabel("Loại:"))
+        filter_row.addWidget(self.history_type_filter)
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
         toolbar = QHBoxLayout()
         self.history_search = QLineEdit()
-        self.history_search.setPlaceholderText("Tìm theo nguồn hoặc model…")
+        self.history_search.setPlaceholderText("Tìm theo nguồn, giọng hoặc model…")
         self.history_preview_button = self._compact_button(
             "▶", "Phát lại audio của lịch sử đang chọn."
         )
@@ -509,15 +693,20 @@ class StudioPage(QWidget):
         history_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         history_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         history_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        history_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        history_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         history_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        history_header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        history_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        history_header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        history_header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.history_table, 1)
         self.history_summary = QLabel("")
         self.history_summary.setObjectName("hint")
         layout.addWidget(self.history_summary)
 
         self.history_search.textChanged.connect(self._refresh_history)
+        self.history_time_filter.currentIndexChanged.connect(self._refresh_history)
+        self.history_status_filter.currentIndexChanged.connect(self._refresh_history)
+        self.history_type_filter.currentIndexChanged.connect(self._refresh_history)
         self.history_preview_button.clicked.connect(self._preview_history_audio)
         self.history_copy_audio_button.clicked.connect(
             lambda: self._copy_selected_history_path("audio")
@@ -561,9 +750,52 @@ class StudioPage(QWidget):
         self._settings_timer.setSingleShot(True)
         self._settings_timer.setInterval(400)
         self._settings_timer.timeout.connect(self._apply_settings_change)
+        self._pronunciation_timer = QTimer(self)
+        self._pronunciation_timer.setSingleShot(True)
+        self._pronunciation_timer.setInterval(250)
+        self._pronunciation_timer.timeout.connect(self._refresh_pronunciation_preview)
 
     def _on_settings_changed(self) -> None:
         self._settings_timer.start()
+        self._schedule_pronunciation_preview()
+
+    def _schedule_pronunciation_preview(self) -> None:
+        timer = getattr(self, "_pronunciation_timer", None)
+        if timer is not None:
+            timer.start()
+
+    def _refresh_pronunciation_preview(self) -> None:
+        loader = getattr(self.ctrl, "preview_pronunciation", None)
+        if not callable(loader):
+            self.text_input.setExtraSelections([])
+            return
+        selection = self.settings_panel.current_settings().to_request("x").pronunciation
+        try:
+            analysis = loader(self.text_input.toPlainText(), selection)
+        except Exception as error:
+            self.text_input.setExtraSelections([])
+            self.pronunciation_status.setText(f"Không phân tích được cách đọc: {error}")
+            return
+        highlights = []
+        for match in analysis.matches:
+            extra = QTextEdit.ExtraSelection()
+            cursor = self.text_input.textCursor()
+            cursor.setPosition(match.start)
+            cursor.setPosition(match.end, QTextCursor.MoveMode.KeepAnchor)
+            extra.cursor = cursor
+            extra.format = QTextCharFormat()
+            extra.format.setBackground(QColor("#5b21b6"))
+            extra.format.setForeground(QColor("#ffffff"))
+            extra.format.setToolTip(
+                f"{match.written} → {match.spoken} · {match.preset_name}"
+            )
+            highlights.append(extra)
+        self.text_input.setExtraSelections(highlights)
+        details = analysis_details(analysis, limit=12)
+        summary = analysis_summary(analysis)
+        self.pronunciation_status.setText(
+            f"{summary}\n{details}" if details else summary
+        )
 
     def _apply_settings_change(self) -> None:
         if self.settings_panel.current_model_id() != self._current_model_id:
@@ -697,20 +929,31 @@ class StudioPage(QWidget):
         patterns = " ".join(f"*{ext}" for ext in SUPPORTED_TEXT_EXTENSIONS)
         files, _ = QFileDialog.getOpenFileNames(self, "Chọn file nguồn", "", f"Văn bản ({patterns})")
         if files:
-            self.queue.add_paths([Path(f) for f in files])
+            self.queue.add_paths_async([Path(f) for f in files])
             self.tabs.setCurrentIndex(1)
 
     def _add_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục nguồn")
         if folder:
-            self.queue.add_paths([Path(folder)])
+            self.queue.add_paths_async([Path(folder)])
             self.tabs.setCurrentIndex(1)
 
     def _paste_paths(self) -> None:
-        text, ok = QInputDialog.getMultiLineText(self, "Dán đường dẫn", "Mỗi dòng một đường dẫn:")
-        if ok and text.strip():
-            self.queue.add_from_text(text)
-            self.tabs.setCurrentIndex(1)
+        """Read paths straight from the clipboard into the queue — no dialog.
+
+        Scanning runs off the GUI thread so pasting hundreds of paths stays
+        responsive.
+        """
+        clipboard_text = QApplication.clipboard().text()
+        paths = parse_path_text(clipboard_text)
+        if not paths:
+            self.context.log(
+                "Clipboard chưa có đường dẫn file hợp lệ. Hãy copy đường dẫn "
+                "file/thư mục rồi bấm lại."
+            )
+            return
+        self.queue.add_paths_async(paths)
+        self.tabs.setCurrentIndex(1)
 
     def _paste_text_job(self) -> None:
         self.tabs.setCurrentIndex(0)
@@ -762,6 +1005,82 @@ class StudioPage(QWidget):
         if QMessageBox.question(self, "Xóa tất cả", "Xóa toàn bộ hàng đợi?") == QMessageBox.StandardButton.Yes:
             self.queue.clear()
 
+    def _refresh_queue_pronunciation_choices(self) -> None:
+        if not hasattr(self, "queue_pronunciation_combo"):
+            return
+        current = self.queue_pronunciation_combo.currentData()
+        getter = getattr(self.ctrl, "pronunciation_presets", None)
+        try:
+            presets = list(getter()) if callable(getter) else []
+        except Exception as error:
+            presets = []
+            self.context.log(f"Không tải được preset cách đọc: {error}")
+
+        combo = self.queue_pronunciation_combo
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(
+            "Theo preset đang chọn trong Studio",
+            (FileQueuePronunciationMode.INHERIT.value, ()),
+        )
+        combo.addItem(
+            "Tắt cách đọc cho mục hàng đợi",
+            (FileQueuePronunciationMode.OFF.value, ()),
+        )
+        self._queue_pronunciation_preset_names = {}
+        for preset in presets:
+            self._queue_pronunciation_preset_names[preset.preset_id] = preset.name
+            combo.addItem(
+                f"Preset riêng: {preset_label(preset)}",
+                (FileQueuePronunciationMode.PRESET.value, (preset.preset_id,)),
+            )
+        restore_index = combo.findData(current)
+        combo.setCurrentIndex(restore_index if restore_index >= 0 else 0)
+        combo.blockSignals(False)
+
+    def _apply_queue_pronunciation(self, all_items: bool) -> None:
+        if self.queue.is_running():
+            QMessageBox.information(
+                self,
+                "Hàng đợi đang chạy",
+                "Hãy đợi hàng đợi hoàn tất trước khi đổi cách đọc.",
+            )
+            return
+        if all_items:
+            item_ids = [
+                item.item_id
+                for item in self.queue.items()
+                if item.status != FileQueueStatus.RUNNING
+            ]
+        else:
+            item_ids = self._selected_item_ids()
+        if not item_ids:
+            QMessageBox.information(
+                self,
+                "Chưa có mục để áp dụng",
+                "Hãy chọn ít nhất một file trong hàng đợi.",
+            )
+            return
+
+        data = self.queue_pronunciation_combo.currentData()
+        if not isinstance(data, tuple) or len(data) != 2:
+            QMessageBox.warning(self, "Cách đọc", "Lựa chọn cách đọc không hợp lệ.")
+            return
+        mode, preset_ids = data
+        studio_selection = self.settings_panel.current_settings().to_request("x").pronunciation
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.queue.set_pronunciation_binding(
+                item_ids,
+                mode=mode,
+                preset_ids=list(preset_ids),
+                studio_selection=studio_selection,
+            )
+        except Exception as error:
+            QMessageBox.warning(self, "Không áp dụng được cách đọc", str(error))
+        finally:
+            QApplication.restoreOverrideCursor()
+
     def _refresh_queue(self) -> None:
         status_filter = self.filter_combo.currentData() if hasattr(self, "filter_combo") else "all"
         needle = self.queue_search.text() if hasattr(self, "queue_search") else ""
@@ -774,7 +1093,7 @@ class StudioPage(QWidget):
             if not matches_search(item.source_path.name, needle):
                 continue
             items.append(item)
-        self.queue_model.set_items(items)
+        self.queue_model.set_items(items, self._queue_pronunciation_preset_names)
         self._update_queue_output_buttons()
         total = sum(counts.values())
         done = counts.get(FileQueueStatus.DONE, 0)
@@ -877,21 +1196,23 @@ class StudioPage(QWidget):
     # --- History tab actions ------------------------------------------------
 
     def _refresh_history(self, *_args) -> None:
-        needle = self.history_search.text() if hasattr(self, "history_search") else ""
+        if not hasattr(self, "history_search"):
+            return
+        needle = self.history_search.text()
+        cutoff = self._history_time_cutoff()
+        status_filter = self.history_status_filter.currentData()
+        type_filter = self.history_type_filter.currentData()
+        profile_names = {
+            profile_id: name
+            for name, profile_id in self.ctrl.voice_profile_choices()
+        }
+        self.history_model.set_profile_names(profile_names)
         entries = self.history_store.list_entries()
         visible = [
             entry
             for entry in entries
-            if matches_search(
-                " ".join(
-                    (
-                        entry.source_label,
-                        str(entry.source_path or ""),
-                        entry.model_id,
-                        entry.provider_id,
-                    )
-                ),
-                needle,
+            if self._history_entry_visible(
+                entry, needle, cutoff, status_filter, type_filter, profile_names
             )
         ]
         self.history_model.set_items(visible)
@@ -899,6 +1220,38 @@ class StudioPage(QWidget):
             f"Hiển thị {len(visible)}/{len(entries)} lần xử lý gần nhất"
         )
         self._update_history_output_buttons()
+
+    def _history_time_cutoff(self) -> datetime | None:
+        hours = int(self.history_time_filter.currentData() or 0)
+        if hours <= 0:
+            return None
+        return datetime.now() - timedelta(hours=hours)
+
+    def _history_entry_visible(
+        self, entry, needle, cutoff, status_filter, type_filter, profile_names
+    ) -> bool:
+        if status_filter and status_filter != "all" and entry.status.value != status_filter:
+            return False
+        if type_filter and type_filter != "all" and entry.mode != type_filter:
+            return False
+        if cutoff is not None:
+            try:
+                created = datetime.fromisoformat(entry.created_at)
+            except (TypeError, ValueError):
+                created = None
+            if created is not None and created < cutoff:
+                return False
+        haystack = " ".join(
+            (
+                entry.source_label,
+                str(entry.source_path or ""),
+                entry.model_id,
+                entry.provider_id,
+                history_voice_label(entry, profile_names),
+                history_language_label(entry),
+            )
+        )
+        return matches_search(haystack, needle)
 
     def _selected_history_entries(self):
         rows = self.history_table.selectionModel().selectedRows()
@@ -1041,6 +1394,9 @@ class StudioPage(QWidget):
             else:
                 self.text_input.setPlainText(plan.source_text)
                 self.output_stem.setText(plan.settings.output_stem or "")
+                self.text_output_dir.setText(
+                    str(plan.settings.output_dir) if plan.settings.output_dir else ""
+                )
                 self.tabs.setCurrentIndex(0)
                 self.text_input.setFocus()
                 message = "Đã khôi phục nội dung và toàn bộ setting vào tab Văn bản."
@@ -1107,6 +1463,12 @@ class StudioPage(QWidget):
         self.cancel_button.setEnabled(running)
         for button in (self.run_button, self.run_selected_button, self.retry_button):
             button.setEnabled(not running)
+        for control in (
+            self.queue_pronunciation_combo,
+            self.queue_pronunciation_selected,
+            self.queue_pronunciation_all,
+        ):
+            control.setEnabled(not running)
         self._sync_global_worker_status()
 
     def _on_queue_worker_status(self, status: str, message: str) -> None:
@@ -1142,12 +1504,22 @@ class StudioPage(QWidget):
         stem = self.output_stem.text().strip()
         if stem:
             settings.output_stem = stem
+        output_dir = self.text_output_dir.text().strip()
+        if output_dir:
+            settings.output_dir = Path(output_dir)
+        # Blank name (auto) always gets the suffix; a typed name follows the box.
+        settings.append_stem_suffix = (not stem) or self.text_suffix_check.isChecked()
         self._active_text_settings = settings
         self._active_text_char_count = len(text)
-        self._active_text_source_label = stem or "Văn bản trực tiếp"
+        self._active_text_source_label = (
+            stem or default_stem_from_text(text) or "Văn bản trực tiếp"
+        )
         self._active_text_source_text = text
         self._last_text_result = None
         self.text_preview_button.setEnabled(False)
+        self.text_open_folder_button.setEnabled(False)
+        self.text_copy_path_button.setEnabled(False)
+        self.text_copy_content_button.setEnabled(False)
         self._text_worker = GenerationWorker(self.ctrl, "text", settings, text=text)
         self._text_worker.progress_event.connect(self._on_text_progress)
         self._text_worker.completed.connect(self._on_text_done)
@@ -1178,6 +1550,9 @@ class StudioPage(QWidget):
     def _on_text_done(self, result) -> None:
         self._last_text_result = result
         self.text_preview_button.setEnabled(True)
+        self.text_open_folder_button.setEnabled(True)
+        self.text_copy_path_button.setEnabled(True)
+        self.text_copy_content_button.setEnabled(True)
         self.result_view.setPlainText(labels.format_result(result))
         self._record_text_history(HistoryStatus.DONE, result=result)
         self._finish_text("ready", "Đã tạo giọng đọc.")
@@ -1255,11 +1630,22 @@ class StudioPage(QWidget):
         index = self.filter_combo.findData(status)
         if index >= 0:
             self.filter_combo.setCurrentIndex(index)
+        self.text_suffix_check.setChecked(
+            bool(data.get("text_append_stem_suffix", True))
+        )
 
     def save_preferences(self, data: dict) -> None:
         self.settings_panel.save_preferences(data)
         data["main_splitter_b64"] = bytes(self._splitter.saveState().toBase64()).decode("ascii")
         data["queue_status_filter"] = self.filter_combo.currentData()
+        data["text_append_stem_suffix"] = self.text_suffix_check.isChecked()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.settings_panel.refresh_pronunciation_presets()
+        self._refresh_queue_pronunciation_choices()
+        self._refresh_queue()
+        self._schedule_pronunciation_preview()
 
     def is_busy(self) -> bool:
         return self.queue.is_running() or (self._text_worker is not None and self._text_worker.isRunning())

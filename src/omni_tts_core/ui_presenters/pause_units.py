@@ -27,6 +27,7 @@ PAUSE_FIELDS = frozenset(
         "ellipsis_pause_min_ms",
         "ellipsis_pause_max_ms",
         "chunk_pause_ms",
+        "chunk_crossfade_ms",
         "paragraph_pause_ms",
         "paragraph_pause_min_ms",
         "paragraph_pause_max_ms",

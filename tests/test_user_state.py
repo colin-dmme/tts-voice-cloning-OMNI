@@ -133,6 +133,8 @@ class UserStateTest(unittest.TestCase):
                         "model_id": "vieneu_v3_turbo",
                         "voice_source_mode": "profile",
                         "speed": 1.1,
+                        "pronunciation_enabled": True,
+                        "pronunciation_preset_ids": ["project-a"],
                         "window_geometry_b64": "AAAA",
                     },
                     ensure_ascii=False,
@@ -146,6 +148,10 @@ class UserStateTest(unittest.TestCase):
             )
             self.assertIn("ui_qt", payload)
             self.assertEqual(payload["ui_qt"]["model_id"], "vieneu_v3_turbo")
+            self.assertTrue(payload["ui_qt"]["pronunciation_enabled"])
+            self.assertEqual(
+                payload["ui_qt"]["pronunciation_preset_ids"], ["project-a"]
+            )
 
             target = root / "new-machine"
             (target / "user_state").mkdir(parents=True)
@@ -155,7 +161,39 @@ class UserStateTest(unittest.TestCase):
             restored = json.loads((target / "config" / "ui_qt.json").read_text(encoding="utf-8"))
             self.assertEqual(restored["model_id"], "vieneu_v3_turbo")
             self.assertEqual(restored["speed"], 1.1)
+            self.assertEqual(restored["pronunciation_preset_ids"], ["project-a"])
             self.assertNotIn("window_geometry_b64", restored)
+
+    def test_pronunciation_presets_are_portable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            preset_dir = root / "pronunciation" / "presets"
+            preset_dir.mkdir(parents=True)
+            preset = preset_dir / "project-a.json"
+            preset.write_text(
+                json.dumps(
+                    {
+                        "preset_id": "project-a",
+                        "name": "Dự án A",
+                        "rules": [{"written": "IIKO", "spoken": "Y Cô"}],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            exported = export_user_state(root)
+            self.assertEqual(exported["pronunciation_presets"], 1)
+
+            target = root / "new-machine"
+            (target / "user_state").mkdir(parents=True)
+            _copy_tree(root / "user_state", target / "user_state")
+            restored = restore_user_state(target)
+
+            restored_preset = target / "pronunciation" / "presets" / "project-a.json"
+            self.assertEqual(restored["pronunciation_presets"], 1)
+            self.assertTrue(restored_preset.exists())
+            self.assertIn("Y Cô", restored_preset.read_text(encoding="utf-8"))
 
     def test_voice_profile_manager_resolves_stale_absolute_sample_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -28,6 +28,12 @@ x-piper-nghi: &piper-nghi
   hf_repo: "doof-ferb/nghitts-copy"
   notes: "Giọng Piper ONNX từ mirror NGHI-TTS, tải và gỡ độc lập."
 
+x-piper-vbee-export: &piper-vbee-export
+  <<: *piper-single
+  source_kind: "manual"
+  hf_repo: ""
+  notes: "Package được trích xuất hợp lệ từ bộ VbeeTTS; nhãn Vbee Export chỉ mô tả xuất xứ package, không khẳng định đơn vị huấn luyện model gốc."
+
 tts_models:
   piper_vais1000_medium:
     <<: *piper-single
@@ -229,6 +235,8 @@ tts_models:
       model_file: "piper-tts/chieuthanh.onnx"
       config_file: "piper-tts/config.json"
       download_allow_patterns: ["piper-tts/chieuthanh.onnx", "piper-tts/config.json"]
+      model_sha256: "5b3059395e1d2f3d7499deaf3463615b5281c607465ea274d82ce84d93d61ac3"
+      config_sha256: "6e6d2581b36004fa613a1ce22070c5ea48b07bc55e73c65e114c5fb5c99d5abe"
     catalog_info:
       category: "community"
       origin: "community"
@@ -878,3 +886,205 @@ tts_models:
       speed_score: 5
       vram_mb: 0
       ram_mb: 300
+
+  piper_vbee_ngoc_huyen_1:
+    <<: *piper-vbee-export
+    display_name: "Piper Ngọc Huyền 1 — Vbee Export"
+    local_path: "models/piper/local/vbee-export/ngoc-huyen-1"
+    runtime:
+      model_file: "ngoc-huyen-1.onnx"
+      config_file: "ngoc-huyen-1.onnx.json"
+      import_folder: "1. Ngọc Huyền (Vbee)"
+      import_model_file: "1. Ngọc Huyền (Vbee).onnx"
+      import_config_file: "1. Ngọc Huyền (Vbee).onnx.json"
+      model_sha256: "a277bb43aa160c889af4934d1a1840381ff0300320c9550295d28c9aaab91329"
+      config_sha256: "971f57f8d504223fee5b40d664f503cf769baf7db21f7d2ae0554a75d07de2f8"
+      piper_recommended_profile: "vbee"
+    catalog_info: &vbee-export-info
+      category: "local-package"
+      origin: "vbee_export"
+      family: "Piper"
+      source_label: "VbeeTTS extracted_models"
+      risk: "test"
+      description: "Package local từ bộ VbeeTTS đã giải nén; nhập bằng nút Nhập model local."
+      highlight: "Local · Vbee Export"
+
+  piper_vbee_ngan_ke_chuyen_2:
+    <<: *piper-vbee-export
+    display_name: "Piper Ngạn Kể Chuyện 2 — Vbee Export"
+    local_path: "models/piper/local/vbee-export/ngan-ke-chuyen-2"
+    runtime:
+      model_file: "ngan-ke-chuyen-2.onnx"
+      config_file: "ngan-ke-chuyen-2.onnx.json"
+      import_folder: "2. Ngạn Kể Chuyện (Vbee)"
+      import_model_file: "2. Ngạn Kể Chuyện (Vbee).onnx"
+      import_config_file: "2. Ngạn Kể Chuyện (Vbee).onnx.json"
+      model_sha256: "39828957a00b86bf8eb9a70f7d859637dac54c2fb0ca9630ac7148119b2b31cf"
+      config_sha256: &vbee-common-config-sha "6e6d2581b36004fa613a1ce22070c5ea48b07bc55e73c65e114c5fb5c99d5abe"
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_thien_tam_3:
+    <<: *piper-vbee-export
+    display_name: "Piper Thiện Tâm 3 — Vbee Export"
+    local_path: "models/piper/local/vbee-export/thien-tam-3"
+    runtime:
+      model_file: "thien-tam-3.onnx"
+      config_file: "thien-tam-3.onnx.json"
+      import_folder: "3. Thiện Tâm  (Vbee)"
+      import_model_file: "3. Thiện Tâm  (Vbee).onnx"
+      import_config_file: "3. Thiện Tâm  (Vbee).onnx.json"
+      model_sha256: "5a25eec175c7e3bb24e5365984150c0cfdaa4366fbc1b388f7919ad56ec7121d"
+      config_sha256: *vbee-common-config-sha
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_anh_khoi:
+    <<: *piper-vbee-export
+    display_name: "Piper Anh Khôi — Vbee Export"
+    local_path: "models/piper/local/vbee-export/anh-khoi"
+    runtime:
+      model_file: "anh-khoi.onnx"
+      config_file: "anh-khoi.onnx.json"
+      import_folder: "Anh Khôi  (Vbee)"
+      import_model_file: "Anh Khôi  (Vbee).onnx"
+      import_config_file: "Anh Khôi  (Vbee).onnx.json"
+      model_sha256: "310b36fb970263e37b32692790e4faf55e7ff56b1701e754583596e7ff17a6cd"
+      config_sha256: *vbee-common-config-sha
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_capcut_nam_tu_tin:
+    <<: *piper-vbee-export
+    display_name: "Piper CapCut Nam Tự Tin — Vbee Export"
+    local_path: "models/piper/local/vbee-export/capcut-nam-tu-tin"
+    runtime:
+      model_file: "capcut-nam-tu-tin.onnx"
+      config_file: "capcut-nam-tu-tin.onnx.json"
+      import_folder: "Capcut Nam tự tin"
+      import_model_file: "Capcut Nam tự tin.onnx"
+      import_config_file: "Capcut Nam tự tin.onnx.json"
+      model_sha256: "bb88354bc6d3d97d50dccb4493c9b680ca6830ee2d33f0cd667e5487c14fbf24"
+      config_sha256: *vbee-common-config-sha
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_capcut_nu_hoat_ngon:
+    <<: *piper-vbee-export
+    display_name: "Piper CapCut Nữ Hoạt Ngôn — Vbee Export"
+    local_path: "models/piper/local/vbee-export/capcut-nu-hoat-ngon"
+    runtime:
+      model_file: "capcut-nu-hoat-ngon.onnx"
+      config_file: "capcut-nu-hoat-ngon.onnx.json"
+      import_folder: "Capcut Nữ hoạt ngôn"
+      import_model_file: "Capcut Nữ hoạt ngôn.onnx"
+      import_config_file: "Capcut Nữ hoạt ngôn.onnx.json"
+      model_sha256: "93f5c5ce733e315ac84f389b292a14956f41fd0768fd01abb57838a3b94f4261"
+      config_sha256: *vbee-common-config-sha
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_chieu_thanh_mien_nam:
+    <<: *piper-vbee-export
+    display_name: "Piper Chiêu Thành Miền Nam — Vbee Export"
+    local_path: "models/piper/local/vbee-export/chieu-thanh-mien-nam"
+    runtime:
+      model_file: "chieu-thanh-mien-nam.onnx"
+      config_file: "chieu-thanh-mien-nam.onnx.json"
+      import_folder: "Chiêu Thành"
+      import_model_file: "Chiêu Thành.onnx"
+      import_config_file: "Chiêu Thành.onnx.json"
+      model_sha256: "5b3059395e1d2f3d7499deaf3463615b5281c607465ea274d82ce84d93d61ac3"
+      config_sha256: "373dd3d543e0f2fa522fab2dd9dc1aaa27e3fb17b4b305a9dbc86b5bd8326cbd"
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_hoai_my:
+    <<: *piper-vbee-export
+    display_name: "Piper Hoài My — Vbee Export"
+    local_path: "models/piper/local/vbee-export/hoai-my"
+    runtime:
+      model_file: "hoai-my.onnx"
+      config_file: "hoai-my.onnx.json"
+      import_folder: "Hoài My"
+      import_model_file: "Hoài My.onnx"
+      import_config_file: "Hoài My.onnx.json"
+      model_sha256: "b9ab78572bdfe6153b37884a6071adbc9dc40baefb267081e9a0156b7d4747bd"
+      config_sha256: *vbee-common-config-sha
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_lai_van_sam:
+    <<: *piper-vbee-export
+    display_name: "Piper Lại Văn Sâm — Vbee Export"
+    local_path: "models/piper/local/vbee-export/lai-van-sam"
+    runtime:
+      model_file: "lai-van-sam.onnx"
+      config_file: "lai-van-sam.onnx.json"
+      import_folder: "Lại Văn Sâm"
+      import_model_file: "Lại Văn Sâm.onnx"
+      import_config_file: "Lại Văn Sâm.onnx.json"
+      model_sha256: "4ec355dacb7b8fcfca4941947cfea792d3fb7e709f140241cdafcb6b8fcedbdb"
+      config_sha256: *vbee-common-config-sha
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_lan_trinh:
+    <<: *piper-vbee-export
+    display_name: "Piper Lan Trinh — Vbee Export"
+    local_path: "models/piper/local/vbee-export/lan-trinh"
+    runtime:
+      model_file: "lan-trinh.onnx"
+      config_file: "lan-trinh.onnx.json"
+      import_folder: "Lan Trinh  (Vbee)"
+      import_model_file: "Lan Trinh  (Vbee).onnx"
+      import_config_file: "Lan Trinh  (Vbee).onnx.json"
+      model_sha256: "95ff12a5c9b93f772b33b62883efdd3926cdcac551a143f858450763dd02d060"
+      config_sha256: *vbee-common-config-sha
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_nam_minh:
+    <<: *piper-vbee-export
+    display_name: "Piper Nam Minh — Vbee Export"
+    local_path: "models/piper/local/vbee-export/nam-minh"
+    runtime:
+      model_file: "nam-minh.onnx"
+      config_file: "nam-minh.onnx.json"
+      import_folder: "Nam Minh"
+      import_model_file: "Nam Minh.onnx"
+      import_config_file: "Nam Minh.onnx.json"
+      model_sha256: "2e53cea93859d0870bcbd269fc73249214ce380a273c52a66eedd57ce3a49c00"
+      config_sha256: *vbee-common-config-sha
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_ngoc_huyen_fix:
+    <<: *piper-vbee-export
+    display_name: "Piper Ngọc Huyền Fix — Vbee Export"
+    local_path: "models/piper/local/vbee-export/ngoc-huyen-fix"
+    runtime:
+      model_file: "ngoc-huyen-fix.onnx"
+      config_file: "ngoc-huyen-fix.onnx.json"
+      import_folder: "ngochuyen_fix"
+      import_model_file: "ngochuyen_fix.onnx"
+      import_config_file: "ngochuyen_fix.onnx.json"
+      model_sha256: "8c00aa6112b2fab49fb1f70afaadbc1f62472620cabd64cc9abddf57d1ee3377"
+      config_sha256: *vbee-common-config-sha
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info
+
+  piper_vbee_nguyet_nga_podcast:
+    <<: *piper-vbee-export
+    display_name: "Piper Nguyệt Nga Podcast — Vbee Export"
+    local_path: "models/piper/local/vbee-export/nguyet-nga-podcast"
+    runtime:
+      model_file: "nguyet-nga-podcast.onnx"
+      config_file: "nguyet-nga-podcast.onnx.json"
+      import_folder: "Nguyệt Nga Podcast  (Vbee)"
+      import_model_file: "Nguyệt Nga Podcast  (Vbee).onnx"
+      import_config_file: "Nguyệt Nga Podcast  (Vbee).onnx.json"
+      model_sha256: "81b1860f13fcd7f2a72ec3ab5a510e40c1d2b5b5524ce8428d8c1b18e84911cb"
+      config_sha256: *vbee-common-config-sha
+      piper_recommended_profile: "vbee"
+    catalog_info: *vbee-export-info

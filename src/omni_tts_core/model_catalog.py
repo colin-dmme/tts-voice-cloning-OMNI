@@ -15,6 +15,7 @@ _CATEGORY_LABELS = {
     "experimental": "Thử nghiệm / Legacy",
     "multilingual": "Đa ngôn ngữ",
     "support": "Model hỗ trợ",
+    "local-package": "Package local",
 }
 
 _CATEGORY_COLORS = {
@@ -24,6 +25,7 @@ _CATEGORY_COLORS = {
     "experimental": "#ef4444",
     "multilingual": "#8b5cf6",
     "support": "#6b7280",
+    "local-package": "#a855f7",
 }
 
 
@@ -40,7 +42,9 @@ def _badge(text: str, color: str) -> str:
     )
 
 
-def _hardware_tag(vram_mb: int, ram_mb: int) -> str:
+def _hardware_tag(vram_mb: int, ram_mb: int, custom_label: str = "") -> str:
+    if custom_label:
+        return f'<span style="color:#10b981;font-size:12px">{custom_label}</span>'
     if vram_mb > 0:
         vram_str = f"{vram_mb // 1024:.1f}GB" if vram_mb >= 1024 else f"{vram_mb}MB"
         return f'<span style="color:#10b981;font-size:12px">GPU {vram_str} VRAM · {ram_mb // 1024:.1f}GB RAM</span>'
@@ -58,14 +62,21 @@ def _model_card(model_id: str, spec: dict[str, Any], info: dict[str, Any]) -> st
     base_model = info.get("base_model", "")
     risk = info.get("risk", "")
     source_repo = info.get("source_repo", "")
+    source_label = info.get("source_label", "")
     quality = int(info.get("quality_score", 0))
     speed = int(info.get("speed_score", 0))
     vram_mb = int(info.get("vram_mb", 0))
     ram_mb = int(info.get("ram_mb", 0))
     recommend = info.get("recommend_for", "")
     install_note = info.get("install_note", "")
+    hardware_label = str(info.get("hardware_label") or "").strip()
     hf_repo = spec.get("hf_repo", "")
     provider = spec.get("provider", "")
+    runtime = spec.get("runtime") or {}
+    provider_label = str(runtime.get("worker_label") or "").strip()
+    if not provider_label and provider == "vieneu":
+        provider_label = "VieNeu v3" if runtime.get("vieneu_mode") == "v3turbo" else "VieNeu v2"
+    provider_label = provider_label or provider
     lang = spec.get("language_priority", "")
 
     quality_html = _stars(quality) if quality > 0 else '<span style="color:#4b5563">—</span>'
@@ -87,6 +98,8 @@ def _model_card(model_id: str, spec: dict[str, Any], info: dict[str, Any]) -> st
         detail_bits.append(f"Base: {base_model}")
     if source_repo:
         detail_bits.append(f"Repo: {source_repo}")
+    if source_label:
+        detail_bits.append(f"Package: {source_label}")
     if risk:
         detail_bits.append(f"Mức: {risk}")
     detail_html = ""
@@ -97,6 +110,13 @@ def _model_card(model_id: str, spec: dict[str, Any], info: dict[str, Any]) -> st
             + "</div>"
         )
 
+    source_link = (
+        f'''<a href="https://huggingface.co/{hf_repo}" target="_blank"
+           style="font-size:11px;color:#3b82f6;text-decoration:none">🤗 {hf_repo}</a>'''
+        if hf_repo
+        else '<span style="font-size:11px;color:#a855f7">📦 Package local đã kiểm tra SHA-256</span>'
+    )
+
     return f"""
     <div class="card" data-category="{category}" style="
         background:#1e293b;border:1px solid #334155;border-radius:10px;
@@ -105,7 +125,7 @@ def _model_card(model_id: str, spec: dict[str, Any], info: dict[str, Any]) -> st
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
         <div>
           <div style="font-weight:700;font-size:14px;color:#f1f5f9">{display_name}</div>
-          <div style="font-size:11px;color:#64748b;margin-top:2px">{model_id} · {provider} · {lang}</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px">{model_id} · {provider_label} · {lang}</div>
         </div>
         <div style="flex-shrink:0">{_badge(highlight, color) if highlight else ""}</div>
       </div>
@@ -115,14 +135,11 @@ def _model_card(model_id: str, spec: dict[str, Any], info: dict[str, Any]) -> st
         <span>Chất lượng: {quality_html}</span>
         <span>Tốc độ: {speed_html}</span>
       </div>
-      <div>{_hardware_tag(vram_mb, ram_mb)}</div>
+      <div>{_hardware_tag(vram_mb, ram_mb, hardware_label)}</div>
       {"<div style='font-size:12px;color:#64748b'>✓ " + recommend + "</div>" if recommend else ""}
       {install_html}
       <div style="margin-top:4px">
-        <a href="https://huggingface.co/{hf_repo}" target="_blank"
-           style="font-size:11px;color:#3b82f6;text-decoration:none">
-          🤗 {hf_repo}
-        </a>
+        {source_link}
       </div>
     </div>"""
 

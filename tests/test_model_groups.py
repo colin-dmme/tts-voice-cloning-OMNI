@@ -48,6 +48,16 @@ class GroupModelsTest(unittest.TestCase):
         self.assertEqual(len(everything), 5)
         self.assertEqual(model_groups.models_for_provider(_SPECS, "nope"), [])
 
+    def test_models_for_provider_searches_label_and_id_without_accents(self) -> None:
+        specs = [
+            _Spec("piper_ngoc_huyen", "piper", "Piper Ngọc Huyền"),
+            _Spec("piper_ngan", "piper", "Piper Ngạn kể chuyện"),
+        ]
+        by_name = model_groups.models_for_provider(specs, "piper", "ngoc huyen")
+        by_id = model_groups.models_for_provider(specs, "piper", "piper_ngan")
+        self.assertEqual([model_id for _label, model_id in by_name], ["piper_ngoc_huyen"])
+        self.assertEqual([model_id for _label, model_id in by_id], ["piper_ngan"])
+
     def test_provider_choices_count_any_object_with_provider(self) -> None:
         """The model-management table passes ModelStatus, not ModelSpec."""
 

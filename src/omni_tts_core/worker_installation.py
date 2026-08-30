@@ -4,8 +4,12 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from omni_tts_core.paths import PROJECT_ROOT, project_path
+
+if TYPE_CHECKING:
+    from omni_tts_core.model_registry import ModelSpec
 
 
 PROVIDER_WORKERS = {
@@ -15,6 +19,8 @@ PROVIDER_WORKERS = {
     "f5tts": "f5_worker",
     "chatterbox": "chatterbox_worker",
     "piper": "piper_worker",
+    "kokoro_onnx": "kokoro_worker",
+    "supertonic": "supertonic_worker",
 }
 
 PROVIDER_LABELS = {
@@ -25,6 +31,8 @@ PROVIDER_LABELS = {
     "f5tts": "F5-TTS",
     "chatterbox": "Chatterbox",
     "piper": "Piper ONNX",
+    "kokoro_onnx": "Kokoro ONNX",
+    "supertonic": "Supertonic 3",
 }
 
 # Providers that ship a CUDA installer script. Keep in sync with the script maps
@@ -39,6 +47,8 @@ _WINDOWS_BASE_INSTALLERS = {
     "f5tts": "install_f5_worker.bat",
     "chatterbox": "install_chatterbox_worker.bat",
     "piper": "install_piper_worker.bat",
+    "kokoro_onnx": "install_kokoro_worker.bat",
+    "supertonic": "install_supertonic_worker.bat",
 }
 
 _LINUX_BASE_INSTALLERS = {
@@ -47,6 +57,8 @@ _LINUX_BASE_INSTALLERS = {
     "qwen": "scripts/install_qwen_worker_linux.sh",
     "f5tts": "scripts/install_f5_worker_linux.sh",
     "chatterbox": "scripts/install_chatterbox_worker_linux.sh",
+    "kokoro_onnx": "scripts/install_kokoro_worker_linux.sh",
+    "supertonic": "scripts/install_supertonic_worker_linux.sh",
 }
 
 
@@ -115,6 +127,28 @@ def worker_for_provider(provider: str) -> str | None:
     return PROVIDER_WORKERS.get(provider)
 
 
+def worker_for_spec(spec: "ModelSpec") -> str | None:
+    """Resolve an isolated worker for one model, with provider fallback.
+
+    Newer model families can move to a dedicated runtime without changing the
+    public provider id or disturbing older models from the same provider.
+    """
+    runtime = getattr(spec, "runtime", {}) or {}
+    configured = str(runtime.get("worker_name") or "").strip()
+    return configured or worker_for_provider(spec.provider)
+
+
+def worker_label_for_spec(spec: "ModelSpec") -> str:
+    runtime = getattr(spec, "runtime", {}) or {}
+    configured = str(runtime.get("worker_label") or "").strip()
+    if configured:
+        return configured
+    if spec.provider == "vieneu":
+        mode = str(runtime.get("vieneu_mode") or "").lower()
+        return "VieNeu v3" if mode == "v3turbo" else "VieNeu v2"
+    return provider_label(spec.provider)
+
+
 def provider_worker_installed(provider: str) -> bool | None:
     worker_name = worker_for_provider(provider)
     if not worker_name:
@@ -129,6 +163,16 @@ def base_installer_for_provider(provider: str) -> Path | None:
     return PROJECT_ROOT / script
 
 
+def base_installer_for_spec(spec: "ModelSpec") -> Path | None:
+    key = "base_installer_windows" if os.name == "nt" else "base_installer_linux"
+    script = str((getattr(spec, "runtime", {}) or {}).get(key) or "").strip()
+    if script:
+        return PROJECT_ROOT / script
+    if worker_for_spec(spec) != worker_for_provider(spec.provider):
+        return None
+    return base_installer_for_provider(spec.provider)
+
+
 def install_base_runtime(provider: str) -> str:
     script = base_installer_for_provider(provider)
     if script is not None and script.exists():
@@ -139,6 +183,19 @@ def install_base_runtime(provider: str) -> str:
         install_worker(worker_name)
         return f"Đã cài worker {worker_name}."
     raise RuntimeError(f"Provider {provider} chưa có tác vụ cài môi trường tự động.")
+
+
+def install_base_runtime_for_spec(spec: "ModelSpec") -> str:
+    script = base_installer_for_spec(spec)
+    label = worker_label_for_spec(spec)
+    if script is not None and script.exists():
+        _run_installer_script(script, f"Cài môi trường {label}")
+        return f"Đã cài môi trường {label} bằng {script.name}."
+    worker_name = worker_for_spec(spec)
+    if worker_name:
+        install_worker(worker_name)
+        return f"Đã cài worker {label} ({worker_name})."
+    raise RuntimeError(f"Model {spec.display_name} chưa có tác vụ cài môi trường tự động.")
 
 
 def provider_supports_gpu_install(provider: str) -> bool:
@@ -179,6 +236,16 @@ def gpu_installer_for_provider(provider: str) -> Path | None:
     return PROJECT_ROOT / script
 
 
+def gpu_installer_for_spec(spec: "ModelSpec") -> Path | None:
+    key = "gpu_installer_windows" if os.name == "nt" else "gpu_installer_linux"
+    script = str((getattr(spec, "runtime", {}) or {}).get(key) or "").strip()
+    if script:
+        return PROJECT_ROOT / script
+    if worker_for_spec(spec) != worker_for_provider(spec.provider):
+        return None
+    return gpu_installer_for_provider(spec.provider)
+
+
 def _host_gpu_is_blackwell() -> bool:
     try:
         result = subprocess.run(
@@ -207,6 +274,17 @@ def install_gpu_acceleration(provider: str) -> str:
         raise RuntimeError(f"Không tìm thấy script cài GPU: {script.name}")
     _run_installer_script(script, f"Cài GPU cho {provider_label(provider)}")
     return f"Đã chạy xong {script.name}."
+
+
+def install_gpu_acceleration_for_spec(spec: "ModelSpec") -> str:
+    script = gpu_installer_for_spec(spec)
+    label = worker_label_for_spec(spec)
+    if script is None:
+        raise RuntimeError(f"{label} chưa có script cài GPU tự động.")
+    if not script.exists():
+        raise RuntimeError(f"Không tìm thấy script cài GPU cho {label}: {script.name}")
+    _run_installer_script(script, f"Cài GPU cho {label}")
+    return f"Đã cài GPU cho {label} bằng {script.name}."
 
 
 def host_gpu_summary() -> str:

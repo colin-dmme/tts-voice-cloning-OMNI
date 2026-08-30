@@ -239,6 +239,9 @@ class PiperSubprocessEngine(BaseTtsEngine):
                 "config_path": str(self.spec.local_path / str(self.spec.runtime["config_file"])),
                 "speaker_id": requests[0].speaker_id,
                 "speed": requests[0].speed,
+                "noise_scale": requests[0].piper_noise_scale,
+                "noise_w": requests[0].piper_noise_w,
+                "seed": requests[0].piper_seed,
                 "sentence_pause_ms": (
                     requests[0].sentence_pause_ms
                     if requests[0].punctuation_pause_enabled

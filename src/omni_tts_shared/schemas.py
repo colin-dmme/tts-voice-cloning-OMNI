@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from omni_tts_shared.pronunciation import PronunciationSelection, PronunciationSnapshot
 
-LanguageCode = Literal["auto", "vi", "en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"]
+
+LanguageCode = Literal[
+    "auto", "ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi",
+    "fr", "hi", "hr", "hu", "id", "it", "ja", "ko", "lt", "lv", "nl",
+    "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "vi", "zh",
+]
 OutputMode = Literal["merged", "split"]
 OutputAudioFormat = Literal["wav", "mp3"]
 RuntimeTarget = Literal["auto", "cpu", "cuda"]
-VoiceSourceMode = Literal["fixed", "profile"]
+VoiceSourceMode = Literal["fixed", "profile", "design"]
+ChunkJoinMode = Literal["auto", "crossfade", "direct", "silence"]
 RemoteAuthMode = Literal["none", "bearer_env"]
 HiggsApiFlavor = Literal["sglang", "boson", "compatible"]
 HiggsResponseFormat = Literal["wav", "mp3", "flac", "opus", "aac", "pcm"]
@@ -22,6 +29,7 @@ class ModelStatus(BaseModel):
     provider: str
     model_type: str
     hf_repo: str
+    source_kind: str = "huggingface"
     local_path: Path
     installed: bool
     required: bool = False
@@ -36,6 +44,8 @@ class ModelStatus(BaseModel):
     storage_path: Path | None = None
     cache_path: Path | None = None
     worker_path: Path | None = None
+    worker_name: str = ""
+    worker_label: str = ""
     storage_note: str = ""
     worker_installed: bool | None = None  # None = không áp dụng (non-worker model)
     hf_cached: bool | None = None         # None = không áp dụng (non-worker model)
@@ -46,6 +56,7 @@ class ModelCapabilities(BaseModel):
     supports_voice_profile: bool = True
     requires_voice_profile: bool = False
     supports_voice_presets: bool = False
+    supports_voice_design: bool = False
     supports_reference_text: bool = True
     supports_speed: bool = False
     supports_pitch_shift: bool = False
@@ -65,6 +76,11 @@ class VoiceInputConfig(BaseModel):
     profile_label: str = "Profile giọng"
     profile_tooltip: str = (
         "Clone giọng từ Profile đã lưu. Chỉ dùng khi model hỗ trợ audio tham chiếu."
+    )
+    design_label: str = "Giọng thiết kế"
+    design_tooltip: str = (
+        "Chọn một giọng đã thiết kế bằng mô tả (tạo ở tab Giọng). Chỉ model hỗ "
+        "trợ Voice Design mới dùng được."
     )
 
     @model_validator(mode="after")
@@ -91,11 +107,14 @@ class GenerationFormDescriptor(BaseModel):
     fixed_tooltip: str
     profile_label: str
     profile_tooltip: str
+    design_label: str = "Giọng thiết kế"
+    design_tooltip: str = ""
     fixed_voices: list[VoiceOption] = Field(default_factory=list)
     default_fixed_voice_id: str | None = None
     requires_fixed_voice: bool = False
     show_fixed_voice: bool = False
     show_profile: bool = False
+    show_design: bool = False
     status_text: str = ""
 
 
@@ -213,6 +232,8 @@ class HiggsCustomVoice(BaseModel):
 
 class GenerateSpeechRequest(BaseModel):
     text: str = Field(min_length=1)
+    pronunciation: PronunciationSelection = Field(default_factory=PronunciationSelection)
+    pronunciation_snapshot: PronunciationSnapshot | None = None
     language: LanguageCode = "vi"
     model_id: str = "omnivoice_vietnamese"
     voice_source_mode: VoiceSourceMode | None = None
@@ -220,6 +241,16 @@ class GenerateSpeechRequest(BaseModel):
     reference_audio_path: Path | None = None
     reference_text: str | None = None
     speaker_id: str | None = None
+    # Voice Design (mode == "design"): id of a saved DesignedVoice. Core resolves
+    # it to ``voice_instruct`` before synthesis; only providers whose model
+    # capabilities set supports_voice_design honour it.
+    designed_voice_id: str | None = None
+    # Resolved free-text speaker description for Voice Design (filled from the
+    # DesignedVoice, or supplied directly by API callers).
+    voice_instruct: str | None = None
+    # OmniVoice diffusion steps: higher = better quality/slower, lower = faster.
+    # None keeps the model default (32).
+    omnivoice_num_step: int | None = Field(default=None, ge=1, le=100)
     speed: float = Field(default=1.0, ge=0.5, le=1.8)
     pitch_shift: float = Field(default=0.0, ge=-12.0, le=12.0)
     emotion: str = "natural"
@@ -227,6 +258,9 @@ class GenerateSpeechRequest(BaseModel):
     codec_repo: str | None = None
     temperature: float | None = Field(default=None, ge=0.1, le=2.0)
     top_k: int | None = Field(default=None, ge=1, le=200)
+    piper_noise_scale: float = Field(default=0.667, ge=0.0, le=1.0)
+    piper_noise_w: float = Field(default=0.8, ge=0.0, le=1.0)
+    piper_seed: int | None = Field(default=None, ge=0)
     f5_nfe_step: int | None = Field(default=None, ge=4, le=128)
     f5_cfg_strength: float | None = Field(default=None, ge=0.0, le=10.0)
     f5_sway_sampling_coef: float | None = Field(default=None, ge=-5.0, le=5.0)
@@ -269,7 +303,9 @@ class GenerateSpeechRequest(BaseModel):
     ellipsis_pause_random_enabled: bool = False
     ellipsis_pause_min_ms: int = Field(default=380, ge=0, le=3000)
     ellipsis_pause_max_ms: int = Field(default=550, ge=0, le=3000)
+    chunk_join_mode: ChunkJoinMode = "auto"
     chunk_pause_ms: int = Field(default=120, ge=0, le=3000)
+    chunk_crossfade_ms: int = Field(default=80, ge=0, le=1000)
     paragraph_pause_ms: int = Field(default=600, ge=0, le=10000)
     paragraph_pause_random_enabled: bool = False
     paragraph_pause_min_ms: int = Field(default=500, ge=0, le=10000)
@@ -278,6 +314,10 @@ class GenerateSpeechRequest(BaseModel):
     max_chunk_chars: int = Field(default=220, ge=60, le=800)
     output_dir: Path | None = None
     output_stem: str | None = None
+    # When set, the saved filename gains a "_{voice}_{duration}" suffix so the
+    # audio is recognisable at a glance. Duration is only known after synthesis,
+    # so Core finalises the name at save time.
+    append_stem_suffix: bool = False
     source_path: Path | None = None
     overwrite: bool = False
     output_mode: OutputMode = "split"
@@ -287,6 +327,7 @@ class GenerateSpeechRequest(BaseModel):
     join_split_output_audio: bool = False
     remote_endpoint: RemoteEndpointOptions | None = None
     higgs: HiggsTtsOptions | None = None
+    provider_options: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -309,6 +350,13 @@ class GenerateSpeechRequest(BaseModel):
                 and not punctuation_keys.intersection(data)
             ):
                 data["chunk_pause_ms"] = data["sentence_pause_ms"]
+            # Old callers had no explicit join mode: a positive chunk pause
+            # meant silence, while zero silently enabled the global crossfade.
+            # Preserve that contract only when the old field was supplied.
+            if "chunk_join_mode" not in data and "chunk_pause_ms" in data:
+                data["chunk_join_mode"] = (
+                    "crossfade" if int(data.get("chunk_pause_ms") or 0) == 0 else "silence"
+                )
         return data
 
     @model_validator(mode="after")
@@ -336,12 +384,22 @@ class GenerateSpeechRequest(BaseModel):
                 if self.voice_profile_id or self.reference_audio_path
                 else "fixed"
             )
-        if self.voice_source_mode == "fixed":
+        if self.voice_source_mode == "design":
+            # Synthesise from a saved description; no preset/profile/reference.
+            self.speaker_id = None
             self.voice_profile_id = None
             self.reference_audio_path = None
             self.reference_text = None
-        else:
+        elif self.voice_source_mode == "fixed":
+            self.voice_profile_id = None
+            self.reference_audio_path = None
+            self.reference_text = None
+            self.designed_voice_id = None
+            self.voice_instruct = None
+        else:  # profile
             self.speaker_id = None
+            self.designed_voice_id = None
+            self.voice_instruct = None
         return self
 
     @model_validator(mode="after")
@@ -374,6 +432,12 @@ class GenerateSpeechResult(BaseModel):
     message: str
     item_audio_paths: list[Path] = Field(default_factory=list)
     item_srt_paths: list[Path] = Field(default_factory=list)
+    pronunciation_report_path: Path | None = None
+    pronunciation_snapshot_hash: str = ""
+    pronunciation_preset_ids: list[str] = Field(default_factory=list)
+    pronunciation_term_count: int = 0
+    pronunciation_match_count: int = 0
+    pronunciation_conflict_count: int = 0
 
 
 class SegmentTiming(BaseModel):
@@ -412,6 +476,7 @@ class VoiceProfile(BaseModel):
     transcript: str = ""
     language: LanguageCode = "vi"
     project: str = ""
+    tags: list[str] = Field(default_factory=list)
     notes: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -420,3 +485,24 @@ class VoiceProfile(BaseModel):
     sample_rate: int = 0
     default_sample_id: str = ""
     extra_samples: list[AudioSampleMeta] = Field(default_factory=list)
+
+
+class DesignedVoice(BaseModel):
+    """A voice synthesised from a text description (OmniVoice Voice Design).
+
+    Unlike a VoiceProfile it has no reference audio — only an ``instruct``
+    description of speaker attributes (gender, age, pitch, accent…). Selectable
+    in Studio only for providers whose model capabilities set
+    ``supports_voice_design``.
+    """
+
+    designed_voice_id: str
+    name: str
+    instruct: str
+    language: LanguageCode = "vi"
+    project: str = ""
+    tags: list[str] = Field(default_factory=list)
+    notes: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    schema_version: int = 1

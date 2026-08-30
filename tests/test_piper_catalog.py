@@ -15,7 +15,7 @@ class PiperCatalogTest(unittest.TestCase):
     def test_extra_piper_catalog_is_merged(self) -> None:
         ids = {spec.model_id for spec in self.piper_models}
 
-        self.assertEqual(len(self.piper_models), 33)
+        self.assertEqual(len(self.piper_models), 46)
         self.assertIn("piper_ngoc_huyen", ids)
         self.assertIn("piper_ngoc_huyen_new", ids)
         self.assertIn("piper_mai_linh_250626", ids)
@@ -29,6 +29,24 @@ class PiperCatalogTest(unittest.TestCase):
         self.assertIn("piper_adam_1", ids)
         self.assertIn("piper_yan_new", ids)
         self.assertIn("piper_vivos_x_low", ids)
+        self.assertEqual(
+            {spec.model_id for spec in self.piper_models if spec.source_kind == "manual"},
+            {
+                "piper_vbee_ngoc_huyen_1",
+                "piper_vbee_ngan_ke_chuyen_2",
+                "piper_vbee_thien_tam_3",
+                "piper_vbee_anh_khoi",
+                "piper_vbee_capcut_nam_tu_tin",
+                "piper_vbee_capcut_nu_hoat_ngon",
+                "piper_vbee_chieu_thanh_mien_nam",
+                "piper_vbee_hoai_my",
+                "piper_vbee_lai_van_sam",
+                "piper_vbee_lan_trinh",
+                "piper_vbee_nam_minh",
+                "piper_vbee_ngoc_huyen_fix",
+                "piper_vbee_nguyet_nga_podcast",
+            },
+        )
 
     def test_every_piper_voice_is_fixed_and_downloads_only_two_files(self) -> None:
         for spec in self.piper_models:
@@ -37,15 +55,39 @@ class PiperCatalogTest(unittest.TestCase):
                 self.assertEqual(voice_input.modes, ["fixed"])
                 self.assertEqual(voice_input.default_mode, "fixed")
                 self.assertFalse(spec.capabilities.supports_voice_profile)
-                self.assertEqual(len(spec.runtime["download_allow_patterns"]), 2)
+                if spec.source_kind == "manual":
+                    self.assertEqual(spec.hf_repo, "")
+                    self.assertTrue(spec.runtime["import_folder"])
+                    self.assertTrue(spec.runtime["import_model_file"])
+                    self.assertTrue(spec.runtime["import_config_file"])
+                    self.assertEqual(len(spec.runtime["model_sha256"]), 64)
+                    self.assertEqual(len(spec.runtime["config_sha256"]), 64)
+                    self.assertIn("Vbee Export", spec.display_name)
+                else:
+                    self.assertEqual(len(spec.runtime["download_allow_patterns"]), 2)
 
     def test_model_artifacts_are_not_duplicated_under_different_names(self) -> None:
-        artifacts = [
-            (spec.hf_repo, str(spec.runtime["model_file"]))
-            for spec in self.piper_models
-        ]
+        artifacts = []
+        for spec in self.piper_models:
+            if spec.source_kind == "manual":
+                artifacts.append(
+                    (spec.runtime["model_sha256"], spec.runtime["config_sha256"])
+                )
+            else:
+                artifacts.append((spec.hf_repo, str(spec.runtime["model_file"])))
 
         self.assertEqual(len(artifacts), len(set(artifacts)))
+
+    def test_vbee_chieu_thanh_is_a_real_config_variant(self) -> None:
+        existing = self.registry.get("piper_chieu_thanh")
+        exported = self.registry.get("piper_vbee_chieu_thanh_mien_nam")
+
+        self.assertEqual(
+            existing.runtime["model_sha256"], exported.runtime["model_sha256"]
+        )
+        self.assertNotEqual(
+            existing.runtime.get("config_sha256"), exported.runtime["config_sha256"]
+        )
 
     def test_ngoc_huyen_variants_use_different_weight_files(self) -> None:
         original = self.registry.get("piper_ngoc_huyen")

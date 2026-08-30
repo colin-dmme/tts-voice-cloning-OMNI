@@ -134,6 +134,7 @@ class TkinterApp(GenerationTabsMixin):
         self._model_action_policy = build_action_policy([])
         self.model_action_buttons: dict[str, ttk.Button] = {}
         self.sampling_spins: list[ttk.Spinbox] = []
+        self.piper_controls: list = []
         self.speed_spins: list[ttk.Spinbox] = []
         self.pitch_spins: list[ttk.Spinbox] = []
         self.f5_controls: list = []
@@ -147,6 +148,11 @@ class TkinterApp(GenerationTabsMixin):
         # (notebook, {tuning group id: tab frame}) — provider tabs are hidden for
         # models that do not expose that group, instead of shown greyed out.
         self.tuning_tab_groups: list[tuple[ttk.Notebook, dict[str, ttk.Frame]]] = []
+        self.declarative_tuning_tabs: list[ttk.Frame] = []
+        self.provider_option_vars: dict[str, tk.Variable] = {}
+        self._provider_option_cache: dict[str, dict] = {}
+        self._provider_option_signature: tuple | None = None
+        self._provider_option_provider: str | None = None
         self.emotion_combos: list[ttk.Combobox] = []
         self.profile_compat_labels: list[ttk.Label] = []
         self._preference_trace_ready = False
@@ -205,6 +211,17 @@ class TkinterApp(GenerationTabsMixin):
         self.top_k_var = tk.IntVar(
             value=int(self.preference_data.get("top_k") or self.controller.default_vieneu_top_k(model_id))
         )
+        self.piper_preset_var = tk.StringVar(value="Piper chuẩn")
+        self.piper_noise_scale_var = tk.DoubleVar(
+            value=float(self.preference_data.get("piper_noise_scale", 0.667))
+        )
+        self.piper_noise_w_var = tk.DoubleVar(
+            value=float(self.preference_data.get("piper_noise_w", 0.8))
+        )
+        self.piper_seed_var = tk.StringVar(
+            value=_optional_text(self.preference_data.get("piper_seed"))
+        )
+        self.piper_recommendation_var = tk.StringVar(value="")
         f5_defaults = self.controller.default_f5_settings(model_id)
         self.f5_nfe_step_var = tk.IntVar(
             value=int(self.preference_data.get("f5_nfe_step") or f5_defaults["f5_nfe_step"])
@@ -992,6 +1009,9 @@ class TkinterApp(GenerationTabsMixin):
             codec_repo=self._selected_codec_repo() if self.controller.model_supports_codec(model_id) else None,
             temperature=float(self.temperature_var.get()) if self.controller.model_supports_sampling(model_id) else None,
             top_k=int(self.top_k_var.get()) if self.controller.model_supports_sampling(model_id) else None,
+            piper_noise_scale=float(self.piper_noise_scale_var.get()),
+            piper_noise_w=float(self.piper_noise_w_var.get()),
+            piper_seed=_optional_int(self.piper_seed_var.get()),
             f5_nfe_step=int(self.f5_nfe_step_var.get()) if supports_f5 else None,
             f5_cfg_strength=float(self.f5_cfg_strength_var.get()) if supports_f5 else None,
             f5_sway_sampling_coef=float(self.f5_sway_sampling_coef_var.get()) if supports_f5 else None,
@@ -1043,6 +1063,7 @@ class TkinterApp(GenerationTabsMixin):
             mp3_bitrate_kbps=int(self.mp3_bitrate_var.get()),
             output_srt=bool(self.output_srt_var.get()),
             join_split_output_audio=join_split_output_audio,
+            provider_options=self._current_provider_options(),
         )
 
     def save_preferences(self) -> None:
@@ -1080,6 +1101,9 @@ class TkinterApp(GenerationTabsMixin):
             ),
             "temperature": float(self.temperature_var.get()) if self.controller.model_supports_sampling(model_id) else None,
             "top_k": int(self.top_k_var.get()) if self.controller.model_supports_sampling(model_id) else None,
+            "piper_noise_scale": float(self.piper_noise_scale_var.get()),
+            "piper_noise_w": float(self.piper_noise_w_var.get()),
+            "piper_seed": _optional_int(self.piper_seed_var.get()),
             "f5_nfe_step": int(self.f5_nfe_step_var.get()) if supports_f5 else self.preference_data.get("f5_nfe_step"),
             "f5_cfg_strength": (
                 float(self.f5_cfg_strength_var.get()) if supports_f5 else self.preference_data.get("f5_cfg_strength")
@@ -1166,6 +1190,7 @@ class TkinterApp(GenerationTabsMixin):
             "mp3_bitrate_kbps": int(self.mp3_bitrate_var.get()),
             "output_srt": bool(self.output_srt_var.get()),
             "join_split_output_audio": bool(self.split_output_var.get()) and bool(self.join_split_audio_var.get()),
+            "provider_options": self._current_provider_options(),
         })
         self.preferences.save(self.preference_data)
 
@@ -1184,6 +1209,9 @@ class TkinterApp(GenerationTabsMixin):
             self.runtime_target_var,
             self.temperature_var,
             self.top_k_var,
+            self.piper_noise_scale_var,
+            self.piper_noise_w_var,
+            self.piper_seed_var,
             self.f5_nfe_step_var,
             self.f5_cfg_strength_var,
             self.f5_sway_sampling_coef_var,
@@ -1724,6 +1752,7 @@ class TkinterApp(GenerationTabsMixin):
         # Only offer devices this model can actually run on; picking CUDA for a
         # CPU-only model would fail with ConfigError at generation time.
         policy = self.controller.control_policy(model_id)
+        self.piper_recommendation_var.set(policy.piper_recommendation)
         device_labels = [label for label, _value in policy.device_targets]
         for combo in self.runtime_target_combos:
             combo.configure(values=device_labels)
@@ -1731,6 +1760,8 @@ class TkinterApp(GenerationTabsMixin):
             self.runtime_target_var.set(device_labels[0])
 
         _set_widgets_state(self.speed_spins, caps.supports_speed)
+        for spin in self.speed_spins:
+            spin.configure(from_=policy.speed_minimum, to=policy.speed_maximum)
         if not caps.supports_speed:
             self.speed_var.set(1.0)
         _set_widgets_state(self.pitch_spins, caps.supports_pitch_shift)
@@ -1858,6 +1889,7 @@ class TkinterApp(GenerationTabsMixin):
 
     def _sync_tuning_tabs(self, policy) -> None:
         """Show only the provider tuning tabs this model actually exposes."""
+        self._configure_declarative_tuning(policy)
         groups = set(policy.tuning_groups)
         for notebook, tabs in self.tuning_tab_groups:
             if not notebook.winfo_exists():
@@ -1868,6 +1900,73 @@ class TkinterApp(GenerationTabsMixin):
                 notebook.tab(tab, state="normal" if visible else "hidden")
                 if not visible and selected == str(tab):
                     notebook.select(0)
+
+    def _current_provider_options(self) -> dict:
+        return {key: variable.get() for key, variable in self.provider_option_vars.items()}
+
+    def _configure_declarative_tuning(self, policy) -> None:
+        signature = (
+            policy.provider_id,
+            tuple(
+                (item.key, item.kind, item.default, item.minimum, item.maximum, item.step)
+                for item in policy.provider_settings
+            ),
+        )
+        if signature == self._provider_option_signature:
+            return
+        if self._provider_option_provider:
+            self._provider_option_cache[self._provider_option_provider] = (
+                self._current_provider_options()
+            )
+        saved = self._provider_option_cache.get(policy.provider_id)
+        if saved is None and self.preference_data.get("model_id") == policy.model_id:
+            saved = dict(self.preference_data.get("provider_options") or {})
+        saved = saved or {}
+        self.provider_option_vars = {}
+        for setting in policy.provider_settings:
+            value = saved.get(setting.key, setting.default)
+            if setting.kind == "boolean":
+                variable = tk.BooleanVar(value=bool(value))
+            elif setting.kind == "integer":
+                variable = tk.IntVar(value=int(value))
+            elif setting.kind == "number":
+                variable = tk.DoubleVar(value=float(value))
+            else:
+                variable = tk.StringVar(value=str(value))
+            variable.trace_add("write", lambda *_args: self.save_preferences())
+            self.provider_option_vars[setting.key] = variable
+        for tab in self.declarative_tuning_tabs:
+            for child in tab.winfo_children():
+                child.destroy()
+            for setting in policy.provider_settings:
+                variable = self.provider_option_vars[setting.key]
+                if setting.kind == "boolean":
+                    widget = ttk.Checkbutton(
+                        tab, text=setting.label, variable=variable
+                    )
+                    widget.pack(anchor="w", pady=(2, 8))
+                elif setting.kind == "choice":
+                    ttk.Label(tab, text=setting.label).pack(anchor="w")
+                    widget = ttk.Combobox(
+                        tab,
+                        textvariable=variable,
+                        values=[value for _label, value in setting.choices],
+                        state="readonly",
+                    )
+                    widget.pack(fill="x", pady=(4, 8))
+                else:
+                    ttk.Label(tab, text=setting.label).pack(anchor="w")
+                    widget = ttk.Spinbox(
+                        tab,
+                        textvariable=variable,
+                        from_=setting.minimum if setting.minimum is not None else -999999,
+                        to=setting.maximum if setting.maximum is not None else 999999,
+                        increment=setting.step or (1 if setting.kind == "integer" else 0.1),
+                    )
+                    widget.pack(fill="x", pady=(4, 8))
+                attach_tooltip(widget, setting.tooltip)
+        self._provider_option_provider = policy.provider_id
+        self._provider_option_signature = signature
 
     def _sync_punctuation_tabs(self, policy) -> None:
         """The whole tab disappears when the selected provider cannot honour it."""
@@ -1961,6 +2060,21 @@ class TkinterApp(GenerationTabsMixin):
     def download_selected_model(self) -> None:
         self._run_model_action(
             model_actions.DOWNLOAD, "Đang tải model", self.controller.download_model
+        )
+
+    def import_selected_local_model(self) -> None:
+        targets = self._action_targets(model_actions.IMPORT_LOCAL)
+        if not targets:
+            return
+        source_root = filedialog.askdirectory(
+            title="Chọn extracted_models hoặc một package model"
+        )
+        if not source_root:
+            return
+        self._run_model_action(
+            model_actions.IMPORT_LOCAL,
+            "Đang nhập package model local",
+            lambda model_id: self.controller.import_local_model(model_id, source_root),
         )
 
     def download_required_models(self) -> None:

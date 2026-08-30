@@ -12,11 +12,12 @@ from omni_tts_core.paths import PROJECT_ROOT, project_path
 from omni_tts_core.worker_installation import (
     is_worker_installed,
     portable_python_path,
+    worker_for_spec,
+    worker_label_for_spec,
     worker_site_packages,
     worker_venv_python,
 )
 from omni_tts_shared.errors import ConfigError
-
 
 RuntimeTarget = Literal["auto", "cpu", "cuda"]
 RUNTIME_TARGET_CHOICES: list[tuple[str, RuntimeTarget]] = [
@@ -39,6 +40,9 @@ class ProviderDeviceInfo:
     total_vram_mb: int = 0
     onnxruntime_cuda: bool = False
     llama_gpu_offload: bool = False
+    onnxruntime_available: bool = False
+    runtime_version: str = ""
+    worker_name: str = ""
     message: str = ""
 
     @property
@@ -48,6 +52,8 @@ class ProviderDeviceInfo:
             return f"CUDA - {self.device_name}{suffix}".strip()
         if self.torch_available:
             return "CPU"
+        if self.onnxruntime_available:
+            return "CPU / ONNX Runtime"
         return "unknown"
 
 
@@ -60,14 +66,21 @@ class RuntimeDeviceDetector:
             self._cache[provider] = self._detect(provider)
         return self._cache[provider]
 
+    def info_for_spec(self, spec: ModelSpec) -> ProviderDeviceInfo:
+        worker_name = worker_for_spec(spec)
+        cache_key = f"{spec.provider}:{worker_name or '-'}"
+        if cache_key not in self._cache:
+            self._cache[cache_key] = self._detect(spec.provider, worker_name=worker_name)
+        return self._cache[cache_key]
+
     def clear(self) -> None:
         self._cache.clear()
 
-    def _detect(self, provider: str) -> ProviderDeviceInfo:
+    def _detect(self, provider: str, *, worker_name: str | None = None) -> ProviderDeviceInfo:
         if provider == "omnivoice":
             return _probe_current_python(provider)
         if provider == "vieneu":
-            return _probe_worker(provider, "vieneu_worker")
+            return _probe_worker(provider, worker_name or "vieneu_worker")
         if provider == "qwen":
             return _probe_worker(provider, "qwen_worker")
         if provider == "valtec":
@@ -122,7 +135,7 @@ class RuntimeDevicePolicy:
     def _vieneu_auto_cuda_ready(self, spec: ModelSpec, *, mode: str | None = None) -> bool:
         if bool(spec.runtime.get("prefer_cpu_auto")):
             return False
-        info = self.detector.info_for_provider(spec.provider)
+        info = self.detector.info_for_spec(spec)
         if not info.cuda_available:
             return False
         active_mode = (mode or str(spec.runtime.get("vieneu_mode") or "")).lower()
@@ -141,7 +154,7 @@ class RuntimeDevicePolicy:
     ) -> None:
         if target != "cuda":
             return
-        info = self.detector.info_for_provider(spec.provider)
+        info = self.detector.info_for_spec(spec)
         if not info.cuda_available:
             install_hint = {
                 "omnivoice": "Mở tab Quản lý model và bấm Cài GPU/CUDA cho model OmniVoice.",
@@ -151,7 +164,15 @@ class RuntimeDevicePolicy:
                 "f5tts": "Mở tab Quản lý model và bấm Cài GPU/CUDA cho model F5-TTS.",
                 "chatterbox": "Mở tab Quản lý model và bấm Cài GPU/CUDA cho model Chatterbox.",
             }.get(spec.provider, "Hãy kiểm tra CUDA runtime.")
-            raise ConfigError(f"CUDA chưa khả dụng cho {spec.provider}. {install_hint}")
+            if spec.provider == "vieneu":
+                install_hint = (
+                    f"Mở tab Quản lý model và bấm Cài GPU/CUDA cho worker "
+                    f"{worker_label_for_spec(spec)}."
+                )
+            raise ConfigError(
+                f"GPU CUDA chưa khả dụng cho {worker_label_for_spec(spec) if spec.provider == 'vieneu' else spec.provider}. "
+                f"{install_hint} Bạn vẫn có thể chọn CPU."
+            )
         if spec.provider == "vieneu":
             active_mode = (mode or str(spec.runtime.get("vieneu_mode") or "")).lower()
             if active_mode == "turbo" and not info.onnxruntime_cuda:
@@ -270,6 +291,9 @@ def _probe_worker(provider: str, worker_name: str) -> ProviderDeviceInfo:
         total_vram_mb=int(data.get("total_vram_mb") or 0),
         onnxruntime_cuda=bool(data.get("onnxruntime_cuda")),
         llama_gpu_offload=bool(data.get("llama_gpu_offload")),
+        onnxruntime_available=bool(data.get("onnxruntime_available")),
+        runtime_version=str(data.get("vieneu_version") or ""),
+        worker_name=worker_name,
         message=str(data.get("message") or "") or _unsupported_arch_message(
             str(data.get("capability") or ""),
             data.get("arch_list") or [],
@@ -347,7 +371,9 @@ data = {
     "arch_list": [],
     "total_vram_mb": 0,
     "onnxruntime_cuda": False,
+    "onnxruntime_available": False,
     "llama_gpu_offload": False,
+    "vieneu_version": "",
     "message": "",
 }
 try:
@@ -365,9 +391,18 @@ except Exception as exc:
     data["message"] = str(exc)
 try:
     import onnxruntime as ort
+    data["onnxruntime_available"] = True
     data["onnxruntime_cuda"] = "CUDAExecutionProvider" in ort.get_available_providers()
 except Exception:
     pass
+try:
+    from importlib.metadata import version
+    data["vieneu_version"] = version("vieneu")
+except Exception:
+    pass
+if data["onnxruntime_available"] and not data["torch_available"]:
+    # A torch-free CPU worker is intentional for VieNeu v3, not a broken probe.
+    data["message"] = ""
 try:
     import llama_cpp
     support = getattr(llama_cpp, "llama_supports_gpu_offload", None)

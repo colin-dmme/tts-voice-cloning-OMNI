@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import queue
@@ -7,7 +8,6 @@ import subprocess
 import tempfile
 import threading
 import time
-import atexit
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -27,6 +27,7 @@ from omni_tts_core.paths import PROJECT_ROOT, project_path
 from omni_tts_core.progress import check_cancel
 from omni_tts_core.runtime_devices import RuntimeDevicePolicy
 from omni_tts_core.storage_paths import hf_cache_env
+from omni_tts_core.worker_installation import worker_for_spec, worker_label_for_spec
 from omni_tts_shared.errors import EngineDependencyError, GenerationError
 
 if TYPE_CHECKING:
@@ -38,7 +39,9 @@ class VieneuSubprocessEngine(BaseTtsEngine):
         self.spec = spec
         self._cache = cache
         self._device_policy = RuntimeDevicePolicy()
-        self.worker_dir = project_path("engines/vieneu_worker")
+        self.worker_name = worker_for_spec(spec) or "vieneu_worker"
+        self.worker_label = worker_label_for_spec(spec)
+        self.worker_dir = project_path(f"engines/{self.worker_name}")
         self.worker_script = self.worker_dir / "synthesize.py"
         self.encoder_script = self.worker_dir / "encode_reference.py"
         self._process: subprocess.Popen | None = None
@@ -281,7 +284,8 @@ class VieneuSubprocessEngine(BaseTtsEngine):
             if candidate.exists():
                 return WorkerRuntime(candidate, [])
         raise EngineDependencyError(
-            "VieNeu worker chưa được cài. Mở tab Quản lý model, chọn model VieNeu rồi bấm Cài worker/môi trường."
+            f"Worker {self.worker_label} chưa được cài ({self.worker_name}). "
+            "Mở tab Quản lý model, chọn đúng model rồi bấm Cài worker/môi trường."
         )
 
     def _base_payload(self, request: TtsEngineRequest, scratch_dir: Path | None = None) -> dict:
@@ -316,7 +320,7 @@ class VieneuSubprocessEngine(BaseTtsEngine):
                 )
                 payload["codec_device"] = "cpu"
             else:
-                payload["ref_audio"] = str(request.reference_audio_path)
+                payload["ref_audio"] = str(request.reference_audio_path.resolve())
         else:
             voice_name = request.speaker_id if request.speaker_id in self.spec.voice_presets else None
             if voice_name:
@@ -354,7 +358,7 @@ class VieneuSubprocessEngine(BaseTtsEngine):
         if encode_codec_repo == "neuphonic/neucodec-onnx-decoder-int8":
             encode_codec_repo = None
         payload = {
-            "ref_audio": str(request.reference_audio_path),
+            "ref_audio": str(request.reference_audio_path.resolve()),
             "output_path": str(ref_codes_path),
             "codec_repo": encode_codec_repo or "neuphonic/distill-neucodec",
             "codec_device": "cpu",
@@ -456,7 +460,8 @@ def _runtime_payload(runtime: dict) -> dict:
         "onnx_subfolder",
         "threads",
         "max_batch_size",
-        "style",
+        "repetition_window",
+        "denoise_reference",
     }
     return {key: value for key, value in runtime.items() if key in allowed and value not in ("", None)}
 
@@ -479,9 +484,16 @@ def _clean_worker_error(message: str) -> str:
             "Nếu đang dùng Profile với Standard/GGUF, hãy thử xóa cache profile hoặc encode lại bằng NeuCodec Distill."
         )
     if "No module named 'neucodec'" in message:
-        return "VieNeu Standard cần neucodec để clone giọng. Mở Quản lý model và bấm Cài worker/môi trường."
+        return "VieNeu v2 Standard cần neucodec để clone giọng. Mở Quản lý model và bấm Cài worker VieNeu v2."
+    if "No module named 'kaldi_native_fbank'" in message or "No module named 'kaldi-native-fbank'" in message:
+        return "VieNeu v3 thiếu kaldi-native-fbank. Hãy cài lại worker VieNeu v3 từ Quản lý model."
+    if "sea-g2p" in message.lower() or "sea_g2p" in message.lower():
+        return "VieNeu v3 thiếu hoặc sai phiên bản sea-g2p. Hãy cài lại worker VieNeu v3."
     if "No module named 'torch'" in message or "Torch is required" in message:
-        return "VieNeu cần torch trong worker để clone giọng. Mở Quản lý model và bấm Cài worker/môi trường."
+        return (
+            "Backend GPU PyTorch chưa được cài cho worker đang chọn. "
+            "Hãy bấm Cài GPU/CUDA hoặc chuyển Thiết bị xử lý sang CPU ONNX."
+        )
     lines = [line.strip() for line in message.splitlines() if line.strip()]
     if not lines:
         return "Không rõ lỗi từ worker."

@@ -57,7 +57,9 @@ PAUSE_PRESET_KEYS = (
             spec.maximum_field,
         )
     ),
+    "chunk_join_mode",
     "chunk_pause_ms",
+    "chunk_crossfade_ms",
     PARAGRAPH_PAUSE_FIELD.fixed_field,
     PARAGRAPH_PAUSE_FIELD.random_field,
     PARAGRAPH_PAUSE_FIELD.minimum_field,
@@ -68,7 +70,7 @@ PAUSE_PRESET_KEYS = (
 @dataclass(frozen=True)
 class PunctuationPausePreset:
     name: str
-    values: dict[str, int | bool]
+    values: dict[str, int | bool | str]
 
 
 class PunctuationPausePresetStore:
@@ -139,14 +141,23 @@ class PunctuationPausePresetStore:
             raise OmniTtsError(f"Không lưu được preset ngắt nghỉ: {error}") from error
 
 
-def normalize_pause_values(values: Mapping[str, Any]) -> dict[str, int | bool]:
+def normalize_pause_values(values: Mapping[str, Any]) -> dict[str, int | bool | str]:
     merged: dict[str, Any] = {
         key: DEFAULT_GENERATION_PREFERENCES[key] for key in PAUSE_PRESET_KEYS
     }
     merged.update({key: values[key] for key in PAUSE_PRESET_KEYS if key in values})
-    normalized: dict[str, int | bool] = {}
+    if "chunk_join_mode" not in values and "chunk_pause_ms" in values:
+        merged["chunk_join_mode"] = (
+            "crossfade" if int(values.get("chunk_pause_ms") or 0) == 0 else "silence"
+        )
+    normalized: dict[str, int | bool | str] = {}
     for key in PAUSE_PRESET_KEYS:
-        if key.endswith("_enabled"):
+        if key == "chunk_join_mode":
+            mode = str(merged[key])
+            normalized[key] = (
+                mode if mode in {"auto", "crossfade", "direct", "silence"} else "auto"
+            )
+        elif key.endswith("_enabled"):
             normalized[key] = bool(merged[key])
         else:
             normalized[key] = max(0, int(merged[key]))

@@ -25,7 +25,9 @@ def build_pause_explanation(values: Mapping[str, Any]) -> PauseExplanation:
     sentence_fixed = int(_value(values, "sentence_pause_ms"))
     sentence_min = int(_value(values, "sentence_pause_min_ms"))
     sentence_max = int(_value(values, "sentence_pause_max_ms"))
+    chunk_mode = _chunk_join_mode(values)
     chunk_ms = int(_value(values, "chunk_pause_ms"))
+    chunk_crossfade_ms = int(_value(values, "chunk_crossfade_ms"))
     paragraph_random = bool(_value(values, "paragraph_pause_random_enabled"))
     paragraph_ms = int(_value(values, "paragraph_pause_ms"))
     paragraph_min = int(_value(values, "paragraph_pause_min_ms"))
@@ -42,6 +44,10 @@ def build_pause_explanation(values: Mapping[str, Any]) -> PauseExplanation:
         else _seconds_text(paragraph_ms)
     )
     chunk_effective = _seconds_text(chunk_ms)
+    chunk_crossfade_effective = _seconds_text(chunk_crossfade_ms)
+    chunk_summary = _chunk_summary(
+        chunk_mode, chunk_effective, chunk_crossfade_effective
+    )
     punctuation_effective = {
         "sentence": sentence_effective,
         "comma": _punctuation_value(values, "comma"),
@@ -69,15 +75,14 @@ def build_pause_explanation(values: Mapping[str, Any]) -> PauseExplanation:
             f"• Dấu cuối câu ở giữa cùng một đoạn: nghỉ {sentence_effective}.\n"
             f"• Dấu cuối câu ngay trước dòng trống: chỉ nghỉ đoạn gốc "
             f"{paragraph_effective}; KHÔNG cộng thành {stacked}.\n"
-            f"• Ranh giới chunk: có dấu được hỗ trợ thì dùng mức của dấu; "
-            f"không có dấu mới dùng {chunk_effective}. Hai mức không cộng dồn."
+            f"• Điểm nối chunk: {chunk_summary}"
         )
     else:
         section = (
             "KẾT QUẢ THỰC TẾ VỚI THIẾT LẬP HIỆN TẠI\n"
             "• Ngắt nghỉ theo dấu câu đang tắt.\n"
             f"• Dòng trống vẫn tạo nghỉ đoạn gốc {paragraph_effective}.\n"
-            f"• Ranh giới chunk dùng {chunk_effective}."
+            f"• Điểm nối chunk: {chunk_summary}"
         )
 
     return PauseExplanation(
@@ -96,11 +101,7 @@ def build_pause_explanation(values: Mapping[str, Any]) -> PauseExplanation:
         ellipsis=_punctuation_detail(
             "dấu ba chấm", punctuation_effective["ellipsis"], paragraph_effective
         ),
-        chunk=(
-            f"Thực tế: {chunk_effective} chỉ dùng khi Core chia chunk tại vị trí "
-            "không có dấu được hỗ trợ. Nếu chunk kết thúc bằng dấu câu, mức của "
-            "dấu thay thế mức chunk; không cộng hai giá trị."
-        ),
+        chunk=_chunk_detail(chunk_mode, chunk_effective, chunk_crossfade_effective),
         paragraph=(
             f"Thực tế: chèn {paragraph_effective} giữa hai đoạn được phân cách "
             "bằng dòng trống. Dù đoạn trước kết thúc bằng . ? !, khoảng nghỉ tại "
@@ -117,6 +118,49 @@ def build_pause_explanation(values: Mapping[str, Any]) -> PauseExplanation:
 
 def _value(values: Mapping[str, Any], key: str) -> Any:
     return values.get(key, DEFAULT_GENERATION_PREFERENCES[key])
+
+
+def _chunk_join_mode(values: Mapping[str, Any]) -> str:
+    mode = values.get("chunk_join_mode")
+    if mode in {"auto", "crossfade", "direct", "silence"}:
+        return str(mode)
+    if "chunk_pause_ms" in values:
+        return "crossfade" if int(values.get("chunk_pause_ms") or 0) == 0 else "silence"
+    return "auto"
+
+
+def _chunk_summary(mode: str, silence: str, crossfade: str) -> str:
+    if mode == "crossfade":
+        return f"crossfade {crossfade}, không chèn khoảng lặng."
+    if mode == "direct":
+        return "nối thẳng, không chèn khoảng lặng và không crossfade."
+    if mode == "silence":
+        return f"chèn khoảng lặng cố định {silence}."
+    return "AUTO theo chính sách của provider; không áp một kiểu nối chung cho mọi model."
+
+
+def _chunk_detail(mode: str, silence: str, crossfade: str) -> str:
+    if mode == "crossfade":
+        return (
+            f"Thực tế: không chèn khoảng lặng tại điểm nối do Core tạo. App chồng "
+            f"{crossfade} cuối chunk trước với đầu chunk sau; tổng thời lượng ngắn "
+            "đi tương ứng."
+        )
+    if mode == "direct":
+        return (
+            "Thực tế: nối thẳng hai waveform tại điểm nối do Core tạo, không chèn "
+            "khoảng lặng và không crossfade. Chế độ này chủ yếu dành cho kiểm thử."
+        )
+    if mode == "silence":
+        return (
+            f"Thực tế: chèn {silence} giữa mọi Core chunk. Đây là ghi đè cố định, "
+            "không tự đổi theo loại dấu câu."
+        )
+    return (
+        "Thực tế: Core đọc metadata của provider. VieNeu có thể tự chia/nối bên "
+        "trong SDK; provider hỗ trợ dấu câu dùng nhịp theo dấu; provider chưa có "
+        "bộ nối riêng dùng fallback an toàn."
+    )
 
 
 def _punctuation_value(values: Mapping[str, Any], prefix: str) -> str:

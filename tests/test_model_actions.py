@@ -17,6 +17,8 @@ def _status(
     installed: bool = True,
     required: bool = False,
     hf_cached: bool | None = None,
+    worker_name: str = "",
+    source_kind: str = "huggingface",
 ) -> ModelStatus:
     return ModelStatus(
         model_id=model_id,
@@ -24,11 +26,13 @@ def _status(
         provider=provider,
         model_type="tts",
         hf_repo="",
+        source_kind=source_kind,
         local_path="C:/x",
         installed=installed,
         required=required,
         size_mb=0,
         hf_cached=hf_cached,
+        worker_name=worker_name,
     )
 
 
@@ -37,7 +41,7 @@ class EmptySelectionTest(unittest.TestCase):
         policy = build_action_policy([])
         for action in (
             model_actions.DOWNLOAD, model_actions.REMOVE, model_actions.INSTALL_WORKER,
-            model_actions.INSTALL_GPU, model_actions.OPEN_STORAGE,
+            model_actions.INSTALL_GPU, model_actions.OPEN_STORAGE, model_actions.IMPORT_LOCAL,
         ):
             state = policy.state(action)
             self.assertFalse(state.enabled, msg=action)
@@ -70,6 +74,22 @@ class DownloadTest(unittest.TestCase):
         )
         self.assertTrue(state.enabled)
 
+    def test_manual_package_is_not_offered_as_download(self) -> None:
+        state = build_action_policy([
+            _status("local", installed=False, source_kind="manual")
+        ]).state(model_actions.DOWNLOAD)
+        self.assertFalse(state.enabled)
+
+
+class ImportLocalTest(unittest.TestCase):
+    def test_targets_only_missing_manual_packages(self) -> None:
+        policy = build_action_policy([
+            _status("a", installed=False, source_kind="manual"),
+            _status("b", installed=True, source_kind="manual"),
+            _status("c", installed=False),
+        ])
+        self.assertEqual(policy.state(model_actions.IMPORT_LOCAL).targets, ("a",))
+
 
 class RemoveTest(unittest.TestCase):
     def test_skips_required_models(self) -> None:
@@ -96,11 +116,19 @@ class ProviderActionTest(unittest.TestCase):
         self.assertIn("Piper ONNX", state.reason)
 
     def test_gpu_install_runs_once_per_provider(self) -> None:
-        """33 Piper rows must not trigger 33 installs."""
+        """46 Piper rows must not trigger 46 installs."""
         selection = [_status(f"v{i}", provider="vieneu") for i in range(5)]
         state = build_action_policy(selection).state(model_actions.INSTALL_GPU)
         self.assertTrue(state.enabled)
         self.assertEqual(state.targets, ("v0",))
+
+    def test_vieneu_v2_and_v3_workers_are_not_deduplicated_together(self) -> None:
+        selection = [
+            _status("v2", worker_name="vieneu_worker"),
+            _status("v3", worker_name="vieneu_v3_worker"),
+        ]
+        state = build_action_policy(selection).state(model_actions.INSTALL_WORKER)
+        self.assertEqual(state.targets, ("v2", "v3"))
 
     def test_mixed_selection_skips_unsupported_providers(self) -> None:
         selection = [_status("v", provider="vieneu"), _status("p", provider="piper")]

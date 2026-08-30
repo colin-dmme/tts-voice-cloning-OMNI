@@ -6,7 +6,11 @@ from omni_tts_core.runtime_devices import (
     RuntimeDeviceDetector,
     configured_runtime_device,
 )
-from omni_tts_core.worker_installation import is_worker_installed
+from omni_tts_core.worker_installation import (
+    is_worker_installed,
+    worker_for_spec,
+    worker_label_for_spec,
+)
 from omni_tts_shared.schemas import RuntimeStatus
 
 
@@ -42,8 +46,17 @@ class RuntimeStatusService:
             )
         if spec.provider == "omnivoice":
             return _omnivoice_status(spec, installed, self.detector)
+        if bool(spec.runtime.get("cpu_only")) and worker_for_spec(spec):
+            return _cpu_worker_status(
+                spec, installed, worker_for_spec(spec) or ""
+            )
         if spec.provider == "vieneu":
-            return _worker_status(spec, installed, "vieneu_worker", self.detector)
+            return _worker_status(
+                spec,
+                installed,
+                worker_for_spec(spec) or "vieneu_worker",
+                self.detector,
+            )
         if spec.provider == "qwen":
             return _worker_status(spec, installed, "qwen_worker", self.detector)
         if spec.provider == "valtec":
@@ -78,12 +91,35 @@ class RuntimeStatusService:
         )
 
 
+def _cpu_worker_status(
+    spec: ModelSpec,
+    installed: bool,
+    worker_name: str,
+) -> RuntimeStatus:
+    ready = is_worker_installed(worker_name)
+    label = worker_label_for_spec(spec)
+    return RuntimeStatus(
+        model_id=spec.model_id,
+        display_name=spec.display_name,
+        provider=spec.provider,
+        installed=installed,
+        gpu_available=False,
+        actual_device="cpu" if ready else "not-installed",
+        device_name="CPU / ONNX Runtime" if ready else "",
+        message=(
+            f"Worker {label} đã cài; model chạy ONNX trên CPU."
+            if ready
+            else f"Worker {label} chưa cài. Bấm Cài worker/môi trường."
+        ),
+    )
+
+
 def _omnivoice_status(
     spec: ModelSpec,
     installed: bool,
     detector: RuntimeDeviceDetector,
 ) -> RuntimeStatus:
-    info = detector.info_for_provider(spec.provider)
+    info = detector.info_for_spec(spec)
     actual = "auto-cuda" if info.cuda_available else "auto-cpu"
     return RuntimeStatus(
         model_id=spec.model_id,
@@ -115,11 +151,11 @@ def _worker_status(
             installed=False,
             actual_device="not-installed",
             message=(
-                f"{_provider_label(spec.provider)} worker chưa cài. "
+                f"Worker {worker_label_for_spec(spec)} chưa cài ({worker_name}). "
                 "Mở tab Quản lý model, chọn model này rồi bấm Cài worker/môi trường."
             ),
         )
-    info = detector.info_for_provider(spec.provider)
+    info = detector.info_for_spec(spec)
     configured = configured_runtime_device(spec)
     actual = configured
     runtime_warning = ""
@@ -133,7 +169,12 @@ def _worker_status(
         runtime_warning = _cuda_runtime_warning(spec, info)
         if runtime_warning:
             actual = "cuda-partial"
-    default_note = "Worker đã cài."
+    default_note = f"Worker {worker_label_for_spec(spec)} đã cài"
+    if info.runtime_version:
+        default_note += f"; SDK {info.runtime_version}"
+    default_note += "."
+    if str(spec.runtime.get("vieneu_mode") or "").lower() == "v3turbo":
+        default_note += " Auto mặc định dùng CPU ONNX INT8; GPU PyTorch chỉ dùng khi chọn GPU CUDA."
     if spec.provider == "valtec":
         default_note = "Worker đã cài; mặc định vẫn ưu tiên CPU, CUDA là tùy chọn nâng cao."
     return RuntimeStatus(
@@ -163,7 +204,7 @@ def _runtime_message(
     cuda_available: bool,
     runtime_warning: str = "",
 ) -> str:
-    parts = [default_note, f"Cấu hình model hiện tại: {configured.upper()}."]
+    parts = [default_note, f"Thiết bị mặc định của model: {configured.upper()}."]
     if configured == "cuda" and not cuda_available:
         parts.append(f"Chưa có CUDA trong {_provider_label(provider)} worker; hãy cài worker GPU hoặc chọn model thường + Auto/CPU.")
     if runtime_warning:

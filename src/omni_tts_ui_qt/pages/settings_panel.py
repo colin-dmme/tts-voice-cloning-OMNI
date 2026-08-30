@@ -11,11 +11,12 @@ provider) → Đầu ra → Bảo vệ GPU.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QThreadPool, Signal
+from PySide6.QtCore import QStringListModel, Qt, QThreadPool, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
@@ -36,6 +37,8 @@ from omni_tts_core.pause_presets import (
     PAUSE_PRESET_KEYS,
     PUNCTUATION_PAUSE_FIELDS,
 )
+from omni_tts_core.chunk_join import CUSTOM_CHUNK_JOIN_CHOICES
+from omni_tts_core.voice_library import group_by_project
 from omni_tts_core.ui_presenters import control_policy, field_limits, model_groups
 from omni_tts_core.ui_presenters.control_policy import (
     NEUTRAL_EMOTION,
@@ -44,6 +47,7 @@ from omni_tts_core.ui_presenters.control_policy import (
     GenerationControlPolicy,
 )
 from omni_tts_core.ui_presenters.pause_explanations import build_pause_explanation
+from omni_tts_core.ui_presenters.pronunciation import preset_label
 from omni_tts_core.ui_presenters.settings_state import (
     DEFAULT_GENERATION_PREFERENCES,
     GenerationSettings,
@@ -52,7 +56,13 @@ from omni_tts_core.ui_presenters.tooltips import tooltip
 from omni_tts_ui_qt.context import AppContext
 from omni_tts_ui_qt.background import FunctionTask
 from omni_tts_ui_qt.pages.higgs_remote_section import HiggsRemoteGroup
-from omni_tts_ui_qt.pages.settings_sections import ChatterboxGroup, F5Group, VieneuGroup
+from omni_tts_ui_qt.pages.settings_sections import (
+    ChatterboxGroup,
+    F5Group,
+    PiperGroup,
+    VieneuGroup,
+    DeclarativeProviderGroup,
+)
 from omni_tts_ui_qt.widgets.common import (
     CollapsibleSection,
     PathBar,
@@ -85,6 +95,9 @@ class SettingsPanel(QScrollArea):
         # Model whose provider defaults are currently loaded into the tuning
         # widgets; used to avoid re-seeding on every apply_model() call.
         self._seeded_model_id: str | None = None
+        self._provider_option_cache: dict[str, dict] = {}
+        self._configured_option_provider: str | None = None
+        self._model_search_matches: list[tuple[str, str]] = []
 
         container = QWidget()
         self.setWidget(container)
@@ -93,6 +106,7 @@ class SettingsPanel(QScrollArea):
         self._layout.setSpacing(8)
 
         self._build_basic()
+        self._build_pronunciation()
         self._build_punctuation()
         self._build_voice_source()
         self._build_tuning()
@@ -126,7 +140,28 @@ class SettingsPanel(QScrollArea):
         self.provider_combo = make_combo(self.ctrl.provider_choices())
         self.provider_combo.setToolTip(tooltip("provider"))
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        self.model_search = QLineEdit()
+        self.model_search.setPlaceholderText("Tìm model theo tên hoặc mã…")
+        self.model_search.setClearButtonEnabled(True)
+        self.model_search.setToolTip(tooltip("model_search"))
+        self._model_search_model = QStringListModel(self)
+        self._model_search_completer = QCompleter(self._model_search_model, self)
+        self._model_search_completer.setCaseSensitivity(
+            Qt.CaseSensitivity.CaseInsensitive
+        )
+        self._model_search_completer.setCompletionMode(
+            QCompleter.CompletionMode.UnfilteredPopupCompletion
+        )
+        self.model_search.setCompleter(self._model_search_completer)
+        self.model_search.textEdited.connect(self._on_model_search_edited)
+        self.model_search.returnPressed.connect(
+            self._activate_first_model_search_result
+        )
+        self._model_search_completer.activated[str].connect(
+            self._activate_model_search_label
+        )
         self.model_combo = make_combo(self.ctrl.model_choices(self._current_provider_id()))
+        self.model_combo.setMaxVisibleItems(16)
         self.model_combo.setToolTip(tooltip("model"))
         self.model_combo.currentIndexChanged.connect(self._on_model_changed)
         self.model_info = self._hint()
@@ -138,9 +173,31 @@ class SettingsPanel(QScrollArea):
         self.device_note = self._hint()
         self.speed = dspin_for("speed", NEUTRAL_SPEED)
         self.pitch = dspin_for("pitch_shift", NEUTRAL_PITCH)
+        self.omnivoice_num_step = QComboBox()
+        for label, value in (
+            ("Mặc định (32)", None),
+            ("Nhanh (16)", 16),
+            ("Cân bằng (24)", 24),
+            ("Cao (48)", 48),
+            ("Rất cao (64)", 64),
+        ):
+            self.omnivoice_num_step.addItem(label, value)
+        self.omnivoice_num_step.setToolTip(
+            "Số bước diffusion của OmniVoice. Ít bước = nhanh hơn (hợp GPU cũ chạy "
+            "FP32); nhiều bước = chất lượng/độ ổn định cao hơn nhưng chậm hơn."
+        )
+        self.omnivoice_num_step.currentIndexChanged.connect(lambda _i: self._emit_changed())
+        self.chunk_join_custom = QCheckBox("Tùy chỉnh điểm nối chunk")
+        self.chunk_join_custom.setToolTip(tooltip("chunk_join_custom"))
+        self.chunk_join_mode = make_combo(list(CUSTOM_CHUNK_JOIN_CHOICES), "silence")
+        self.chunk_join_mode.setToolTip(tooltip("chunk_join_mode"))
         self.chunk_pause = pause_seconds_spin_for(
             "chunk_pause_ms", 120, "chunk_pause"
         )
+        self.chunk_crossfade = pause_seconds_spin_for(
+            "chunk_crossfade_ms", 80, "chunk_crossfade"
+        )
+        self.chunk_join_note = self._hint()
         paragraph = PARAGRAPH_PAUSE_FIELD
         self.paragraph_pause_editor = RandomPauseEditor(
             paragraph.label,
@@ -152,6 +209,7 @@ class SettingsPanel(QScrollArea):
         )
         self.max_chunk = spin_for("max_chunk_chars", 220, "max_chunk")
         form.addRow("Nhà cung cấp:", self.provider_combo)
+        form.addRow("Tìm model:", self.model_search)
         form.addRow("Model TTS:", self.model_combo)
         form.addRow(self.model_info)
         form.addRow(self.runtime_status)
@@ -162,15 +220,39 @@ class SettingsPanel(QScrollArea):
         form.addRow("Tốc độ đọc:", self.speed)
         self._pitch_row = form.rowCount()
         form.addRow("Pitch shift:", self.pitch)
-        form.addRow("Nghỉ giữa chunk kỹ thuật (giây):", self.chunk_pause)
+        self._omnivoice_num_step_row = form.rowCount()
+        form.addRow("Số bước diffusion:", self.omnivoice_num_step)
+        form.addRow(self.chunk_join_custom)
+        self._chunk_join_mode_row = form.rowCount()
+        form.addRow("Kiểu nối chunk:", self.chunk_join_mode)
+        self._chunk_crossfade_row = form.rowCount()
+        form.addRow("Thời gian crossfade (giây):", self.chunk_crossfade)
+        self._chunk_pause_row = form.rowCount()
+        form.addRow("Khoảng lặng giữa chunk (giây):", self.chunk_pause)
+        form.addRow(self.chunk_join_note)
         form.addRow(self.paragraph_pause_editor)
         form.addRow("Ký tự tối đa mỗi đoạn nhỏ:", self.max_chunk)
         self._basic_form = form
-        self._connect_all(self.language_combo, self.device_combo, self.speed, self.pitch,
-                          self.chunk_pause, self.max_chunk)
+        self._connect_all(
+            self.language_combo,
+            self.device_combo,
+            self.speed,
+            self.pitch,
+            self.chunk_join_custom,
+            self.chunk_join_mode,
+            self.chunk_pause,
+            self.chunk_crossfade,
+            self.max_chunk,
+        )
+        self.chunk_join_custom.toggled.connect(self._refresh_chunk_join_controls)
+        self.chunk_join_mode.currentIndexChanged.connect(
+            self._refresh_chunk_join_controls
+        )
         self.paragraph_pause_editor.changed.connect(self._emit_changed)
         self.paragraph_pause_editor.changed.connect(self._refresh_pause_tooltips)
         self.chunk_pause.valueChanged.connect(self._refresh_pause_tooltips)
+        self.chunk_crossfade.valueChanged.connect(self._refresh_pause_tooltips)
+        self._refresh_chunk_join_controls()
 
     def _build_punctuation(self) -> None:
         self.punctuation_section, form = self._section(
@@ -228,6 +310,64 @@ class SettingsPanel(QScrollArea):
         form.addRow(reset)
         self._refresh_pause_tooltips()
 
+    def _build_pronunciation(self) -> None:
+        self.pronunciation_section, form = self._section(
+            "Cách đọc / Từ điển phát âm",
+            expanded=True,
+            active=False,
+            active_text="ACTIVE · ĐANG ÁP DỤNG",
+            inactive_text="DEACTIVE · ĐỌC NGUYÊN VĂN",
+        )
+        self.pronunciation_section.activation_changed.connect(self._emit_changed)
+        self.pronunciation_combo = QComboBox()
+        self.pronunciation_combo.setToolTip(
+            "Preset chỉ thay đổi văn bản gửi tới model TTS. Văn bản gốc và subtitle "
+            "vẫn giữ nguyên cách viết."
+        )
+        self.pronunciation_combo.currentIndexChanged.connect(self._emit_changed)
+        manage = QPushButton("Quản lý…")
+        manage.clicked.connect(lambda: self.context.show_page("pronunciation"))
+        row = QHBoxLayout()
+        row.addWidget(self.pronunciation_combo, 1)
+        row.addWidget(manage)
+        form.addRow("Preset:", row)
+        note = self._hint()
+        note.setWordWrap(True)
+        note.setText(
+            "Ví dụ IIKO → Y Cô: audio dùng “Y Cô”, còn nội dung và SRT vẫn là “IIKO”."
+        )
+        form.addRow(note)
+        self.refresh_pronunciation_presets()
+
+    def refresh_pronunciation_presets(self) -> None:
+        selected = self.pronunciation_combo.currentData() if hasattr(
+            self, "pronunciation_combo"
+        ) else None
+        combo = getattr(self, "pronunciation_combo", None)
+        if combo is None:
+            return
+        combo.blockSignals(True)
+        combo.clear()
+        try:
+            loader = getattr(self.ctrl, "pronunciation_presets", None)
+            presets = loader() if callable(loader) else []
+        except Exception:
+            presets = []
+        for preset in presets:
+            combo.addItem(preset_label(preset), preset.preset_id)
+        missing_selected = False
+        if selected:
+            index = combo.findData(selected)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            else:
+                combo.setCurrentIndex(-1)
+                missing_selected = True
+        combo.blockSignals(False)
+        combo.setEnabled(combo.count() > 0)
+        if combo.count() == 0 or missing_selected:
+            self.pronunciation_section.set_active(False)
+
     def _build_voice_source(self) -> None:
         self.voice_section, form = self._section("Nguồn giọng")
         self.mode_group = QButtonGroup(self)
@@ -235,11 +375,18 @@ class SettingsPanel(QScrollArea):
         self.mode_fixed.setToolTip(tooltip("voice_mode_fixed"))
         self.mode_profile = QRadioButton("Clone từ Profile")
         self.mode_profile.setToolTip(tooltip("voice_mode_profile"))
+        self.mode_design = QRadioButton("Giọng thiết kế")
+        self.mode_design.setToolTip(
+            "Chọn một giọng đã tạo từ mô tả ở tab Giọng. Chỉ hiện với model hỗ "
+            "trợ Voice Design (OmniVoice)."
+        )
         self.mode_group.addButton(self.mode_fixed)
         self.mode_group.addButton(self.mode_profile)
+        self.mode_group.addButton(self.mode_design)
         mode_row = QHBoxLayout()
         mode_row.addWidget(self.mode_fixed)
         mode_row.addWidget(self.mode_profile)
+        mode_row.addWidget(self.mode_design)
         self.mode_holder = QWidget()
         self.mode_holder.setLayout(mode_row)
         self._mode_row = form.rowCount()
@@ -248,10 +395,21 @@ class SettingsPanel(QScrollArea):
         self.fixed_voice_combo.setToolTip(tooltip("voice_fixed"))
         self._fixed_row = form.rowCount()
         form.addRow("Giọng cố định:", self.fixed_voice_combo)
+        self.voice_search = QLineEdit()
+        self.voice_search.setPlaceholderText("Tìm giọng theo tên, dự án, tag…")
+        self.voice_search.setClearButtonEnabled(True)
+        self.voice_search.textChanged.connect(self._on_voice_search_changed)
+        self._voice_search_row = form.rowCount()
+        form.addRow("Tìm giọng:", self.voice_search)
         self.profile_combo = QComboBox()
         self.profile_combo.setToolTip(tooltip("voice_profile"))
         self._profile_row = form.rowCount()
         form.addRow("Profile giọng:", self.profile_combo)
+        self.design_combo = QComboBox()
+        self.design_combo.setToolTip("Giọng đã thiết kế bằng mô tả (tạo ở tab Giọng).")
+        self.design_combo.currentIndexChanged.connect(self._on_design_voice_changed)
+        self._design_row = form.rowCount()
+        form.addRow("Giọng thiết kế:", self.design_combo)
         self.profile_compat = QLabel("")
         self.profile_compat.setWordWrap(True)
         self._compat_row = form.rowCount()
@@ -268,7 +426,10 @@ class SettingsPanel(QScrollArea):
         self._custom_voice_row = form.rowCount()
         form.addRow(self.create_custom_voice_button)
         self._voice_form = form
-        self.mode_fixed.toggled.connect(self._on_voice_mode_changed)
+        # buttonClicked fires once after the click settles, so isChecked() reads
+        # the right mode (per-button `toggled` fires mid-transition with 3 modes
+        # and made the selection snap back).
+        self.mode_group.buttonClicked.connect(lambda _b: self._on_voice_mode_changed())
         self.fixed_voice_combo.currentIndexChanged.connect(
             self._on_fixed_voice_changed
         )
@@ -285,17 +446,22 @@ class SettingsPanel(QScrollArea):
             self.tuning_section.activation.setToolTip(tooltip("tuning_activation"))
         self.tuning_section.activation_changed.connect(self._emit_changed)
         self.vieneu_group = VieneuGroup()
+        self.piper_group = PiperGroup()
         self.f5_group = F5Group()
         self.chatterbox_group = ChatterboxGroup()
         self.higgs_remote_group = HiggsRemoteGroup()
+        self.declarative_provider_group = DeclarativeProviderGroup()
         for group in (
             self.vieneu_group,
+            self.piper_group,
             self.f5_group,
             self.chatterbox_group,
             self.higgs_remote_group,
+            self.declarative_provider_group,
         ):
             self.tuning_section.body_layout.addWidget(group)
             self._connect_all(*group.widgets())
+        self.declarative_provider_group.changed.connect(self._emit_changed)
         self.higgs_remote_group.check_requested.connect(self._check_higgs_endpoint)
         self.higgs_remote_group.api_flavor.currentIndexChanged.connect(
             self._on_higgs_endpoint_type_changed
@@ -427,11 +593,45 @@ class SettingsPanel(QScrollArea):
                 self.model_combo.addItem(label, model_id)
             index = self.model_combo.findData(previous)
             self.model_combo.setCurrentIndex(index if index >= 0 else 0)
+            self._refresh_model_search_matches(self.model_search.text())
         finally:
             self._loading = was_loading
         if not self._loading:
             self.apply_model(self.current_model_id())
             self._emit_changed()
+
+    def _on_model_search_edited(self, text: str) -> None:
+        self._refresh_model_search_matches(text)
+        if text.strip() and self._model_search_matches:
+            self._model_search_completer.complete()
+
+    def _refresh_model_search_matches(self, text: str = "") -> None:
+        self._model_search_matches = self.ctrl.model_choices(
+            self._current_provider_id(), query=text
+        )
+        self._model_search_model.setStringList(
+            [label for label, _model_id in self._model_search_matches]
+        )
+
+    def _activate_first_model_search_result(self) -> None:
+        if self._model_search_matches:
+            self._activate_model_search_label(self._model_search_matches[0][0])
+
+    def _activate_model_search_label(self, label: str) -> None:
+        model_id = next(
+            (
+                candidate_id
+                for candidate_label, candidate_id in self._model_search_matches
+                if candidate_label == label
+            ),
+            None,
+        )
+        if model_id is None:
+            return
+        self._select_model(model_id)
+        self.model_search.clear()
+        self._refresh_model_search_matches()
+        self.model_combo.setFocus()
 
     def _select_model(self, model_id: str | None) -> None:
         if not model_id:
@@ -466,7 +666,12 @@ class SettingsPanel(QScrollArea):
             self._apply_policy(self._policy, seed_defaults=seed_defaults)
             if seed_defaults:
                 self._seeded_model_id = model_id
-            preferred = "fixed" if self.mode_fixed.isChecked() else "profile"
+            if self.mode_fixed.isChecked():
+                preferred = "fixed"
+            elif self.mode_design.isChecked():
+                preferred = "design"
+            else:
+                preferred = "profile"
             self._apply_descriptor(
                 self.ctrl.generation_form_descriptor(model_id, preferred), model_id
             )
@@ -484,6 +689,8 @@ class SettingsPanel(QScrollArea):
         self.device_note.setVisible(bool(policy.device_note))
 
         self._apply_control(self.speed, policy.speed, NEUTRAL_SPEED)
+        self.speed.setRange(policy.speed_minimum, policy.speed_maximum)
+        self._basic_form.setRowVisible(self._omnivoice_num_step_row, policy.omnivoice.supported)
         self._basic_form.setRowVisible(self._speed_row, policy.speed.supported)
         self._apply_control(self.pitch, policy.pitch, NEUTRAL_PITCH)
         self._basic_form.setRowVisible(self._pitch_row, policy.pitch.supported)
@@ -501,11 +708,26 @@ class SettingsPanel(QScrollArea):
         self.vieneu_group.set_row_visible("sampling_topk", policy.sampling.supported)
         self.vieneu_group.set_row_visible("emotion", policy.emotion.supported)
         groups = policy.tuning_groups
+        if self._configured_option_provider:
+            self._provider_option_cache[self._configured_option_provider] = (
+                self.declarative_provider_group.values()
+            )
+        option_values = self._provider_option_cache.get(policy.provider_id, {})
+        self.declarative_provider_group.configure(
+            policy.provider_settings, option_values
+        )
+        self._configured_option_provider = policy.provider_id
+        self.piper_group.recommendation.setText(policy.piper_recommendation)
         for group, group_id in (
             (self.vieneu_group, control_policy.TUNING_VIENEU),
+            (self.piper_group, control_policy.TUNING_PIPER),
             (self.f5_group, control_policy.TUNING_F5),
             (self.chatterbox_group, control_policy.TUNING_CHATTERBOX),
             (self.higgs_remote_group, control_policy.TUNING_HIGGS_REMOTE),
+            (
+                self.declarative_provider_group,
+                control_policy.TUNING_PROVIDER_OPTIONS,
+            ),
         ):
             group.setVisible(group_id in groups)
         self.tuning_section.set_title(policy.tuning_title)
@@ -554,8 +776,12 @@ class SettingsPanel(QScrollArea):
 
     def _apply_descriptor(self, descriptor, model_id: str) -> None:
         self._voice_form.setRowVisible(self._mode_row, descriptor.show_voice_mode_selector)
+        # Offer the Voice Design radio only for models that support it.
+        self.mode_design.setVisible("design" in descriptor.voice_modes)
         if descriptor.selected_voice_mode == "profile":
             self.mode_profile.setChecked(True)
+        elif descriptor.selected_voice_mode == "design":
+            self.mode_design.setChecked(True)
         else:
             self.mode_fixed.setChecked(True)
         self.fixed_voice_combo.clear()
@@ -571,11 +797,15 @@ class SettingsPanel(QScrollArea):
             )
         show_fixed = descriptor.show_fixed_voice and self.fixed_voice_combo.count() > 0
         self._voice_form.setRowVisible(self._fixed_row, show_fixed)
-        self.profile_combo.clear()
-        for name, pid in self.ctrl.voice_profile_choices():
-            self.profile_combo.addItem(name, pid)
+        # Profile + designed-voice combos share the core library + search box.
+        self._repopulate_voice_pickers()
         self._voice_form.setRowVisible(self._profile_row, descriptor.show_profile)
         self._voice_form.setRowVisible(self._compat_row, descriptor.show_profile)
+        self._voice_form.setRowVisible(self._design_row, descriptor.show_design)
+        # The search box is only useful for the library pickers.
+        self._voice_form.setRowVisible(
+            self._voice_search_row, descriptor.show_profile or descriptor.show_design
+        )
         self.voice_status.setText(descriptor.status_text)
         self._update_profile_compat(model_id)
 
@@ -698,6 +928,56 @@ class SettingsPanel(QScrollArea):
         self._update_profile_compat(self.current_model_id())
         self._emit_changed()
 
+    def _on_voice_search_changed(self, *_args) -> None:
+        if self._loading:
+            return
+        self._repopulate_voice_pickers()
+
+    def _on_design_voice_changed(self, *_args) -> None:
+        if self._loading:
+            return
+        self._emit_changed()
+
+    def _repopulate_voice_pickers(self) -> None:
+        """Fill the profile + designed-voice combos from the core library.
+
+        Which kinds appear is decided by the model's capabilities inside
+        ``selectable_voice_items`` — the panel only forwards the search text.
+        """
+        try:
+            items = self.ctrl.selectable_voice_items(
+                self.current_model_id(), query=self.voice_search.text()
+            )
+        except Exception:
+            items = []
+        self._populate_voice_combo(
+            self.profile_combo, [i for i in items if i.kind == "clone"]
+        )
+        self._populate_voice_combo(
+            self.design_combo, [i for i in items if i.kind == "design"]
+        )
+
+    @staticmethod
+    def _populate_voice_combo(combo: QComboBox, items) -> None:
+        previous = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        groups = group_by_project(items)
+        show_headers = len(groups) > 1
+        for project, group_items in groups.items():
+            if show_headers:
+                combo.addItem(f"— {project} —")
+                header = combo.model().item(combo.count() - 1)
+                if header is not None:
+                    header.setEnabled(False)
+            for item in group_items:
+                label = item.name + (f" · {item.subtitle}" if item.subtitle else "")
+                combo.addItem(label, item.item_id)
+        index = combo.findData(previous)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+
     def _on_fixed_voice_changed(self, *_args) -> None:
         if self._loading:
             return
@@ -741,14 +1021,16 @@ class SettingsPanel(QScrollArea):
         self._apply_pause_values(DEFAULT_GENERATION_PREFERENCES)
         self.pause_preset_combo.setCurrentIndex(0)
 
-    def _pause_values(self) -> dict[str, int | bool]:
+    def _pause_values(self) -> dict[str, int | bool | str]:
         paragraph = PARAGRAPH_PAUSE_FIELD
         paragraph_fixed, paragraph_random, paragraph_min, paragraph_max = (
             self.paragraph_pause_editor.pause_values()
         )
-        values: dict[str, int | bool] = {
+        values: dict[str, int | bool | str] = {
             "punctuation_pause_enabled": self.punctuation_section.is_active(),
+            "chunk_join_mode": self._current_chunk_join_mode(),
             "chunk_pause_ms": self.chunk_pause.milliseconds(),
+            "chunk_crossfade_ms": self.chunk_crossfade.milliseconds(),
             paragraph.fixed_field: paragraph_fixed,
             paragraph.random_field: paragraph_random,
             paragraph.minimum_field: paragraph_min,
@@ -800,7 +1082,20 @@ class SettingsPanel(QScrollArea):
                     )
                 ),
             )
+        stored_mode = data.get("chunk_join_mode")
+        if stored_mode not in {"auto", "crossfade", "direct", "silence"}:
+            stored_mode = (
+                "crossfade"
+                if "chunk_pause_ms" in data and int(data.get("chunk_pause_ms") or 0) == 0
+                else "silence"
+                if "chunk_pause_ms" in data
+                else "auto"
+            )
+        self.chunk_join_custom.setChecked(stored_mode != "auto")
+        if stored_mode != "auto":
+            self._set_combo(self.chunk_join_mode, stored_mode)
         self._set_pause(self.chunk_pause, "chunk_pause_ms", data)
+        self._set_pause(self.chunk_crossfade, "chunk_crossfade_ms", data)
         paragraph = PARAGRAPH_PAUSE_FIELD
         self.paragraph_pause_editor.set_pause_values(
             int(
@@ -829,6 +1124,24 @@ class SettingsPanel(QScrollArea):
             ),
         )
         self._refresh_pause_tooltips()
+        self._refresh_chunk_join_controls()
+
+    def _current_chunk_join_mode(self) -> str:
+        if not self.chunk_join_custom.isChecked():
+            return "auto"
+        return str(self.chunk_join_mode.currentData() or "silence")
+
+    def _refresh_chunk_join_controls(self, *_args) -> None:
+        custom = self.chunk_join_custom.isChecked()
+        mode = self._current_chunk_join_mode()
+        self._basic_form.setRowVisible(self._chunk_join_mode_row, custom)
+        self._basic_form.setRowVisible(
+            self._chunk_crossfade_row, custom and mode == "crossfade"
+        )
+        self._basic_form.setRowVisible(
+            self._chunk_pause_row, custom and mode == "silence"
+        )
+        self._refresh_pause_tooltips()
 
     def _refresh_pause_tooltips(self, *_args) -> None:
         if not hasattr(self, "pause_editors"):
@@ -845,6 +1158,22 @@ class SettingsPanel(QScrollArea):
             )
         self.chunk_pause.setToolTip(
             f'{tooltip("chunk_pause")}\n\n{explanation.chunk}'
+        )
+        self.chunk_crossfade.setToolTip(
+            f'{tooltip("chunk_crossfade")}\n\n{explanation.chunk}'
+        )
+        self.chunk_join_mode.setToolTip(
+            f'{tooltip("chunk_join_mode")}\n\n{explanation.chunk}'
+        )
+        try:
+            effective = self.ctrl.chunk_join_description(
+                self.current_model_id(), self._current_chunk_join_mode()
+            )
+        except Exception:
+            effective = explanation.chunk
+        self.chunk_join_note.setText(effective)
+        self.chunk_join_note.setToolTip(
+            f'{tooltip("chunk_join_custom")}\n\n{effective}'
         )
         self.paragraph_pause_editor.set_explanation_tooltip(
             f'{tooltip("paragraph_pause")}\n\n{explanation.paragraph}'
@@ -936,8 +1265,18 @@ class SettingsPanel(QScrollArea):
     def current_settings(self) -> GenerationSettings:
         policy = self._policy
         tuning = self.tuning_section.is_active()
-        mode = "fixed" if self.mode_fixed.isChecked() else "profile"
-        vieneu, f5, cb = self.vieneu_group, self.f5_group, self.chatterbox_group
+        if self.mode_fixed.isChecked():
+            mode = "fixed"
+        elif self.mode_design.isChecked():
+            mode = "design"
+        else:
+            mode = "profile"
+        vieneu, piper, f5, cb = (
+            self.vieneu_group,
+            self.piper_group,
+            self.f5_group,
+            self.chatterbox_group,
+        )
         higgs = self.higgs_remote_group
 
         def on(state) -> bool:
@@ -949,17 +1288,34 @@ class SettingsPanel(QScrollArea):
         codec_on = on(policy.codec) if policy else False
         f5_on = on(policy.f5) if policy else False
         cb_on = on(policy.chatterbox) if policy else False
+        piper_selected = bool(policy and policy.piper)
+        piper_on = piper_selected and tuning
+        preserve_hidden_piper = not piper_selected
+        piper_seed = piper.seed.value()
         f5_seed = f5.seed.value()
         cb_seed = cb.seed.value()
         pause_values = self._pause_values()
         return GenerationSettings(
             language=str(self.language_combo.currentData() or "vi"),
             model_id=self.current_model_id(),
+            pronunciation_enabled=bool(
+                self.pronunciation_section.is_active()
+                and self.pronunciation_combo.currentData()
+            ),
+            pronunciation_preset_ids=(
+                [str(self.pronunciation_combo.currentData())]
+                if self.pronunciation_combo.currentData()
+                else []
+            ),
             voice_source_mode=mode,
             voice_profile_id=str(self.profile_combo.currentData())
             if mode == "profile" and self.profile_combo.currentData() else None,
             speaker_id=str(self.fixed_voice_combo.currentData())
             if mode == "fixed" and self.fixed_voice_combo.currentData() else None,
+            designed_voice_id=str(self.design_combo.currentData())
+            if mode == "design" and self.design_combo.currentData() else None,
+            omnivoice_num_step=self.omnivoice_num_step.currentData()
+            if (policy is not None and policy.omnivoice) else None,
             speed=self.speed.value() if (policy is None or policy.speed) else NEUTRAL_SPEED,
             pitch_shift=self.pitch.value() if (policy is None or policy.pitch) else NEUTRAL_PITCH,
             emotion=str(vieneu.emotion_combo.currentData()) if emotion_on else NEUTRAL_EMOTION,
@@ -968,6 +1324,19 @@ class SettingsPanel(QScrollArea):
             if codec_on and vieneu.codec_combo.currentData() else None,
             temperature=vieneu.temperature.value() if sampling_on else None,
             top_k=vieneu.top_k.value() if sampling_on else None,
+            piper_noise_scale=(
+                piper.noise_scale.value()
+                if piper_on or preserve_hidden_piper
+                else PiperGroup.STANDARD[0]
+            ),
+            piper_noise_w=(
+                piper.noise_w.value()
+                if piper_on or preserve_hidden_piper
+                else PiperGroup.STANDARD[1]
+            ),
+            piper_seed=(
+                piper_seed if piper_seed >= 0 else None
+            ) if piper_on or preserve_hidden_piper else None,
             f5_nfe_step=f5.nfe.value() if f5_on else None,
             f5_cfg_strength=f5.cfg.value() if f5_on else None,
             f5_sway_sampling_coef=f5.sway.value() if f5_on else None,
@@ -982,6 +1351,11 @@ class SettingsPanel(QScrollArea):
             chatterbox_repetition_penalty=cb.repetition.value() if cb_on else None,
             chatterbox_seed=(cb_seed if cb_seed >= 0 else None) if cb_on else None,
             chatterbox_norm_loudness=cb.norm_loudness.isChecked() if cb_on else True,
+            provider_options=(
+                self.declarative_provider_group.values()
+                if policy and policy.provider_settings and tuning
+                else {}
+            ),
             gpu_safety_enabled=self.gpu_section.is_active(),
             gpu_start_temperature_c=self.gpu_start.value(),
             gpu_abort_temperature_c=self.gpu_abort.value(),
@@ -1020,7 +1394,9 @@ class SettingsPanel(QScrollArea):
             ),
             ellipsis_pause_min_ms=int(pause_values["ellipsis_pause_min_ms"]),
             ellipsis_pause_max_ms=int(pause_values["ellipsis_pause_max_ms"]),
+            chunk_join_mode=str(pause_values["chunk_join_mode"]),
             chunk_pause_ms=self.chunk_pause.milliseconds(),
+            chunk_crossfade_ms=self.chunk_crossfade.milliseconds(),
             paragraph_pause_ms=int(pause_values["paragraph_pause_ms"]),
             paragraph_pause_random_enabled=bool(
                 pause_values["paragraph_pause_random_enabled"]
@@ -1076,6 +1452,20 @@ class SettingsPanel(QScrollArea):
         self._loading = True
         try:
             self._select_model(data.get("model_id"))
+            # Force the saved voice mode BEFORE apply_model builds the form: it
+            # reads the currently-checked radio as the "preferred" mode. Without
+            # this, restoring a fixed-voice entry while the panel sits in profile
+            # mode (or vice versa) keeps the panel's previous mode, which then
+            # cascades into voice_source_mode / voice_profile_id / speaker_id
+            # mismatches and aborts the history restore.
+            saved_mode = data.get("voice_source_mode")
+            if saved_mode == "fixed":
+                self.mode_fixed.setChecked(True)
+            elif saved_mode == "profile":
+                self.mode_profile.setChecked(True)
+            elif saved_mode == "design":
+                self.mode_design.setChecked(True)
+            self.voice_search.clear()
             self.apply_model(self.current_model_id())
             # Only restore values the current model actually supports; the rest
             # stay at the neutral values apply_model just set.
@@ -1085,6 +1475,17 @@ class SettingsPanel(QScrollArea):
                 self.speed.setValue(float(data.get("speed", NEUTRAL_SPEED)))
             if self._policy is None or self._policy.pitch:
                 self.pitch.setValue(float(data.get("pitch_shift", NEUTRAL_PITCH)))
+            self.refresh_pronunciation_presets()
+            preset_ids = data.get("pronunciation_preset_ids") or []
+            selected_preset = preset_ids[0] if preset_ids else None
+            self._set_combo(self.pronunciation_combo, selected_preset)
+            self.pronunciation_section.set_active(
+                bool(
+                    data.get("pronunciation_enabled", False)
+                    and selected_preset
+                    and self.pronunciation_combo.findData(selected_preset) >= 0
+                )
+            )
             self._apply_pause_values(data)
             self.max_chunk.setValue(int(data.get("max_chunk_chars", 220)))
             self.output_path.set_value(data.get("output_dir") or "")
@@ -1094,10 +1495,10 @@ class SettingsPanel(QScrollArea):
             self.split_output.setChecked(bool(data.get("split_output", True)))
             self.output_srt.setChecked(bool(data.get("output_srt", False)))
             self.join_split.setChecked(bool(data.get("join_split_output_audio", False)))
-            if data.get("voice_source_mode") == "profile":
-                self.mode_profile.setChecked(True)
             self._set_combo(self.profile_combo, data.get("voice_profile_id"))
+            self._set_combo(self.design_combo, data.get("designed_voice_id"))
             self._set_combo(self.fixed_voice_combo, data.get("speaker_id"))
+            self._set_combo(self.omnivoice_num_step, data.get("omnivoice_num_step"))
             self._load_tuning(data)
             # Endpoint settings belong to the Higgs provider profile and must
             # survive even when the app starts on a different provider.
@@ -1122,6 +1523,13 @@ class SettingsPanel(QScrollArea):
             self._set_number(self.vieneu_group.top_k, "top_k", data)
         if policy.emotion:
             self._set_combo(self.vieneu_group.emotion_combo, data.get("emotion"))
+        for field, widget in (
+            ("piper_noise_scale", self.piper_group.noise_scale),
+            ("piper_noise_w", self.piper_group.noise_w),
+            ("piper_seed", self.piper_group.seed),
+        ):
+            self._set_number(widget, field, data)
+        self.piper_group._sync_preset()
         if policy.f5:
             for field, widget in (
                 ("f5_nfe_step", self.f5_group.nfe),
@@ -1145,6 +1553,13 @@ class SettingsPanel(QScrollArea):
                 self._set_number(widget, field, data)
             self.chatterbox_group.norm_loudness.setChecked(
                 bool(data.get("chatterbox_norm_loudness", True))
+            )
+        if policy.provider_settings:
+            self.declarative_provider_group.set_values(
+                data.get("provider_options") or {}
+            )
+            self._provider_option_cache[policy.provider_id] = (
+                self.declarative_provider_group.values()
             )
         # Values just restored belong to this model; do not overwrite them.
         self._seeded_model_id = self.current_model_id()

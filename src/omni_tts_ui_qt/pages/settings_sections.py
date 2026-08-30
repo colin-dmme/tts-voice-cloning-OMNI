@@ -12,8 +12,18 @@ explains itself differently from the tkinter GUI.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout, QWidget
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QLabel,
+    QSpinBox,
+    QWidget,
+)
 
+from omni_tts_core.provider_options import ProviderSettingSpec
 from omni_tts_core.ui_presenters.tooltips import tooltip
 from omni_tts_ui_qt.widgets.common import dspin_for, make_combo, spin_for
 
@@ -46,6 +56,96 @@ class _Group(QWidget):
                 if self.form.itemAt(row, QFormLayout.ItemRole.FieldRole) is not None]
 
 
+class DeclarativeProviderGroup(_Group):
+    """Draw any provider option from Core metadata; contains no provider names."""
+
+    changed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._settings: tuple[ProviderSettingSpec, ...] = ()
+        self._widgets: dict[str, QWidget] = {}
+
+    def configure(
+        self,
+        settings: tuple[ProviderSettingSpec, ...],
+        values: dict | None = None,
+    ) -> None:
+        self._clear()
+        self._settings = tuple(settings)
+        supplied = dict(values or {})
+        for setting in self._settings:
+            value = supplied.get(setting.key, setting.default)
+            if setting.kind == "boolean":
+                widget = QCheckBox()
+                widget.setChecked(bool(value))
+                widget.toggled.connect(self.changed.emit)
+            elif setting.kind == "integer":
+                widget = QSpinBox()
+                widget.setRange(int(setting.minimum or 0), int(setting.maximum or 999999))
+                widget.setSingleStep(max(1, int(setting.step or 1)))
+                widget.setValue(int(value))
+                widget.valueChanged.connect(self.changed.emit)
+            elif setting.kind == "number":
+                widget = QDoubleSpinBox()
+                widget.setDecimals(setting.decimals)
+                widget.setRange(
+                    float(setting.minimum if setting.minimum is not None else -999999),
+                    float(setting.maximum if setting.maximum is not None else 999999),
+                )
+                widget.setSingleStep(float(setting.step or 0.1))
+                widget.setValue(float(value))
+                widget.valueChanged.connect(self.changed.emit)
+            else:
+                widget = QComboBox()
+                for label, choice_value in setting.choices:
+                    widget.addItem(label, choice_value)
+                index = widget.findData(str(value))
+                widget.setCurrentIndex(index if index >= 0 else 0)
+                widget.currentIndexChanged.connect(self.changed.emit)
+            widget.setToolTip(setting.tooltip)
+            self._widgets[setting.key] = widget
+            self.add(setting.key, f"{setting.label}:", widget)
+
+    def values(self) -> dict[str, bool | int | float | str]:
+        result: dict[str, bool | int | float | str] = {}
+        for setting in self._settings:
+            widget = self._widgets[setting.key]
+            if isinstance(widget, QCheckBox):
+                result[setting.key] = widget.isChecked()
+            elif isinstance(widget, QSpinBox):
+                result[setting.key] = widget.value()
+            elif isinstance(widget, QDoubleSpinBox):
+                result[setting.key] = widget.value()
+            elif isinstance(widget, QComboBox):
+                result[setting.key] = str(widget.currentData())
+        return result
+
+    def set_values(self, values: dict | None) -> None:
+        supplied = dict(values or {})
+        for setting in self._settings:
+            if setting.key not in supplied:
+                continue
+            widget = self._widgets[setting.key]
+            value = supplied[setting.key]
+            if isinstance(widget, QCheckBox):
+                widget.setChecked(bool(value))
+            elif isinstance(widget, QSpinBox):
+                widget.setValue(int(value))
+            elif isinstance(widget, QDoubleSpinBox):
+                widget.setValue(float(value))
+            elif isinstance(widget, QComboBox):
+                index = widget.findData(str(value))
+                if index >= 0:
+                    widget.setCurrentIndex(index)
+
+    def _clear(self) -> None:
+        while self.form.rowCount():
+            self.form.removeRow(0)
+        self._rows.clear()
+        self._widgets.clear()
+
+
 class VieneuGroup(_Group):
     def __init__(self) -> None:
         super().__init__()
@@ -60,6 +160,60 @@ class VieneuGroup(_Group):
         self.emotion_combo = self.add(
             "emotion", "Cảm xúc:", make_combo(EMOTION_FALLBACK, "natural"), "vieneu_emotion",
         )
+
+
+class PiperGroup(_Group):
+    STANDARD = (0.667, 0.800)
+    VBEE = (0.900, 0.650)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.preset = QComboBox()
+        self.preset.addItem("Piper chuẩn", "standard")
+        self.preset.addItem("Vbee tham chiếu", "vbee")
+        self.preset.addItem("Tùy chỉnh", "custom")
+        self.add("preset", "Hồ sơ:", self.preset, "piper_preset")
+        self.noise_scale = self.add(
+            "noise_scale", "Noise Scale:",
+            dspin_for("piper_noise_scale", self.STANDARD[0]), "piper_noise_scale",
+        )
+        self.noise_w = self.add(
+            "noise_w", "Noise W:",
+            dspin_for("piper_noise_w", self.STANDARD[1]), "piper_noise_w",
+        )
+        self.seed = self.add(
+            "seed", "Seed (-1 = ngẫu nhiên):",
+            spin_for("piper_seed", -1), "piper_seed",
+        )
+        self.recommendation = QLabel("")
+        self.recommendation.setWordWrap(True)
+        self.recommendation.setObjectName("hint")
+        self.recommendation.setToolTip(tooltip("piper_recommendation"))
+        self.add("recommendation", "Khuyến nghị:", self.recommendation)
+        self.preset.currentIndexChanged.connect(self._apply_preset)
+        self.noise_scale.valueChanged.connect(self._sync_preset)
+        self.noise_w.valueChanged.connect(self._sync_preset)
+        self._sync_preset()
+
+    def _apply_preset(self, *_args) -> None:
+        preset_id = str(self.preset.currentData() or "custom")
+        values = self.STANDARD if preset_id == "standard" else self.VBEE if preset_id == "vbee" else None
+        if values is None:
+            return
+        self.noise_scale.setValue(values[0])
+        self.noise_w.setValue(values[1])
+
+    def _sync_preset(self, *_args) -> None:
+        values = (round(self.noise_scale.value(), 3), round(self.noise_w.value(), 3))
+        preset_id = (
+            "standard" if values == self.STANDARD
+            else "vbee" if values == self.VBEE
+            else "custom"
+        )
+        self.preset.blockSignals(True)
+        index = self.preset.findData(preset_id)
+        self.preset.setCurrentIndex(index)
+        self.preset.blockSignals(False)
 
 
 class F5Group(_Group):

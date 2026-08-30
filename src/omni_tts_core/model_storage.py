@@ -17,12 +17,13 @@ from omni_tts_core.storage_paths import (
     models_root,
 )
 from omni_tts_core.worker_installation import (
-    PROVIDER_WORKERS,
-    install_base_runtime,
+    install_base_runtime_for_spec,
     is_worker_installed,
+    worker_for_spec,
     worker_install_path,
+    worker_label_for_spec,
 )
-from omni_tts_shared.errors import ModelDownloadError, ConfigError
+from omni_tts_shared.errors import ConfigError, ModelDownloadError
 from omni_tts_shared.schemas import ModelStatus
 
 _REPO_RUNTIME_KEYS = (
@@ -54,7 +55,7 @@ class ModelStorage:
         worker_installed: bool | None = None
         hf_cached: bool | None = None
         worker_path: Path | None = None
-        worker_name = PROVIDER_WORKERS.get(spec.provider)
+        worker_name = worker_for_spec(spec)
         worker_size_mb = 0.0
         if worker_name:
             worker_installed = is_worker_installed(worker_name)
@@ -68,6 +69,7 @@ class ModelStorage:
             provider=spec.provider,
             model_type=spec.model_type,
             hf_repo=spec.hf_repo,
+            source_kind=spec.source_kind,
             local_path=local_path,
             installed=self.is_installed(spec),
             required=spec.required,
@@ -86,6 +88,8 @@ class ModelStorage:
                 else (hf_cache_root() if _repos_for_spec(spec) else None)
             ),
             worker_path=worker_path,
+            worker_name=worker_name or "",
+            worker_label=worker_label_for_spec(spec) if worker_name else "",
             storage_note=_storage_note_for(spec),
             worker_installed=worker_installed,
             hf_cached=hf_cached,
@@ -97,7 +101,7 @@ class ModelStorage:
             # checked from the Studio with the current, user-supplied URL.
             return True
         if _uses_hf_cache(spec):
-            worker_name = PROVIDER_WORKERS.get(spec.provider)
+            worker_name = worker_for_spec(spec)
             return bool(
                 worker_name
                 and is_worker_installed(worker_name)
@@ -115,6 +119,7 @@ class ModelStorage:
             for key in ("model_file", "config_file")
             if _runtime_text(spec, key)
         ]
+        required_artifacts.extend(_runtime_list(spec, "required_files"))
         if required_artifacts:
             return all(
                 (spec.local_path / relative_path).is_file()
@@ -124,19 +129,24 @@ class ModelStorage:
 
     def _status_path(self, spec: ModelSpec) -> Path:
         if _uses_hf_cache(spec):
-            worker_name = PROVIDER_WORKERS.get(spec.provider)
+            worker_name = worker_for_spec(spec)
             if worker_name:
                 return worker_install_path(worker_name)
         return spec.local_path
 
     def download(self, model_id: str) -> ModelStatus:
         spec = self.registry.get(model_id)
+        if spec.source_kind == "manual":
+            raise ConfigError(
+                f"{spec.display_name} là package local. Hãy dùng Nhập model local "
+                "và chọn thư mục chứa package đã giải nén."
+            )
         if _uses_remote_endpoint(spec):
             raise ConfigError(
                 f"{spec.display_name} chạy trên endpoint từ xa, không tải model vào máy này."
             )
         if _uses_hf_cache(spec):
-            self._ensure_worker(spec.provider)
+            self._ensure_worker(spec)
             self._precache_hf_repos(spec)
             return self.status_for(spec)
         download_kwargs = {
@@ -154,6 +164,77 @@ class ModelStorage:
             raise ModelDownloadError(f"Tải model thất bại: {spec.hf_repo}") from exc
         self._size_cache.clear()
         return self.status_for(spec)
+
+    def import_local(self, model_id: str, source_root: str | Path) -> ModelStatus:
+        """Import one catalogued local package without modifying its source files."""
+        spec = self.registry.get(model_id)
+        if spec.source_kind != "manual":
+            raise ConfigError(
+                f"{spec.display_name} được tải từ kho model, không dùng chức năng nhập local."
+            )
+        target = spec.local_path.resolve()
+        allowed_root = models_root().resolve()
+        if not _is_relative_to(target, allowed_root):
+            raise ConfigError(
+                f"Không nhập vì thư mục đích nằm ngoài vùng model cho phép: {target}"
+            )
+        if target.exists() and any(target.iterdir()):
+            raise ConfigError(
+                f"{spec.display_name} đã có payload tại {target}. Hãy gỡ model trước nếu muốn nhập lại."
+            )
+
+        source_dir = self._manual_source_dir(spec, Path(source_root))
+        source_model = source_dir / _runtime_text(spec, "import_model_file")
+        source_config = source_dir / _runtime_text(spec, "import_config_file")
+        missing = [str(path) for path in (source_model, source_config) if not path.is_file()]
+        if missing:
+            raise ConfigError("Thiếu file trong package local:\n- " + "\n- ".join(missing))
+        self._verify_payload_hashes(
+            spec,
+            model_path=source_model,
+            config_path=source_config,
+            cleanup_root=None,
+        )
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            target.rmdir()
+        with tempfile.TemporaryDirectory(
+            prefix=f".{spec.model_id}-import-",
+            dir=str(target.parent),
+        ) as staging_dir:
+            staging = Path(staging_dir)
+            staged_model = staging / _runtime_text(spec, "model_file")
+            staged_config = staging / _runtime_text(spec, "config_file")
+            staged_model.parent.mkdir(parents=True, exist_ok=True)
+            staged_config.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_model, staged_model)
+            shutil.copy2(source_config, staged_config)
+            self._verify_payload_hashes(
+                spec,
+                model_path=staged_model,
+                config_path=staged_config,
+                cleanup_root=None,
+            )
+            shutil.move(staging_dir, target)
+
+        self._size_cache.clear()
+        return self.status_for(spec)
+
+    @staticmethod
+    def _manual_source_dir(spec: ModelSpec, source_root: Path) -> Path:
+        root = source_root.expanduser().resolve()
+        package_name = _runtime_text(spec, "import_folder")
+        direct_model = root / _runtime_text(spec, "import_model_file")
+        direct_config = root / _runtime_text(spec, "import_config_file")
+        if direct_model.is_file() and direct_config.is_file():
+            return root
+        package_dir = root / package_name
+        if package_dir.is_dir():
+            return package_dir
+        raise ConfigError(
+            f"Không tìm thấy package '{package_name}' trong thư mục đã chọn: {root}"
+        )
 
     def remove(self, model_id: str) -> ModelStatus:
         spec = self.registry.get(model_id)
@@ -247,32 +328,63 @@ class ModelStorage:
             shutil.move(staging_dir, spec.local_path)
 
     def _verify_downloaded_model(self, spec: ModelSpec) -> None:
-        expected = _runtime_text(spec, "model_sha256").lower()
-        if not expected:
-            return
         relative_model_path = _runtime_text(spec, "model_file")
+        relative_config_path = _runtime_text(spec, "config_file")
         model_path = spec.local_path / relative_model_path
-        actual = _sha256_file(model_path) if model_path.is_file() else ""
-        if actual == expected:
-            return
-        if spec.local_path.exists():
-            _safe_rmtree(spec.local_path, allowed_roots=[models_root()])
-        raise ModelDownloadError(
-            f"Model {spec.display_name} sai SHA-256 "
-            f"(mong đợi {expected}, nhận {actual or 'thiếu file'})."
+        config_path = spec.local_path / relative_config_path
+        self._verify_payload_hashes(
+            spec,
+            model_path=model_path,
+            config_path=config_path,
+            cleanup_root=spec.local_path,
         )
+        missing = [
+            relative
+            for relative in _runtime_list(spec, "required_files")
+            if not (spec.local_path / relative).is_file()
+        ]
+        if missing:
+            _safe_rmtree(spec.local_path, allowed_roots=[models_root()])
+            raise ModelDownloadError(
+                f"Package {spec.display_name} tải chưa đủ file: {', '.join(missing)}."
+            )
+
+    @staticmethod
+    def _verify_payload_hashes(
+        spec: ModelSpec,
+        *,
+        model_path: Path,
+        config_path: Path,
+        cleanup_root: Path | None,
+    ) -> None:
+        checks = (
+            ("model", model_path, _runtime_text(spec, "model_sha256").lower()),
+            ("config", config_path, _runtime_text(spec, "config_sha256").lower()),
+        )
+        for label, path, expected in checks:
+            if not expected:
+                continue
+            actual = _sha256_file(path) if path.is_file() else ""
+            if actual == expected:
+                continue
+            if cleanup_root is not None and cleanup_root.exists():
+                _safe_rmtree(cleanup_root, allowed_roots=[models_root()])
+            raise ModelDownloadError(
+                f"Package {spec.display_name} sai SHA-256 của {label} "
+                f"(mong đợi {expected}, nhận {actual or 'thiếu file'})."
+            )
 
     # ------------------------------------------------------------------
     # Worker & HF cache helpers
     # ------------------------------------------------------------------
 
-    def _ensure_worker(self, provider: str) -> None:
-        worker_name = PROVIDER_WORKERS.get(provider)
+    def _ensure_worker(self, spec: ModelSpec) -> None:
+        worker_name = worker_for_spec(spec)
         if not worker_name:
-            raise ConfigError(f"Provider {provider} chưa có worker được khai báo.")
+            raise ConfigError(f"Model {spec.display_name} chưa có worker được khai báo.")
         if not is_worker_installed(worker_name):
             try:
-                install_base_runtime(provider)
+                install_base_runtime_for_spec(spec)
             except RuntimeError as exc:
                 raise ConfigError(str(exc)) from exc
 
@@ -394,7 +506,9 @@ def _storage_kind(spec: ModelSpec) -> str:
         return "Remote endpoint"
     if _uses_hf_cache(spec):
         return "HF cache + worker"
-    if spec.provider in PROVIDER_WORKERS:
+    if spec.source_kind == "manual":
+        return "Package local + worker" if worker_for_spec(spec) else "Package local"
+    if worker_for_spec(spec):
         return "Model folder + worker"
     return "Model folder"
 
@@ -414,7 +528,9 @@ def _storage_note_for(spec: ModelSpec) -> str:
         return "Bắt buộc cho cấu hình mặc định."
     if _uses_hf_cache(spec):
         return "Model nằm trong HF cache; worker cài riêng."
-    if spec.provider in PROVIDER_WORKERS:
+    if spec.source_kind == "manual":
+        return "Nhập từ package local; nguồn gốc package được hiển thị riêng trong tên model."
+    if worker_for_spec(spec):
         return "Cần cả model payload và worker riêng."
     return "Tải khi cần dùng."
 

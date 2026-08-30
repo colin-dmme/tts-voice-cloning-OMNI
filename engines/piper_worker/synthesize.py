@@ -24,6 +24,8 @@ def main() -> None:
 
 
 def _synthesize(payload: dict) -> None:
+    import numpy as np
+    import onnxruntime as ort
     from piper import PiperVoice, SynthesisConfig
 
     model_path = Path(payload["model_path"])
@@ -32,13 +34,22 @@ def _synthesize(payload: dict) -> None:
         raise FileNotFoundError(
             f"Thiếu package giọng Piper: {model_path.name} / {config_path.name}"
         )
+    seed = payload.get("seed")
+    seeded = seed not in (None, "")
+    if seeded:
+        # ONNX Runtime applies this seed while constructing the session. A
+        # seeded A/B run therefore uses a fresh session; ordinary random runs
+        # keep the fast shared voice cache.
+        np.random.seed(int(seed))
+        ort.set_seed(int(seed))
     cache_key = (str(model_path.resolve()), str(config_path.resolve()))
-    voice = _VOICE_CACHE.get(cache_key)
+    voice = None if seeded else _VOICE_CACHE.get(cache_key)
     if voice is None:
         voice = PiperVoice.load(str(model_path), config_path=str(config_path))
-        _VOICE_CACHE[cache_key] = voice
-        while len(_VOICE_CACHE) > _MAX_CACHED_VOICES:
-            _VOICE_CACHE.popitem(last=False)
+        if not seeded:
+            _VOICE_CACHE[cache_key] = voice
+            while len(_VOICE_CACHE) > _MAX_CACHED_VOICES:
+                _VOICE_CACHE.popitem(last=False)
     else:
         _VOICE_CACHE.move_to_end(cache_key)
     speed = max(0.5, min(1.8, float(payload.get("speed") or 1.0)))
@@ -47,6 +58,8 @@ def _synthesize(payload: dict) -> None:
     synthesis_config = SynthesisConfig(
         speaker_id=speaker_id,
         length_scale=1.0 / speed,
+        noise_scale=max(0.0, min(1.0, float(payload.get("noise_scale", 0.667)))),
+        noise_w_scale=max(0.0, min(1.0, float(payload.get("noise_w", 0.8)))),
     )
     for chunk in payload.get("chunks") or []:
         output_path = Path(chunk["output_path"])

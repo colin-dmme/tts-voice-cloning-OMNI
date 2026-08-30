@@ -25,6 +25,8 @@ PORTABLE_TKINTER_KEYS = {
     "codec_repo",
     "temperature",
     "top_k",
+    "pronunciation_enabled",
+    "pronunciation_preset_ids",
     "punctuation_pause_enabled",
     "sentence_pause_ms",
     "sentence_pause_random_enabled",
@@ -42,7 +44,9 @@ PORTABLE_TKINTER_KEYS = {
     "ellipsis_pause_random_enabled",
     "ellipsis_pause_min_ms",
     "ellipsis_pause_max_ms",
+    "chunk_join_mode",
     "chunk_pause_ms",
+    "chunk_crossfade_ms",
     "paragraph_pause_ms",
     "paragraph_pause_random_enabled",
     "paragraph_pause_min_ms",
@@ -74,12 +78,18 @@ def export_user_state(project_root: Path | None = None) -> dict[str, Any]:
         state_root / "voices" / HIGGS_CUSTOM_VOICES_FILE,
         overwrite=True,
     )
+    copied_pronunciation_presets = _copy_files(
+        root / "pronunciation" / "presets",
+        state_root / "pronunciation" / "presets",
+        overwrite=True,
+    )
     settings = _export_settings(root / "config", state_root / SETTINGS_FILE)
 
     return {
         "profiles": copied_profiles,
         "samples": copied_samples,
         "higgs_custom_voices": copied_custom_voices,
+        "pronunciation_presets": copied_pronunciation_presets,
         "settings_keys": sorted(settings),
         "state_root": str(state_root),
     }
@@ -106,6 +116,11 @@ def restore_user_state(
         root / "voices" / HIGGS_CUSTOM_VOICES_FILE,
         overwrite=overwrite,
     )
+    restored_pronunciation_presets = _copy_files(
+        state_root / "pronunciation" / "presets",
+        root / "pronunciation" / "presets",
+        overwrite=overwrite,
+    )
     restored_settings = _restore_settings(
         state_root / SETTINGS_FILE,
         root / "config",
@@ -116,6 +131,7 @@ def restore_user_state(
         "profiles": restored_profiles,
         "samples": restored_samples,
         "higgs_custom_voices": restored_custom_voices,
+        "pronunciation_presets": restored_pronunciation_presets,
         "settings_restored": restored_settings,
         "state_root": str(state_root),
     }

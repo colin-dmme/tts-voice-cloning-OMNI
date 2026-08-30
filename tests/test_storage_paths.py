@@ -214,6 +214,81 @@ class StoragePathsTest(unittest.TestCase):
                     storage.download("piper_hash_test")
                 self.assertFalse(model_path.exists())
 
+    def test_manual_piper_import_validates_both_files_and_preserves_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            model_root = root / "models"
+            source_root = root / "extracted_models"
+            source_dir = source_root / "Voice Package"
+            source_dir.mkdir(parents=True)
+            source_model = source_dir / "voice source.onnx"
+            source_config = source_dir / "voice source.onnx.json"
+            source_model.write_bytes(b"local model")
+            source_config.write_text('{"audio": {"sample_rate": 22050}}', encoding="utf-8")
+            target = model_root / "piper" / "local" / "voice"
+            spec = ModelSpec(
+                model_id="piper_manual",
+                display_name="Piper Manual",
+                provider="piper",
+                model_type="tts",
+                local_path=target,
+                hf_repo="",
+                language_priority="vi",
+                source_kind="manual",
+                runtime={
+                    "model_file": "voice.onnx",
+                    "config_file": "voice.onnx.json",
+                    "import_folder": "Voice Package",
+                    "import_model_file": source_model.name,
+                    "import_config_file": source_config.name,
+                    "model_sha256": hashlib.sha256(source_model.read_bytes()).hexdigest(),
+                    "config_sha256": hashlib.sha256(source_config.read_bytes()).hexdigest(),
+                },
+                capabilities=ModelCapabilities(),
+            )
+            storage = ModelStorage(_Registry(spec))
+            with patch("omni_tts_core.model_storage.models_root", return_value=model_root):
+                status = storage.import_local("piper_manual", source_root)
+
+            self.assertTrue(status.installed)
+            self.assertEqual((target / "voice.onnx").read_bytes(), b"local model")
+            self.assertTrue(source_model.exists())
+            self.assertTrue(source_config.exists())
+
+    def test_manual_piper_import_rejects_bad_config_hash_without_writing_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            model_root = root / "models"
+            source_dir = root / "source"
+            source_dir.mkdir()
+            (source_dir / "voice.onnx").write_bytes(b"model")
+            (source_dir / "voice.json").write_bytes(b"config")
+            spec = ModelSpec(
+                model_id="piper_manual_bad",
+                display_name="Piper Manual Bad",
+                provider="piper",
+                model_type="tts",
+                local_path=model_root / "voice",
+                hf_repo="",
+                language_priority="vi",
+                source_kind="manual",
+                runtime={
+                    "model_file": "voice.onnx",
+                    "config_file": "voice.json",
+                    "import_folder": "source",
+                    "import_model_file": "voice.onnx",
+                    "import_config_file": "voice.json",
+                    "model_sha256": hashlib.sha256(b"model").hexdigest(),
+                    "config_sha256": hashlib.sha256(b"different").hexdigest(),
+                },
+                capabilities=ModelCapabilities(),
+            )
+            storage = ModelStorage(_Registry(spec))
+            with patch("omni_tts_core.model_storage.models_root", return_value=model_root):
+                with self.assertRaisesRegex(ModelDownloadError, "config"):
+                    storage.import_local("piper_manual_bad", source_dir)
+            self.assertFalse(spec.local_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

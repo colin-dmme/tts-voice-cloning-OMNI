@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,7 +10,8 @@ from omni_tts_core.ui_presenters.settings_state import (
     DEFAULT_GENERATION_PREFERENCES,
     GenerationSettings,
 )
-from omni_tts_shared.schemas import ModelStatus
+from omni_tts_shared.schemas import GenerateSpeechResult, ModelStatus
+from omni_tts_ui_qt.preferences import QtPreferences
 
 
 class LabelsTest(unittest.TestCase):
@@ -45,6 +48,25 @@ class LabelsTest(unittest.TestCase):
         self.assertEqual(detail, " - RTX 5090")
         self.assertEqual(labels.runtime_device_detail("cpu", "Intel"), "")
 
+    def test_generation_result_shows_pronunciation_stats_and_report(self) -> None:
+        result = GenerateSpeechResult(
+            job_id="job-1",
+            audio_path=Path("C:/out/audio.wav"),
+            job_dir=Path("C:/out/job-1"),
+            segment_count=1,
+            duration_seconds=2.0,
+            message="done",
+            pronunciation_report_path=Path("C:/out/job-1/pronunciation_report.json"),
+            pronunciation_preset_ids=["project-a"],
+            pronunciation_term_count=1,
+            pronunciation_match_count=2,
+        )
+
+        text = labels.format_result(result)
+
+        self.assertIn("Cách đọc: 1 từ khác nhau · 2 lần áp dụng", text)
+        self.assertIn("pronunciation_report.json", text)
+
 
 class SettingsStateTest(unittest.TestCase):
     def test_defaults_round_trip_through_preferences(self) -> None:
@@ -80,7 +102,9 @@ class SettingsStateTest(unittest.TestCase):
                 "comma_pause_ms": 88,
                 "clause_pause_ms": 177,
                 "ellipsis_pause_ms": 444,
+                "chunk_join_mode": "crossfade",
                 "chunk_pause_ms": 111,
+                "chunk_crossfade_ms": 80,
                 "paragraph_pause_ms": 280,
                 "paragraph_pause_random_enabled": True,
                 "paragraph_pause_min_ms": 250,
@@ -96,7 +120,9 @@ class SettingsStateTest(unittest.TestCase):
         self.assertEqual(request.comma_pause_ms, 88)
         self.assertEqual(request.clause_pause_ms, 177)
         self.assertEqual(request.ellipsis_pause_ms, 444)
+        self.assertEqual(request.chunk_join_mode, "crossfade")
         self.assertEqual(request.chunk_pause_ms, 111)
+        self.assertEqual(request.chunk_crossfade_ms, 80)
         self.assertEqual(request.paragraph_pause_ms, 280)
         self.assertTrue(request.paragraph_pause_random_enabled)
         self.assertEqual(request.paragraph_pause_min_ms, 250)
@@ -106,6 +132,7 @@ class SettingsStateTest(unittest.TestCase):
         settings = GenerationSettings.from_preferences({"sentence_pause_ms": 350})
         self.assertEqual(settings.sentence_pause_ms, 350)
         self.assertEqual(settings.chunk_pause_ms, 350)
+        self.assertEqual(settings.chunk_join_mode, "silence")
 
     def test_full_history_snapshot_round_trips_every_dataclass_field(self) -> None:
         settings = GenerationSettings(
@@ -125,6 +152,26 @@ class SettingsStateTest(unittest.TestCase):
         restored = GenerationSettings.from_snapshot(settings.to_snapshot())
 
         self.assertEqual(restored, settings)
+
+
+class QtPreferencesMigrationTest(unittest.TestCase):
+    def test_positive_legacy_chunk_pause_selects_silence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "ui_qt.json"
+            path.write_text(json.dumps({"chunk_pause_ms": 210}), encoding="utf-8")
+
+            loaded = QtPreferences(path).load()
+
+        self.assertEqual(loaded["chunk_join_mode"], "silence")
+
+    def test_zero_legacy_chunk_pause_preserves_old_crossfade_behavior(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "ui_qt.json"
+            path.write_text(json.dumps({"chunk_pause_ms": 0}), encoding="utf-8")
+
+            loaded = QtPreferences(path).load()
+
+        self.assertEqual(loaded["chunk_join_mode"], "crossfade")
 
 
 if __name__ == "__main__":

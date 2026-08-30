@@ -1,0 +1,42 @@
+{
+  "preset_id": "8be04f36e237459a9fb175c705d3eb96",
+  "name": "PHÂN BÓN",
+  "project": "Ads phân gà",
+  "tags": [],
+  "notes": "",
+  "rules": [
+    {
+      "rule_id": "7d3ffc96830040b59c3fe43c884a1419",
+      "written": "IIKO",
+      "spoken": "Y Cô",
+      "enabled": true,
+      "case_sensitive": false,
+      "match_mode": "whole_term",
+      "priority": 0,
+      "notes": ""
+    },
+    {
+      "rule_id": "da95f2d8717841249e2a9fd14db0d2b4",
+      "written": "0877 285 052",
+      "spoken": "0 8 7 7 hai tám năm không năm hai",
+      "enabled": true,
+      "case_sensitive": false,
+      "match_mode": "whole_term",
+      "priority": 0,
+      "notes": ""
+    },
+    {
+      "rule_id": "ec47acdc3f3a44c3be257ca4e29cb42d",
+      "written": "0877285052",
+      "spoken": "0 8 7 7 hai tám năm không năm hai",
+      "enabled": true,
+      "case_sensitive": false,
+      "match_mode": "whole_term",
+      "priority": 0,
+      "notes": ""
+    }
+  ],
+  "revision": 2,
+  "created_at": "2026-08-24T12:45:30",
+  "updated_at": "2026-08-24T12:46:45"
+}

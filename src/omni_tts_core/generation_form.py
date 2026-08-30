@@ -45,6 +45,8 @@ class GenerationFormPresenter:
             fixed_tooltip=contract.fixed_tooltip,
             profile_label=contract.profile_label,
             profile_tooltip=contract.profile_tooltip,
+            design_label=contract.design_label,
+            design_tooltip=contract.design_tooltip,
             fixed_voices=fixed_voices,
             default_fixed_voice_id=(
                 spec.default_voice_preset
@@ -54,6 +56,7 @@ class GenerationFormPresenter:
             requires_fixed_voice=requires_fixed_voice,
             show_fixed_voice=selected_mode == "fixed" and bool(fixed_voices),
             show_profile=selected_mode == "profile",
+            show_design=selected_mode == "design",
             status_text=status_text,
         )
 
@@ -64,6 +67,11 @@ class GenerationFormPresenter:
         fixed_voices: bool,
         profile_required: bool,
     ) -> str:
+        if mode == "design":
+            return (
+                "Chế độ Giọng thiết kế: dùng giọng đã tạo từ mô tả (tab Giọng); "
+                "không dùng Profile hay giọng cố định."
+            )
         if mode == "profile":
             return (
                 "Chế độ Profile: app dùng audio mẫu đã lưu để clone giọng; "

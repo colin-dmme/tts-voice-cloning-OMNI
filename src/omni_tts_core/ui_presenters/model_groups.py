@@ -13,6 +13,7 @@ from typing import Iterable
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.provider_registry import PROVIDERS, provider_descriptor
 from omni_tts_core.ui_presenters.labels import model_choice_label
+from omni_tts_core.ui_presenters.search import matches_search
 
 ALL_PROVIDERS = "all"
 ALL_PROVIDERS_LABEL = "Tất cả"
@@ -101,15 +102,26 @@ def provider_sort_key(item: object) -> tuple[int, str, str]:
 def models_for_provider(
     specs: Iterable[ModelSpec],
     provider_id: str | None,
+    query: str = "",
 ) -> list[tuple[str, str]]:
-    """(display label, model_id) choices limited to one provider (or all)."""
+    """Model choices limited by provider and an accent-insensitive query.
+
+    Search belongs to the shared presenter so every GUI gets the same matching
+    behaviour and a model can be found by either its visible label or stable id.
+    """
     groups = group_models_by_provider(specs)
     if not provider_id or provider_id == ALL_PROVIDERS:
-        return [model for group in groups for model in group.models]
-    for group in groups:
-        if group.provider_id == provider_id:
-            return list(group.models)
-    return []
+        choices = [model for group in groups for model in group.models]
+    else:
+        choices = next(
+            (list(group.models) for group in groups if group.provider_id == provider_id),
+            [],
+        )
+    return [
+        (label, model_id)
+        for label, model_id in choices
+        if matches_search(f"{label} {model_id}", query)
+    ]
 
 
 def provider_of_model(specs: Iterable[ModelSpec], model_id: str | None) -> str:

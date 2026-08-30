@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Mapping
 from uuid import uuid4
 
 from omni_tts_core.paths import ensure_dir
@@ -22,6 +22,14 @@ class FileQueueStatus(str, Enum):
     CANCELLED = "cancelled"
     INTERRUPTED = "interrupted"
     OUTDATED = "outdated"
+
+
+class FileQueuePronunciationMode(str, Enum):
+    """How one queue item resolves its pronunciation selection."""
+
+    INHERIT = "inherit"
+    OFF = "off"
+    PRESET = "preset"
 
 
 STATUS_LABELS = {
@@ -141,6 +149,7 @@ class FileQueueItem:
     source_path: Path
     path_key: str
     char_count: int
+    unit_count: int = 0
     status: FileQueueStatus = FileQueueStatus.PENDING
     progress_percent: float = 0.0
     attempt_count: int = 0
@@ -150,6 +159,13 @@ class FileQueueItem:
     output_paths: tuple[Path, ...] = ()
     output_manifest: FileQueueOutputManifest = field(default_factory=FileQueueOutputManifest)
     duration_seconds: float = 0.0
+    pronunciation_mode: FileQueuePronunciationMode = FileQueuePronunciationMode.INHERIT
+    pronunciation_preset_ids: tuple[str, ...] = ()
+    pronunciation_term_count: int = -1
+    pronunciation_match_count: int = -1
+    pronunciation_conflict_count: int = -1
+    pronunciation_details: str = ""
+    pronunciation_snapshot_hash: str = ""
     settings_fingerprint: str = ""
     source_signature: str = ""
     position: int = 0
@@ -176,6 +192,26 @@ def settings_fingerprint(payload: Any) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def queue_settings_fingerprint(
+    payload: Any,
+    pronunciation_snapshot_hash: str,
+) -> str:
+    """Fingerprint actual queue behavior, including the resolved preset revision."""
+    normalized = _json_value(payload)
+    if not isinstance(normalized, dict):
+        normalized = {"settings": normalized}
+    else:
+        normalized = dict(normalized)
+    # A pinned/off queue row does not inherit the Studio selector. Its effective
+    # pronunciation is represented by the frozen snapshot hash below.
+    normalized.pop("pronunciation", None)
+    normalized.pop("pronunciation_snapshot", None)
+    normalized["pronunciation_snapshot_hash"] = str(
+        pronunciation_snapshot_hash or ""
+    )
+    return settings_fingerprint(normalized)
+
+
 class FileQueueStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or (ensure_dir("config") / "file_queue.sqlite3")
@@ -189,7 +225,9 @@ class FileQueueStore:
             ).fetchall()
         return [self._row_to_item(row) for row in rows]
 
-    def add(self, source_path: Path, char_count: int) -> tuple[FileQueueItem, bool]:
+    def add(
+        self, source_path: Path, char_count: int, unit_count: int = 0
+    ) -> tuple[FileQueueItem, bool]:
         normalized = source_path.expanduser().resolve(strict=False)
         key = path_key(normalized)
         with self._connect() as connection:
@@ -209,6 +247,7 @@ class FileQueueStore:
                 source_path=normalized,
                 path_key=key,
                 char_count=char_count,
+                unit_count=max(0, int(unit_count)),
                 source_signature=source_signature(normalized),
                 position=position,
                 created_at=_now(),
@@ -216,34 +255,40 @@ class FileQueueStore:
             connection.execute(
                 """
                 INSERT INTO file_queue (
-                    item_id, source_path, path_key, char_count, status,
+                    item_id, source_path, path_key, char_count, unit_count, status,
                     progress_percent, attempt_count, last_error, status_detail,
                     job_id, output_paths_json, output_manifest_json, settings_fingerprint,
                     source_signature, duration_seconds, position, created_at, started_at, finished_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 self._item_values(item),
             )
         return item, True
 
-    def add_many(self, sources: Iterable[tuple[Path, int]]) -> tuple[list[FileQueueItem], int]:
-        prepared: list[tuple[Path, str, int]] = []
+    def add_many(
+        self, sources: Iterable[tuple[Path, int] | tuple[Path, int, int]]
+    ) -> tuple[list[FileQueueItem], int]:
+        prepared: list[tuple[Path, str, int, int]] = []
         duplicates = 0
         seen_keys: set[str] = set()
-        for source_path, char_count in sources:
+        for source in sources:
+            source_path, char_count, *unit_values = source
+            unit_count = unit_values[0] if unit_values else 0
             normalized = source_path.expanduser().resolve(strict=False)
             key = path_key(normalized)
             if key in seen_keys:
                 duplicates += 1
                 continue
             seen_keys.add(key)
-            prepared.append((normalized, key, int(char_count)))
+            prepared.append(
+                (normalized, key, int(char_count), max(0, int(unit_count)))
+            )
         if not prepared:
             return [], duplicates
 
         with self._connect() as connection:
             existing_keys: set[str] = set()
-            keys = [key for _path, key, _count in prepared]
+            keys = [key for _path, key, _chars, _units in prepared]
             for chunk in _chunks(keys, 900):
                 placeholders = ",".join("?" for _ in chunk)
                 rows = connection.execute(
@@ -259,7 +304,7 @@ class FileQueueStore:
             )
             added: list[FileQueueItem] = []
             insert_values = []
-            for normalized, key, char_count in prepared:
+            for normalized, key, char_count, unit_count in prepared:
                 if key in existing_keys:
                     duplicates += 1
                     continue
@@ -268,6 +313,7 @@ class FileQueueStore:
                     source_path=normalized,
                     path_key=key,
                     char_count=char_count,
+                    unit_count=unit_count,
                     source_signature=source_signature(normalized),
                     position=position,
                     created_at=_now(),
@@ -280,11 +326,11 @@ class FileQueueStore:
                 connection.executemany(
                     """
                     INSERT INTO file_queue (
-                        item_id, source_path, path_key, char_count, status,
+                        item_id, source_path, path_key, char_count, unit_count, status,
                         progress_percent, attempt_count, last_error, status_detail,
                         job_id, output_paths_json, output_manifest_json, settings_fingerprint,
                         source_signature, duration_seconds, position, created_at, started_at, finished_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     insert_values,
                 )
@@ -423,22 +469,161 @@ class FileQueueStore:
             )
             return cursor.rowcount
 
-    def refresh_source_metadata(self, item_id: str, char_count: int) -> None:
+    def refresh_source_metadata(
+        self, item_id: str, char_count: int, unit_count: int | None = None
+    ) -> None:
         item = self.get(item_id)
         with self._connect() as connection:
             connection.execute(
                 """
                 UPDATE file_queue
-                SET char_count = ?, source_signature = ?
+                SET char_count = ?, unit_count = ?, source_signature = ?,
+                    pronunciation_term_count = -1,
+                    pronunciation_match_count = -1,
+                    pronunciation_conflict_count = -1,
+                    pronunciation_details = ''
                 WHERE item_id = ? AND status != ?
                 """,
                 (
                     max(0, int(char_count)),
+                    item.unit_count if unit_count is None else max(0, int(unit_count)),
                     source_signature(item.source_path),
                     item_id,
                     FileQueueStatus.RUNNING.value,
                 ),
             )
+
+    def set_pronunciation_binding(
+        self,
+        item_ids: Iterable[str],
+        *,
+        mode: FileQueuePronunciationMode | str,
+        preset_ids: Iterable[str] = (),
+        term_count: int = -1,
+        match_count: int = -1,
+        conflict_count: int = -1,
+        details: str = "",
+    ) -> int:
+        ids = _unique_ids(item_ids)
+        if not ids:
+            return 0
+        try:
+            parsed_mode = FileQueuePronunciationMode(mode)
+        except ValueError as exc:
+            raise ValueError(f"Chế độ cách đọc hàng đợi không hợp lệ: {mode}") from exc
+        selected_presets = tuple(
+            dict.fromkeys(str(value).strip() for value in preset_ids if str(value).strip())
+        )
+        if parsed_mode != FileQueuePronunciationMode.PRESET:
+            selected_presets = ()
+        if parsed_mode == FileQueuePronunciationMode.PRESET and not selected_presets:
+            raise ValueError("Chế độ preset riêng cần ít nhất một preset cách đọc.")
+        presets_json = json.dumps(selected_presets, ensure_ascii=False)
+        placeholders = ",".join("?" for _ in ids)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE file_queue
+                SET pronunciation_mode = ?, pronunciation_preset_ids_json = ?,
+                    pronunciation_term_count = ?, pronunciation_match_count = ?,
+                    pronunciation_conflict_count = ?, pronunciation_details = '',
+                    pronunciation_snapshot_hash = ''
+                WHERE item_id IN ({placeholders}) AND status != ?
+                  AND (
+                    pronunciation_mode != ?
+                    OR pronunciation_preset_ids_json != ?
+                  )
+                """,
+                (
+                    parsed_mode.value,
+                    presets_json,
+                    int(term_count),
+                    int(match_count),
+                    int(conflict_count),
+                    *ids,
+                    FileQueueStatus.RUNNING.value,
+                    parsed_mode.value,
+                    presets_json,
+                ),
+            )
+            changed = cursor.rowcount
+            if changed:
+                connection.execute(
+                    f"""
+                    UPDATE file_queue
+                    SET status = ?, status_detail = ?, progress_percent = 0.0
+                    WHERE item_id IN ({placeholders}) AND status = ?
+                    """,
+                    (
+                        FileQueueStatus.OUTDATED.value,
+                        "Cách đọc hàng đợi đã thay đổi",
+                        *ids,
+                        FileQueueStatus.DONE.value,
+                    ),
+                )
+            if len(ids) == 1 and cursor.rowcount:
+                connection.execute(
+                    "UPDATE file_queue SET pronunciation_details = ? WHERE item_id = ?",
+                    (_short(details, 2000), ids[0]),
+                )
+            return changed
+
+    def update_pronunciation_stats(
+        self,
+        item_id: str,
+        *,
+        term_count: int,
+        match_count: int,
+        conflict_count: int,
+        details: str = "",
+        snapshot_hash: str = "",
+        invalidate_completed: bool = True,
+    ) -> bool:
+        current = self.get(item_id)
+        normalized_hash = str(snapshot_hash or "").strip()
+        hash_changed = bool(
+            invalidate_completed
+            and current.status == FileQueueStatus.DONE
+            and normalized_hash
+            and (
+                current.pronunciation_snapshot_hash != normalized_hash
+                and (current.pronunciation_snapshot_hash or int(match_count) > 0)
+            )
+        )
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE file_queue
+                SET pronunciation_term_count = ?, pronunciation_match_count = ?,
+                    pronunciation_conflict_count = ?, pronunciation_details = ?,
+                    pronunciation_snapshot_hash = ?
+                WHERE item_id = ? AND status != ?
+                """,
+                (
+                    max(0, int(term_count)),
+                    max(0, int(match_count)),
+                    max(0, int(conflict_count)),
+                    _short(details, 2000),
+                    normalized_hash,
+                    item_id,
+                    FileQueueStatus.RUNNING.value,
+                ),
+            )
+            if hash_changed:
+                connection.execute(
+                    """
+                    UPDATE file_queue
+                    SET status = ?, status_detail = ?, progress_percent = 0.0
+                    WHERE item_id = ? AND status = ?
+                    """,
+                    (
+                        FileQueueStatus.OUTDATED.value,
+                        "Preset cách đọc đã thay đổi",
+                        item_id,
+                        FileQueueStatus.DONE.value,
+                    ),
+                )
+        return hash_changed
 
     def delete(self, item_ids: Iterable[str]) -> int:
         ids = _unique_ids(item_ids)
@@ -505,6 +690,36 @@ class FileQueueStore:
             )
             return cursor.rowcount
 
+    def mark_settings_outdated_by_item(
+        self,
+        fingerprints: Mapping[str, str],
+    ) -> int:
+        """Compare completed rows with their own effective queue fingerprints."""
+        changed = 0
+        with self._connect() as connection:
+            for item_id, fingerprint in fingerprints.items():
+                if not item_id or not fingerprint:
+                    continue
+                cursor = connection.execute(
+                    """
+                    UPDATE file_queue
+                    SET status = ?,
+                        status_detail = 'Thiết lập tạo audio hoặc cách đọc đã thay đổi',
+                        progress_percent = 0.0
+                    WHERE item_id = ? AND status = ?
+                      AND settings_fingerprint != ''
+                      AND settings_fingerprint != ?
+                    """,
+                    (
+                        FileQueueStatus.OUTDATED.value,
+                        item_id,
+                        FileQueueStatus.DONE.value,
+                        fingerprint,
+                    ),
+                )
+                changed += cursor.rowcount
+        return changed
+
     def get(self, item_id: str) -> FileQueueItem:
         with self._connect() as connection:
             row = connection.execute(
@@ -541,6 +756,7 @@ class FileQueueStore:
                     source_path TEXT NOT NULL,
                     path_key TEXT NOT NULL UNIQUE,
                     char_count INTEGER NOT NULL,
+                    unit_count INTEGER NOT NULL DEFAULT -1,
                     status TEXT NOT NULL,
                     progress_percent REAL NOT NULL DEFAULT 0,
                     attempt_count INTEGER NOT NULL DEFAULT 0,
@@ -552,6 +768,13 @@ class FileQueueStore:
                     settings_fingerprint TEXT NOT NULL DEFAULT '',
                     source_signature TEXT NOT NULL DEFAULT '',
                     duration_seconds REAL NOT NULL DEFAULT 0,
+                    pronunciation_mode TEXT NOT NULL DEFAULT 'inherit',
+                    pronunciation_preset_ids_json TEXT NOT NULL DEFAULT '[]',
+                    pronunciation_term_count INTEGER NOT NULL DEFAULT -1,
+                    pronunciation_match_count INTEGER NOT NULL DEFAULT -1,
+                    pronunciation_conflict_count INTEGER NOT NULL DEFAULT -1,
+                    pronunciation_details TEXT NOT NULL DEFAULT '',
+                    pronunciation_snapshot_hash TEXT NOT NULL DEFAULT '',
                     position INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL DEFAULT '',
                     started_at TEXT NOT NULL DEFAULT '',
@@ -570,6 +793,25 @@ class FileQueueStore:
                 connection.execute(
                     "ALTER TABLE file_queue ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0"
                 )
+            if "unit_count" not in _column_names(connection, "file_queue"):
+                connection.execute(
+                    "ALTER TABLE file_queue ADD COLUMN unit_count INTEGER NOT NULL DEFAULT -1"
+                )
+            pronunciation_columns = {
+                "pronunciation_mode": "TEXT NOT NULL DEFAULT 'inherit'",
+                "pronunciation_preset_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+                "pronunciation_term_count": "INTEGER NOT NULL DEFAULT -1",
+                "pronunciation_match_count": "INTEGER NOT NULL DEFAULT -1",
+                "pronunciation_conflict_count": "INTEGER NOT NULL DEFAULT -1",
+                "pronunciation_details": "TEXT NOT NULL DEFAULT ''",
+                "pronunciation_snapshot_hash": "TEXT NOT NULL DEFAULT ''",
+            }
+            existing_columns = _column_names(connection, "file_queue")
+            for column, definition in pronunciation_columns.items():
+                if column not in existing_columns:
+                    connection.execute(
+                        f"ALTER TABLE file_queue ADD COLUMN {column} {definition}"
+                    )
 
     @staticmethod
     def _row_to_item(row: sqlite3.Row) -> FileQueueItem:
@@ -584,11 +826,24 @@ class FileQueueStore:
             status = FileQueueStatus(row["status"])
         except ValueError:
             status = FileQueueStatus.PENDING
+        try:
+            pronunciation_mode = FileQueuePronunciationMode(row["pronunciation_mode"])
+        except ValueError:
+            pronunciation_mode = FileQueuePronunciationMode.INHERIT
+        try:
+            pronunciation_preset_ids = tuple(
+                str(value)
+                for value in json.loads(row["pronunciation_preset_ids_json"])
+                if str(value).strip()
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pronunciation_preset_ids = ()
         return FileQueueItem(
             item_id=row["item_id"],
             source_path=Path(row["source_path"]),
             path_key=row["path_key"],
             char_count=int(row["char_count"]),
+            unit_count=int(row["unit_count"]),
             status=status,
             progress_percent=float(row["progress_percent"]),
             attempt_count=int(row["attempt_count"]),
@@ -598,6 +853,13 @@ class FileQueueStore:
             output_paths=outputs,
             output_manifest=manifest,
             duration_seconds=float(row["duration_seconds"] or 0.0),
+            pronunciation_mode=pronunciation_mode,
+            pronunciation_preset_ids=pronunciation_preset_ids,
+            pronunciation_term_count=int(row["pronunciation_term_count"]),
+            pronunciation_match_count=int(row["pronunciation_match_count"]),
+            pronunciation_conflict_count=int(row["pronunciation_conflict_count"]),
+            pronunciation_details=str(row["pronunciation_details"] or ""),
+            pronunciation_snapshot_hash=str(row["pronunciation_snapshot_hash"] or ""),
             settings_fingerprint=row["settings_fingerprint"],
             source_signature=row["source_signature"],
             position=int(row["position"]),
@@ -613,6 +875,7 @@ class FileQueueStore:
             str(item.source_path),
             item.path_key,
             item.char_count,
+            item.unit_count,
             item.status.value,
             item.progress_percent,
             item.attempt_count,

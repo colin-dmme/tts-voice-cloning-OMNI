@@ -34,14 +34,25 @@ class SetupTasksTest(unittest.TestCase):
         self.assertTrue(gpu.required)
         self.assertEqual(gpu.script_name, "install_vieneu_worker_cuda.bat")
 
-    def test_install_base_runtime_delegates_to_core_provider_action(self) -> None:
+    def test_install_base_runtime_delegates_to_model_specific_action(self) -> None:
         service = SetupService()
 
-        with patch("omni_tts_core.setup_tasks.install_base_runtime", return_value="ok") as install:
+        with patch("omni_tts_core.setup_tasks.install_base_runtime_for_spec", return_value="ok") as install:
             message = service.install_base_for_model("f5tts_v1_base_swivid")
 
         self.assertEqual(message, "ok")
-        install.assert_called_once_with("f5tts")
+        self.assertEqual(install.call_args.args[0].model_id, "f5tts_v1_base_swivid")
+
+    def test_vieneu_v3_uses_its_own_worker_and_installers(self) -> None:
+        service = SetupService()
+
+        tasks = service.model_setup_statuses("vieneu_v3_turbo")
+        by_scope = {item.scope: item for item in tasks}
+
+        self.assertEqual(by_scope["worker"].label, "Worker VieNeu v3")
+        self.assertEqual(by_scope["worker"].script_name, "install_vieneu_v3_worker.bat")
+        self.assertEqual(by_scope["gpu"].label, "CUDA cho VieNeu v3")
+        self.assertEqual(by_scope["gpu"].script_name, "install_vieneu_v3_worker_cuda.bat")
 
     def test_main_python_status_reports_the_running_project_python(self) -> None:
         project_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"

@@ -7,6 +7,8 @@ from omni_tts_core.ui_presenters import field_limits, model_actions
 from omni_tts_core.ui_presenters.control_policy import (
     TUNING_CHATTERBOX,
     TUNING_F5,
+    TUNING_PIPER,
+    TUNING_PROVIDER_OPTIONS,
     TUNING_VIENEU,
 )
 from omni_tts_core.ui_presenters.tooltips import tooltip
@@ -345,6 +347,7 @@ class GenerationTabsMixin:
         controls.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         button_specs = [
             (model_actions.DOWNLOAD, "Tải model đang chọn", self.download_selected_model),
+            (model_actions.IMPORT_LOCAL, "Nhập model local", self.import_selected_local_model),
             (model_actions.DOWNLOAD_REQUIRED, "Tải model bắt buộc còn thiếu",
              self.download_required_models),
             (model_actions.REMOVE, "Gỡ model đang chọn", self.remove_selected_model),
@@ -412,15 +415,19 @@ class GenerationTabsMixin:
         advanced_tab = ttk.Frame(controls, padding=8)
         punctuation_tab = ttk.Frame(controls, padding=8)
         vieneu_tab = ttk.Frame(controls, padding=8)
+        piper_tab = ttk.Frame(controls, padding=8)
         f5_tab = ttk.Frame(controls, padding=8)
         chatterbox_tab = ttk.Frame(controls, padding=8)
+        declarative_tab = ttk.Frame(controls, padding=8)
         gpu_tab = ttk.Frame(controls, padding=8)
         controls.add(basic_tab, text="Cơ bản")
         controls.add(advanced_tab, text="Nâng cao")
         controls.add(punctuation_tab, text="Dấu câu")
         controls.add(vieneu_tab, text="VieNeu")
+        controls.add(piper_tab, text="Piper ONNX")
         controls.add(f5_tab, text="F5-TTS")
         controls.add(chatterbox_tab, text="Chatterbox")
+        controls.add(declarative_tab, text="Tinh chỉnh model")
         # Bảo vệ GPU is global (every CUDA provider), so it is its own tab rather
         # than a page inside Chatterbox as it used to be.
         controls.add(gpu_tab, text="Bảo vệ GPU")
@@ -431,11 +438,14 @@ class GenerationTabsMixin:
                 controls,
                 {
                     TUNING_VIENEU: vieneu_tab,
+                    TUNING_PIPER: piper_tab,
                     TUNING_F5: f5_tab,
                     TUNING_CHATTERBOX: chatterbox_tab,
+                    TUNING_PROVIDER_OPTIONS: declarative_tab,
                 },
             )
         )
+        self.declarative_tuning_tabs.append(declarative_tab)
         self.punctuation_tab_groups.append((controls, punctuation_tab))
 
         ttk.Label(basic_tab, text="Nhà cung cấp").pack(anchor="w")
@@ -582,6 +592,7 @@ class GenerationTabsMixin:
         self.emotion_combos.append(emotion_combo)
 
         self._build_f5_controls(f5_tab)
+        self._build_piper_controls(piper_tab)
         self._build_chatterbox_controls(chatterbox_tab)
         self._build_gpu_safety_controls(gpu_tab)
         self._build_punctuation_controls(punctuation_tab)
@@ -609,6 +620,84 @@ class GenerationTabsMixin:
         self._field_spin(advanced_tab, "Max ký tự mỗi đoạn nhỏ", self.chunk_var,
                          "max_chunk_chars", "max_chunk")
         return controls
+
+    def _build_piper_controls(self, parent: ttk.Frame) -> None:
+        ttk.Label(parent, text="Hồ sơ tinh chỉnh Piper").pack(anchor="w")
+        preset = ttk.Combobox(
+            parent,
+            textvariable=self.piper_preset_var,
+            values=["Piper chuẩn", "Vbee tham chiếu", "Tùy chỉnh"],
+            state="readonly",
+        )
+        preset.pack(fill="x", pady=(4, 8))
+        preset.bind("<<ComboboxSelected>>", lambda _event: self._apply_piper_preset())
+        attach_tooltip(preset, tooltip("piper_preset"))
+        self.piper_controls.append(preset)
+        self.piper_controls.append(
+            self._field_spin(
+                parent,
+                "Noise Scale",
+                self.piper_noise_scale_var,
+                "piper_noise_scale",
+                "piper_noise_scale",
+            )
+        )
+        self.piper_controls.append(
+            self._field_spin(
+                parent,
+                "Noise W",
+                self.piper_noise_w_var,
+                "piper_noise_w",
+                "piper_noise_w",
+            )
+        )
+        ttk.Label(parent, text="Seed (trống = ngẫu nhiên)").pack(anchor="w")
+        seed = ttk.Entry(parent, textvariable=self.piper_seed_var)
+        seed.pack(fill="x", pady=(4, 8))
+        attach_tooltip(seed, tooltip("piper_seed"))
+        self.piper_controls.append(seed)
+        recommendation = ttk.Label(
+            parent,
+            textvariable=self.piper_recommendation_var,
+            wraplength=340,
+            foreground="#555555",
+        )
+        recommendation.pack(anchor="w", pady=(4, 0))
+        attach_tooltip(recommendation, tooltip("piper_recommendation"))
+        self.piper_controls.append(recommendation)
+        self.piper_noise_scale_var.trace_add(
+            "write", lambda *_args: self._sync_piper_preset()
+        )
+        self.piper_noise_w_var.trace_add(
+            "write", lambda *_args: self._sync_piper_preset()
+        )
+        self._sync_piper_preset()
+
+    def _apply_piper_preset(self) -> None:
+        values = {
+            "Piper chuẩn": (0.667, 0.800),
+            "Vbee tham chiếu": (0.900, 0.650),
+        }.get(self.piper_preset_var.get())
+        if values is None:
+            return
+        self.piper_noise_scale_var.set(values[0])
+        self.piper_noise_w_var.set(values[1])
+
+    def _sync_piper_preset(self) -> None:
+        try:
+            values = (
+                round(float(self.piper_noise_scale_var.get()), 3),
+                round(float(self.piper_noise_w_var.get()), 3),
+            )
+        except (tk.TclError, ValueError):
+            return
+        label = (
+            "Piper chuẩn" if values == (0.667, 0.800)
+            else "Vbee tham chiếu" if values == (0.900, 0.650)
+            else "Tùy chỉnh"
+        )
+        if self.piper_preset_var.get() != label:
+            self.piper_preset_var.set(label)
 
     def _build_punctuation_controls(self, parent: ttk.Frame) -> None:
         note = ttk.Label(

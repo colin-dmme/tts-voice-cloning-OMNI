@@ -9,9 +9,11 @@ from omni_tts_core.audio.wav_tools import (
     read_audio_mono,
     save_audio,
 )
+from omni_tts_core.chunk_join import resolve_chunk_join_policy
 from omni_tts_core.config import AppSettings
 from omni_tts_core.engine_profile_cache import EngineProfileCache
 from omni_tts_core.generation_form import GenerationFormPresenter
+from omni_tts_core.generation_process_lock import GenerationProcessLock
 from omni_tts_core.higgs.custom_voices import (
     HiggsCustomVoiceClient,
     HiggsCustomVoiceStore,
@@ -23,7 +25,14 @@ from omni_tts_core.jobs.store import JobStore
 from omni_tts_core.model_registry import ModelRegistry, ModelSpec, effective_voice_input
 from omni_tts_core.model_storage import ModelStorage
 from omni_tts_core.progress import ProgressCallback, check_cancel, emit_progress
+from omni_tts_core.pronunciation import (
+    PronunciationPresetStore,
+    analyze_pronunciation,
+    build_pronunciation_report,
+    freeze_pronunciation_selection,
+)
 from omni_tts_core.provider_registry import provider_descriptor
+from omni_tts_core.provider_options import normalize_provider_options
 from omni_tts_core.runtime_status import RuntimeStatusService
 from omni_tts_core.setup_tasks import SetupService
 from omni_tts_core.subtitles.srt_builder import write_srt
@@ -36,11 +45,27 @@ from omni_tts_core.text.punctuation_pauses import (
 )
 from omni_tts_core.text.source_reader import read_source_text, read_source_units, text_units_from_blank_lines
 from omni_tts_core.text.vi_normalizer import normalize_vietnamese_text
+from omni_tts_core.designed_voices import DesignedVoiceStore
+from omni_tts_core.voice_library import VoiceItem, build_voice_items, filter_voice_items
 from omni_tts_core.voice_profile_policy import ProfileCompatibility, VoiceProfilePolicy
 from omni_tts_core.voice_profiles import VoiceProfileManager
 from omni_tts_shared.errors import ConfigError, ModelMissingError
+from omni_tts_core.text.output_naming import (
+    compose_stem,
+    default_stem_from_text,
+    format_duration_stem,
+    slug_component,
+)
 from omni_tts_shared.languages import language_label
+from omni_tts_shared.pronunciation import (
+    PronunciationAnalysis,
+    PronunciationPreset,
+    PronunciationRule,
+    PronunciationSelection,
+    PronunciationSnapshot,
+)
 from omni_tts_shared.schemas import (
+    DesignedVoice,
     GenerateSpeechRequest,
     GenerateSpeechResult,
     GenerationFormDescriptor,
@@ -65,6 +90,7 @@ class TtsService:
         storage: ModelStorage | None = None,
         voice_profiles: VoiceProfileManager | None = None,
         higgs_custom_voices: HiggsCustomVoiceStore | None = None,
+        pronunciation_presets: PronunciationPresetStore | None = None,
     ) -> None:
         self.settings = settings or AppSettings()
         self.registry = registry or ModelRegistry()
@@ -72,19 +98,193 @@ class TtsService:
         self.runtime_status = RuntimeStatusService(self.registry, self.storage)
         self.setup = SetupService(self.registry, self.storage, self.runtime_status)
         self.voice_profiles = voice_profiles or VoiceProfileManager()
+        self.designed_voices = DesignedVoiceStore()
         self.higgs_custom_voices = higgs_custom_voices or HiggsCustomVoiceStore()
         self.engine_cache = EngineProfileCache()
         self.voice_policy = VoiceProfilePolicy(self.registry, self.engine_cache)
         self.generation_form = GenerationFormPresenter(self.registry)
         self.job_store = JobStore(self.settings.outputs_root)
+        project_root = getattr(
+            self.settings,
+            "project_root",
+            Path(self.settings.outputs_root).parent,
+        )
+        self.pronunciation_presets = pronunciation_presets or PronunciationPresetStore(
+            Path(project_root) / "pronunciation" / "presets"
+        )
+        self.process_lock = GenerationProcessLock(
+            Path(project_root) / "config" / "tts_generation.lock"
+        )
         self._engines: dict[str, BaseTtsEngine] = {}
         self._engine_lock = Lock()
+
+    # --- Pronunciation presets ---------------------------------------------
+
+    def list_pronunciation_presets(self) -> list[PronunciationPreset]:
+        return self.pronunciation_presets.list_presets()
+
+    def get_pronunciation_preset(self, preset_id: str) -> PronunciationPreset:
+        return self.pronunciation_presets.get(preset_id)
+
+    def save_pronunciation_preset(
+        self,
+        *,
+        name: str,
+        rules: list[PronunciationRule | dict],
+        project: str = "",
+        tags: list[str] | None = None,
+        notes: str = "",
+        preset_id: str | None = None,
+    ) -> PronunciationPreset:
+        return self.pronunciation_presets.save(
+            name=name,
+            rules=rules,
+            project=project,
+            tags=tags,
+            notes=notes,
+            preset_id=preset_id,
+        )
+
+    def delete_pronunciation_preset(self, preset_id: str) -> bool:
+        return self.pronunciation_presets.delete(preset_id)
+
+    def duplicate_pronunciation_preset(
+        self, preset_id: str, name: str | None = None
+    ) -> PronunciationPreset:
+        return self.pronunciation_presets.duplicate(preset_id, name)
+
+    def import_pronunciation_preset(self, path: Path) -> PronunciationPreset:
+        return self.pronunciation_presets.import_file(path)
+
+    def export_pronunciation_preset(self, preset_id: str, path: Path) -> Path:
+        return self.pronunciation_presets.export_file(preset_id, path)
+
+    def preview_pronunciation(
+        self,
+        text: str,
+        selection: PronunciationSelection | None = None,
+    ) -> PronunciationAnalysis:
+        snapshot = freeze_pronunciation_selection(
+            self.pronunciation_presets,
+            selection,
+        )
+        return analyze_pronunciation(text, snapshot)
+
+    def freeze_pronunciation(
+        self, request: GenerateSpeechRequest
+    ) -> GenerateSpeechRequest:
+        if request.pronunciation_snapshot is not None:
+            return request
+        snapshot = freeze_pronunciation_selection(
+            self.pronunciation_presets,
+            request.pronunciation,
+        )
+        return request.model_copy(update={"pronunciation_snapshot": snapshot})
+
+    def _save_pronunciation_report(
+        self,
+        job_dir: Path,
+        request: GenerateSpeechRequest,
+        source_text: str,
+    ) -> tuple[Path | None, PronunciationAnalysis]:
+        analysis = analyze_pronunciation(
+            source_text,
+            request.pronunciation_snapshot,
+        )
+        snapshot = request.pronunciation_snapshot
+        if snapshot is None or not snapshot.enabled:
+            return None, analysis
+        report_path = job_dir / "pronunciation_report.json"
+        self.job_store.save_json(report_path, build_pronunciation_report(analysis))
+        return report_path, analysis
 
     def list_voice_profiles(self) -> list[VoiceProfile]:
         return self.voice_profiles.list_profiles()
 
     def get_voice_profile(self, profile_id: str) -> VoiceProfile:
         return self.voice_profiles.get_profile(profile_id)
+
+    # --- Designed voices (Voice Design) ------------------------------------
+
+    def list_designed_voices(self) -> list[DesignedVoice]:
+        return self.designed_voices.list_voices()
+
+    def get_designed_voice(self, voice_id: str) -> DesignedVoice:
+        return self.designed_voices.get_voice(voice_id)
+
+    def save_designed_voice(
+        self,
+        name: str,
+        instruct: str,
+        language: str = "vi",
+        project: str = "",
+        tags: list[str] | None = None,
+        notes: str = "",
+        voice_id: str | None = None,
+    ) -> DesignedVoice:
+        return self.designed_voices.save_voice(
+            name=name,
+            instruct=instruct,
+            language=language,
+            project=project,
+            tags=tags,
+            notes=notes,
+            voice_id=voice_id,
+        )
+
+    def delete_designed_voice(self, voice_id: str) -> None:
+        self.designed_voices.delete_voice(voice_id)
+
+    # --- Voice library (unified selectable voices) -------------------------
+
+    def voice_kinds_for_model(self, model_id: str) -> tuple[str, ...]:
+        """Which library voice kinds a model can use: clone and/or design."""
+        caps = self.registry.get(model_id).capabilities
+        kinds: list[str] = []
+        if caps.supports_voice_profile:
+            kinds.append("clone")
+        if caps.supports_voice_design:
+            kinds.append("design")
+        return tuple(kinds)
+
+    def selectable_voice_items(
+        self,
+        model_id: str,
+        *,
+        query: str = "",
+        project: str | None = None,
+        tag: str | None = None,
+    ) -> list[VoiceItem]:
+        """Library voices this model supports, after search/project/tag filters.
+
+        The GUI passes only its widget state (query/project/tag); which *kinds*
+        are offered comes from the model's capabilities, never from the GUI.
+        """
+        items = build_voice_items(
+            self.voice_profiles.list_profiles(), self.designed_voices.list_voices()
+        )
+        return filter_voice_items(
+            items,
+            query=query,
+            project=project,
+            tag=tag,
+            kinds=self.voice_kinds_for_model(model_id),
+        )
+
+    def _resolve_instruct(self, request: GenerateSpeechRequest, spec: ModelSpec) -> str | None:
+        """Resolve the Voice Design description for this request, or None.
+
+        Only honoured when the model supports voice design; a saved
+        designed_voice_id wins, otherwise a directly-supplied voice_instruct.
+        """
+        if not spec.capabilities.supports_voice_design:
+            return None
+        if request.designed_voice_id:
+            try:
+                return self.designed_voices.get_voice(request.designed_voice_id).instruct
+            except Exception:
+                return request.voice_instruct or None
+        return request.voice_instruct or None
 
     def list_higgs_custom_voices(self, endpoint_id: str) -> list[HiggsCustomVoice]:
         return self.higgs_custom_voices.list(endpoint_id)
@@ -114,6 +314,7 @@ class TtsService:
         project: str = "",
         notes: str = "",
         profile_id: str | None = None,
+        tags: list[str] | None = None,
     ) -> tuple[VoiceProfile, list[ProfileSaveWarning]]:
         return self.voice_profiles.save_profile(
             name=name,
@@ -123,6 +324,7 @@ class TtsService:
             project=project,
             notes=notes,
             profile_id=profile_id,
+            tags=tags,
         )
 
     def delete_voice_profile(self, profile_id: str, remove_sample: bool = False) -> None:
@@ -315,6 +517,9 @@ class TtsService:
     def download_model(self, model_id: str) -> ModelStatus:
         return self.storage.download(model_id)
 
+    def import_local_model(self, model_id: str, source_root: str | Path) -> ModelStatus:
+        return self.storage.import_local(model_id, source_root)
+
     def install_gpu_acceleration(self, model_id: str) -> str:
         return self.setup.install_gpu_for_model(model_id)
 
@@ -346,10 +551,16 @@ class TtsService:
         progress_callback: ProgressCallback | None = None,
         cancel_event: Event | None = None,
     ) -> GenerateSpeechResult:
-        check_cancel(cancel_event)
-        if request.output_mode == "split":
-            return self._generate_split_text(request, request.text, progress_callback, cancel_event)
-        return self._generate_merged_text(request, progress_callback, cancel_event)
+        request = self.freeze_pronunciation(request)
+
+        def report_wait(message: str) -> None:
+            emit_progress(progress_callback, message, 0, 1)
+
+        with self.process_lock.acquire(cancel_event, report_wait):
+            check_cancel(cancel_event)
+            if request.output_mode == "split":
+                return self._generate_split_text(request, request.text, progress_callback, cancel_event)
+            return self._generate_merged_text(request, progress_callback, cancel_event)
 
     def _generate_merged_text(
         self,
@@ -366,7 +577,9 @@ class TtsService:
             request.language,
             request.max_chunk_chars,
             provider=spec.provider,
+            chunk_join_mode=request.chunk_join_mode,
             higgs=request.higgs,
+            pronunciation_snapshot=request.pronunciation_snapshot,
         )
         chunks = [chunk for unit in units for chunk in unit["chunks"]]
         if not chunks:
@@ -380,15 +593,8 @@ class TtsService:
 
         job_id, job_dir = self.job_store.create_job_dir()
         output_dir = _resolve_output_dir(request, job_dir)
-        output_stem = _resolve_output_stem(request)
+        base_stem = _resolve_output_stem(request)
         output_dir.mkdir(parents=True, exist_ok=True)
-        audio_path, srt_path = _available_output_pair(
-            output_dir,
-            output_stem,
-            request.overwrite,
-            request.output_srt,
-            request.output_audio_format,
-        )
         self.job_store.save_json(job_dir / "request.json", request)
         self.job_store.save_json(
             job_dir / "chunks.json",
@@ -411,7 +617,9 @@ class TtsService:
                 "ellipsis_pause_random_enabled": request.ellipsis_pause_random_enabled,
                 "ellipsis_pause_min_ms": request.ellipsis_pause_min_ms,
                 "ellipsis_pause_max_ms": request.ellipsis_pause_max_ms,
+                "chunk_join_mode": request.chunk_join_mode,
                 "chunk_pause_ms": request.chunk_pause_ms,
+                "chunk_crossfade_ms": request.chunk_crossfade_ms,
                 "paragraph_pause_ms": _paragraph_pause_ms(request),
                 "paragraph_pause_random_enabled": request.paragraph_pause_random_enabled,
                 "paragraph_pause_min_ms": request.paragraph_pause_min_ms,
@@ -423,10 +631,14 @@ class TtsService:
                         "index": unit["unit"].index,
                         "text": unit["unit"].text,
                         "chunks": unit["chunks"],
+                        "segments": unit["segments"],
                     }
                     for unit in units
                 ],
             },
+        )
+        pronunciation_report_path, pronunciation_analysis = (
+            self._save_pronunciation_report(job_dir, request, request.text)
         )
 
         engine = self._engine_for(spec)
@@ -438,6 +650,8 @@ class TtsService:
                 reference_audio_path=_clean_path(request.reference_audio_path),
                 reference_text=request.reference_text,
                 speaker_id=request.speaker_id,
+                instruct=self._resolve_instruct(request, spec),
+                num_step=request.omnivoice_num_step if spec.provider == "omnivoice" else None,
                 speed=request.speed,
                 pitch_shift=request.pitch_shift,
                 emotion=request.emotion,
@@ -445,6 +659,9 @@ class TtsService:
                 codec_repo=_codec_repo_for_request(request, spec),
                 temperature=request.temperature if spec.provider == "vieneu" else None,
                 top_k=request.top_k if spec.provider == "vieneu" else None,
+                piper_noise_scale=request.piper_noise_scale if spec.provider == "piper" else 0.667,
+                piper_noise_w=request.piper_noise_w if spec.provider == "piper" else 0.8,
+                piper_seed=request.piper_seed if spec.provider == "piper" else None,
                 f5_nfe_step=request.f5_nfe_step if spec.provider == "f5tts" else None,
                 f5_cfg_strength=request.f5_cfg_strength if spec.provider == "f5tts" else None,
                 f5_sway_sampling_coef=request.f5_sway_sampling_coef if spec.provider == "f5tts" else None,
@@ -508,6 +725,7 @@ class TtsService:
                     request.remote_endpoint if spec.provider == "higgs_remote" else None
                 ),
                 higgs=request.higgs if spec.provider == "higgs_remote" else None,
+                provider_options=dict(request.provider_options),
             )
             for chunk in chunks
         ]
@@ -539,24 +757,51 @@ class TtsService:
             unit_results = batch_results[chunk_cursor : chunk_cursor + len(unit_chunks)]
             chunk_cursor += len(unit_chunks)
             unit_audio_segments = []
+            chunk_windows: list[tuple[float, float]] = []
             unit_sample_rate = sample_rate
             unit_pauses_ms = _chunk_pause_values(request, spec, unit_chunks)
+            unit_crossfade_ms = _chunk_crossfade_ms(request, spec)
 
             for chunk_index, (chunk, result) in enumerate(zip(unit_chunks, unit_results)):
                 unit_sample_rate = result.sample_rate
                 segment_duration = duration_seconds(result.audio, unit_sample_rate)
-                timings.append(
-                    SegmentTiming(
-                        index=len(timings) + 1,
-                        text=chunk,
-                        start_seconds=current_seconds,
-                        end_seconds=current_seconds + segment_duration,
-                    )
+                chunk_windows.append(
+                    (current_seconds, current_seconds + segment_duration)
                 )
                 current_seconds += segment_duration
                 if chunk_index < len(unit_chunks) - 1:
-                    current_seconds += unit_pauses_ms[chunk_index] / 1000
+                    pause_ms = unit_pauses_ms[chunk_index]
+                    if pause_ms > 0:
+                        current_seconds += pause_ms / 1000
+                    elif unit_crossfade_ms > 0:
+                        next_duration = duration_seconds(
+                            unit_results[chunk_index + 1].audio,
+                            unit_sample_rate,
+                        )
+                        current_seconds -= min(
+                            unit_crossfade_ms / 1000,
+                            segment_duration,
+                            next_duration,
+                        )
                 unit_audio_segments.append(result.audio)
+
+            window_cursor = 0
+            for segment in unit["segments"]:
+                segment_chunk_count = len(segment["chunks"])
+                segment_windows = chunk_windows[
+                    window_cursor : window_cursor + segment_chunk_count
+                ]
+                window_cursor += segment_chunk_count
+                if not segment_windows:
+                    continue
+                timings.append(
+                    SegmentTiming(
+                        index=len(timings) + 1,
+                        text=segment["display_text"],
+                        start_seconds=segment_windows[0][0],
+                        end_seconds=segment_windows[-1][1],
+                    )
+                )
 
             if paragraph_audio_segments and unit_sample_rate != sample_rate:
                 raise ConfigError("Không thể nối audio vì sample rate các đoạn không khớp.")
@@ -566,7 +811,7 @@ class TtsService:
                     unit_audio_segments,
                     sample_rate,
                     unit_pauses_ms,
-                    self.settings.crossfade_ms,
+                    unit_crossfade_ms,
                 )
             )
             if unit_index < len(units) - 1:
@@ -582,6 +827,25 @@ class TtsService:
             paragraph_pauses_ms,
             0,
         )
+        # Finalise the filename now that the real duration is known, so the
+        # optional "_{voice}_{duration}" suffix can be appended.
+        final_duration = duration_seconds(combined, sample_rate)
+        output_stem = base_stem
+        if request.append_stem_suffix:
+            output_stem = _safe_stem(
+                compose_stem(
+                    base_stem,
+                    voice_label=self._voice_label_for_stem(request),
+                    duration_seconds=final_duration,
+                )
+            )
+        audio_path, srt_path = _available_output_pair(
+            output_dir,
+            output_stem,
+            request.overwrite,
+            request.output_srt,
+            request.output_audio_format,
+        )
         save_audio(audio_path, combined, sample_rate, request.output_audio_format, request.mp3_bitrate_kbps)
         if request.output_srt and srt_path is not None:
             write_srt(srt_path, timings)
@@ -592,8 +856,14 @@ class TtsService:
             srt_path=srt_path,
             job_dir=job_dir,
             segment_count=len(timings),
-            duration_seconds=duration_seconds(combined, sample_rate),
+            duration_seconds=final_duration,
             message="Đã tạo audio và SRT." if request.output_srt else "Đã tạo audio.",
+            pronunciation_report_path=pronunciation_report_path,
+            pronunciation_snapshot_hash=pronunciation_analysis.snapshot_hash,
+            pronunciation_preset_ids=pronunciation_analysis.preset_ids,
+            pronunciation_term_count=pronunciation_analysis.term_count,
+            pronunciation_match_count=pronunciation_analysis.match_count,
+            pronunciation_conflict_count=pronunciation_analysis.conflict_count,
         )
 
     def generate_from_source_file(
@@ -649,16 +919,19 @@ class TtsService:
                 "output_stem": request_template.output_stem or source_path.stem,
             }
         )
+        request = self.freeze_pronunciation(request)
         return self._generate_split_units(request, units, progress_callback, cancel_event)
 
     def _engine_for(
         self,
         spec: ModelSpec,
     ) -> BaseTtsEngine:
-        engine = self._engines.get(spec.model_id)
-        if engine is not None:
-            return engine
         with self._engine_lock:
+            # Keep at most one model resident: free the VRAM held by any other
+            # previously-used model before loading (or reusing) this one. This is
+            # the "unload old model on switch" behaviour, applied at the moment a
+            # generation actually needs the engine.
+            self._release_engines_locked(keep_model_id=spec.model_id)
             engine = self._engines.get(spec.model_id)
             if engine is None:
                 descriptor = provider_descriptor(spec.provider)
@@ -667,6 +940,43 @@ class TtsService:
                 engine = descriptor.engine_factory(spec, self.engine_cache)
                 self._engines[spec.model_id] = engine
         return engine
+
+    def _release_engines_locked(self, keep_model_id: str | None = None) -> list[str]:
+        """Close and drop cached engines. Caller must hold ``_engine_lock``."""
+        released: list[str] = []
+        for model_id in list(self._engines):
+            if keep_model_id is not None and model_id == keep_model_id:
+                continue
+            engine = self._engines.pop(model_id)
+            close = getattr(engine, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+            released.append(model_id)
+        if released:
+            _free_cuda_cache()
+        return released
+
+    def release_engines(self, keep_model_id: str | None = None) -> list[str]:
+        """Free VRAM held by resident models.
+
+        Closes each cached engine (in-process models like OmniVoice and
+        persistent workers like VieNeu v3 turbo release their VRAM here; one-shot
+        subprocess engines are already idle) and drops it from the cache so the
+        next generation reloads on demand. Returns the released model ids.
+
+        Not safe to call while a generation using one of those models is running;
+        callers should gate on their own busy state.
+        """
+        with self._engine_lock:
+            return self._release_engines_locked(keep_model_id=keep_model_id)
+
+    def resident_models(self) -> list[str]:
+        """Model ids whose engines are currently cached (may hold VRAM)."""
+        with self._engine_lock:
+            return list(self._engines)
 
     def _ensure_request_can_generate(self, request: GenerateSpeechRequest, spec: ModelSpec) -> None:
         _validate_request_for_model(request, spec)
@@ -719,6 +1029,25 @@ class TtsService:
         profile = self.voice_profiles.get_profile(profile_id)
         return self.voice_policy.check_compatibility(profile, model_id)
 
+    def _voice_label_for_stem(self, request: GenerateSpeechRequest) -> str:
+        """Readable name of the voice used, for the filename suffix.
+
+        Profile name when cloning, otherwise the fixed voice/Higgs voice id.
+        Returns an empty string when nothing meaningful applies (e.g. a model's
+        single default voice).
+        """
+        if request.voice_profile_id:
+            try:
+                return self.voice_profiles.get_profile(request.voice_profile_id).name
+            except Exception:
+                return ""
+        if request.speaker_id:
+            return str(request.speaker_id)
+        higgs = getattr(request, "higgs", None)
+        if higgs and higgs.voice and higgs.voice != "default":
+            return str(higgs.voice)
+        return ""
+
     def _apply_voice_profile(self, request: GenerateSpeechRequest) -> GenerateSpeechRequest:
         if not request.voice_profile_id:
             return request
@@ -758,6 +1087,12 @@ class TtsService:
         self._ensure_request_can_generate(request, spec)
         job_id, job_dir = self.job_store.create_job_dir()
         output_stem = _resolve_output_stem(request)
+        if request.append_stem_suffix:
+            # Duration is per-file here, so only the voice is baked into the
+            # shared stem now; each file adds its own duration at save time.
+            voice = slug_component(self._voice_label_for_stem(request))
+            if voice:
+                output_stem = _safe_stem(f"{output_stem}_{voice}")
         output_dir = _split_output_dir(
             _resolve_output_dir(request, job_dir),
             output_stem,
@@ -772,17 +1107,26 @@ class TtsService:
                 "units": [{"index": unit.index, "text": unit.text} for unit in units],
             },
         )
+        source_text = "\n\n".join(unit.text for unit in units)
+        pronunciation_report_path, pronunciation_analysis = (
+            self._save_pronunciation_report(job_dir, request, source_text)
+        )
 
         engine = self._engine_for(spec)
         cached_path = self._cached_prompt_path_for(request, spec)
         split_jobs = []
         engine_requests: list[TtsEngineRequest] = []
         for unit in units:
-            chunks = _chunks_for_provider(
+            pronunciation_unit = analyze_pronunciation(
                 unit.text,
+                request.pronunciation_snapshot,
+            )
+            chunks = _chunks_for_provider(
+                pronunciation_unit.speech_text,
                 request.language,
                 request.max_chunk_chars,
                 provider=spec.provider,
+                chunk_join_mode=request.chunk_join_mode,
                 higgs=request.higgs,
             )
             if not chunks:
@@ -798,6 +1142,8 @@ class TtsService:
                         reference_audio_path=_clean_path(request.reference_audio_path),
                         reference_text=request.reference_text,
                         speaker_id=request.speaker_id,
+                        instruct=self._resolve_instruct(request, spec),
+                        num_step=request.omnivoice_num_step if spec.provider == "omnivoice" else None,
                         speed=request.speed,
                         pitch_shift=request.pitch_shift,
                         emotion=request.emotion,
@@ -805,6 +1151,11 @@ class TtsService:
                         codec_repo=_codec_repo_for_request(request, spec),
                         temperature=request.temperature if spec.provider == "vieneu" else None,
                         top_k=request.top_k if spec.provider == "vieneu" else None,
+                        piper_noise_scale=(
+                            request.piper_noise_scale if spec.provider == "piper" else 0.667
+                        ),
+                        piper_noise_w=request.piper_noise_w if spec.provider == "piper" else 0.8,
+                        piper_seed=request.piper_seed if spec.provider == "piper" else None,
                         f5_nfe_step=request.f5_nfe_step if spec.provider == "f5tts" else None,
                         f5_cfg_strength=request.f5_cfg_strength if spec.provider == "f5tts" else None,
                         f5_sway_sampling_coef=request.f5_sway_sampling_coef
@@ -874,6 +1225,7 @@ class TtsService:
                             else None
                         ),
                         higgs=request.higgs if spec.provider == "higgs_remote" else None,
+                        provider_options=dict(request.provider_options),
                     )
                 )
             split_jobs.append(
@@ -1008,7 +1360,10 @@ class TtsService:
         joined_audio_path = None
         joined_duration = None
         if request.join_split_output_audio:
-            joined_audio_path = _audio_output_path(output_dir, output_stem, request.output_audio_format)
+            joined_stem = output_stem
+            if request.append_stem_suffix:
+                joined_stem = f"{output_stem}_{format_duration_stem(total_duration)}"
+            joined_audio_path = _audio_output_path(output_dir, joined_stem, request.output_audio_format)
             joined_duration = self._join_split_jobs_from_results(
                 split_jobs,
                 batch_results,
@@ -1031,6 +1386,12 @@ class TtsService:
             ),
             item_audio_paths=audio_paths,
             item_srt_paths=[],
+            pronunciation_report_path=pronunciation_report_path,
+            pronunciation_snapshot_hash=pronunciation_analysis.snapshot_hash,
+            pronunciation_preset_ids=pronunciation_analysis.preset_ids,
+            pronunciation_term_count=pronunciation_analysis.term_count,
+            pronunciation_match_count=pronunciation_analysis.match_count,
+            pronunciation_conflict_count=pronunciation_analysis.conflict_count,
         )
 
     def _save_split_job_outputs(
@@ -1040,10 +1401,13 @@ class TtsService:
         request: GenerateSpeechRequest,
     ) -> tuple[Path, float, int]:
         combined, sample_rate, segment_count = self._build_split_job_audio(job, job_results, request)
+        audio_duration = duration_seconds(combined, sample_rate)
         audio_path = job["audio_path"]
+        if request.append_stem_suffix:
+            audio_path = _with_duration_suffix(audio_path, audio_duration)
         save_audio(audio_path, combined, sample_rate, request.output_audio_format, request.mp3_bitrate_kbps)
 
-        return audio_path, duration_seconds(combined, sample_rate), segment_count
+        return audio_path, audio_duration, segment_count
 
     def _build_split_job_audio(
         self,
@@ -1064,7 +1428,7 @@ class TtsService:
             audio_segments,
             sample_rate,
             _chunk_pause_values(request, spec, chunks),
-            self.settings.crossfade_ms,
+            _chunk_crossfade_ms(request, spec),
         )
 
         return combined, sample_rate, len(chunks)
@@ -1133,22 +1497,80 @@ def _prepared_text_units(
     max_chunk_chars: int,
     *,
     provider: str = "",
+    chunk_join_mode: str = "auto",
     higgs=None,
+    pronunciation_snapshot: PronunciationSnapshot | None = None,
 ) -> list[dict]:
     prepared_units = []
     for unit in text_units_from_blank_lines(text):
-        chunks = _chunks_for_provider(
-            unit.text,
-            language,
-            max_chunk_chars,
-            provider=provider,
-            higgs=higgs,
+        pronunciation_active = bool(
+            pronunciation_snapshot
+            and pronunciation_snapshot.enabled
+            and pronunciation_snapshot.presets
         )
+        if not pronunciation_active:
+            display_chunks = _chunks_for_provider(
+                unit.text,
+                language,
+                max_chunk_chars,
+                provider=provider,
+                chunk_join_mode=chunk_join_mode,
+                higgs=higgs,
+            )
+            segments = [
+                {"display_text": chunk, "chunks": [chunk]}
+                for chunk in display_chunks
+            ]
+        elif provider == "higgs_remote":
+            analysis = analyze_pronunciation(unit.text, pronunciation_snapshot)
+            speech_chunks = _chunks_for_provider(
+                analysis.speech_text,
+                language,
+                max_chunk_chars,
+                provider=provider,
+                chunk_join_mode=chunk_join_mode,
+                higgs=higgs,
+            )
+            segments = [
+                {"display_text": unit.text, "chunks": speech_chunks}
+            ] if speech_chunks else []
+        else:
+            segments = []
+            display_text = unit.text.strip()
+            descriptor = provider_descriptor(provider)
+            policy = resolve_chunk_join_policy(chunk_join_mode, descriptor)
+            raw_display_chunks = (
+                [display_text]
+                if policy.delegates_text_boundaries
+                else split_text(display_text, max_chunk_chars)
+            )
+            for display_text in raw_display_chunks:
+                analysis = analyze_pronunciation(
+                    display_text,
+                    pronunciation_snapshot,
+                )
+                speech_chunks = _chunks_for_provider(
+                    analysis.speech_text,
+                    language,
+                    max_chunk_chars,
+                    provider=provider,
+                    chunk_join_mode=chunk_join_mode,
+                    higgs=higgs,
+                )
+                if speech_chunks:
+                    segments.append(
+                        {
+                            "display_text": display_text,
+                            "chunks": speech_chunks,
+                        }
+                    )
+        chunks = [chunk for segment in segments for chunk in segment["chunks"]]
         if chunks:
             prepared_units.append(
                 {
                     "unit": unit,
                     "chunks": chunks,
+                    "segments": segments,
                 }
             )
     return prepared_units
@@ -1160,6 +1582,7 @@ def _chunks_for_provider(
     max_chunk_chars: int,
     *,
     provider: str,
+    chunk_join_mode: str = "auto",
     higgs=None,
 ) -> list[str]:
     if provider == "higgs_remote":
@@ -1174,7 +1597,12 @@ def _chunks_for_provider(
                 "Higgs Script không hợp lệ: " + " ".join(errors[:3])
             )
         return compile_higgs_chunks(text, language, max_chunk_chars, higgs)
-    return split_text(_prepare_text(text, language), max_chunk_chars)
+    prepared = _prepare_text(text, language)
+    descriptor = provider_descriptor(provider)
+    policy = resolve_chunk_join_policy(chunk_join_mode, descriptor)
+    if policy.delegates_text_boundaries:
+        return [prepared] if prepared else []
+    return split_text(prepared, max_chunk_chars)
 
 
 def _paragraph_pause_ms(request: GenerateSpeechRequest) -> int:
@@ -1241,7 +1669,13 @@ def _chunk_pause_values(
     """
     if len(chunks) < 2:
         return []
+    descriptor = provider_descriptor(spec.provider)
+    policy = resolve_chunk_join_policy(request.chunk_join_mode, descriptor)
+    if policy.effective in {"native", "crossfade", "direct"}:
+        return [0] * (len(chunks) - 1)
     fallback = max(0, int(request.chunk_pause_ms))
+    if policy.effective == "silence":
+        return [fallback] * (len(chunks) - 1)
     if not request.punctuation_pause_enabled or not _supports_punctuation_pauses(spec):
         return [fallback] * (len(chunks) - 1)
     config = _punctuation_pause_config(request)
@@ -1249,6 +1683,17 @@ def _chunk_pause_values(
         pause if (pause := pause_after_text(chunk, config)) is not None else fallback
         for chunk in chunks[:-1]
     ]
+
+
+def _chunk_crossfade_ms(
+    request: GenerateSpeechRequest,
+    spec: ModelSpec,
+) -> int:
+    descriptor = provider_descriptor(spec.provider)
+    policy = resolve_chunk_join_policy(request.chunk_join_mode, descriptor)
+    if policy.effective != "crossfade":
+        return 0
+    return max(0, int(request.chunk_crossfade_ms))
 
 
 def _read_tts_result(path: Path) -> TtsEngineResult:
@@ -1277,7 +1722,8 @@ def _resolve_output_stem(request: GenerateSpeechRequest) -> str:
         return _safe_stem(request.output_stem)
     if request.source_path:
         return _safe_stem(request.source_path.stem)
-    return "output"
+    derived = default_stem_from_text(request.text)
+    return _safe_stem(derived) if derived else "output"
 
 
 def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec) -> None:
@@ -1304,6 +1750,14 @@ def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec)
         raise ConfigError(f"{spec.display_name} không hỗ trợ Profile giọng.")
     if not caps.supports_speed and abs(request.speed - 1.0) > 0.001:
         raise ConfigError(f"{spec.display_name} chưa hỗ trợ chỉnh Tốc độ đọc.")
+    descriptor = provider_descriptor(spec.provider)
+    if caps.supports_speed and descriptor is not None and not (
+        descriptor.speed_minimum <= request.speed <= descriptor.speed_maximum
+    ):
+        raise ConfigError(
+            f"Tốc độ của {spec.display_name} phải từ "
+            f"{descriptor.speed_minimum:g} đến {descriptor.speed_maximum:g}."
+        )
     if not caps.supports_pitch_shift and abs(request.pitch_shift) > 0.001:
         raise ConfigError(f"{spec.display_name} chưa hỗ trợ Pitch shift.")
     if not caps.supports_emotion and request.emotion not in ("", "natural"):
@@ -1315,6 +1769,13 @@ def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec)
         raise ConfigError(f"{spec.display_name} cần chọn Preset giọng.")
     if request.speaker_id and request.speaker_id not in spec.voice_presets:
         raise ConfigError(f"Preset giọng không hợp lệ cho {spec.display_name}.")
+    if descriptor is not None:
+        try:
+            request.provider_options = normalize_provider_options(
+                descriptor, request.provider_options
+            )
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
     _validate_vieneu_codec(request, spec)
     _validate_f5_request(request, spec)
     _validate_chatterbox_request(request, spec)
@@ -1371,10 +1832,37 @@ def _is_vieneu_standard_gguf(spec: ModelSpec) -> bool:
     )
 
 
+def _free_cuda_cache() -> None:
+    """Best-effort release of freed CUDA allocations in the main process.
+
+    Only matters for in-process engines (e.g. OmniVoice) that load the model
+    into this process; subprocess engines free VRAM when their process exits.
+    Torch may not be importable in a pure-subprocess deployment — that's fine.
+    """
+    try:
+        import gc
+
+        import torch
+    except Exception:
+        return
+    try:
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        pass
+
+
 def _clear_engine_cache_assets(asset_dir: Path) -> None:
     if asset_dir == Path() or not asset_dir.exists():
         return
-    for name in ("ref_codes.npy", "ref_codes.pkl", "voice_clone_prompt.pkl"):
+    for name in (
+        "ref_codes.npy",
+        "ref_codes.pkl",
+        "voice_clone_prompt.pkl",
+        "voice_clone_prompt.pt",
+    ):
         path = asset_dir / name
         if path.exists():
             try:
@@ -1414,6 +1902,11 @@ def _split_output_dir(base_dir: Path, stem: str, overwrite: bool) -> Path:
 
 def _audio_output_path(output_dir: Path, stem: str, output_audio_format: str) -> Path:
     return output_dir / f"{stem}{_audio_extension(output_audio_format)}"
+
+
+def _with_duration_suffix(path: Path, seconds: float) -> Path:
+    """Insert a ``_{duration}`` token before the file extension."""
+    return path.with_name(f"{path.stem}_{format_duration_stem(seconds)}{path.suffix}")
 
 
 def _audio_extension(output_audio_format: str) -> str:

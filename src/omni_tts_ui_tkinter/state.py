@@ -22,6 +22,9 @@ class UiSettings:
     codec_repo: str | None = None
     temperature: float | None = None
     top_k: int | None = None
+    piper_noise_scale: float = 0.667
+    piper_noise_w: float = 0.8
+    piper_seed: int | None = None
     f5_nfe_step: int | None = None
     f5_cfg_strength: float | None = None
     f5_sway_sampling_coef: float | None = None
@@ -64,6 +67,7 @@ class UiSettings:
     mp3_bitrate_kbps: int = 192
     output_srt: bool = False
     join_split_output_audio: bool = False
+    provider_options: dict | None = None
 
     def to_request(self, text: str) -> GenerateSpeechRequest:
         return GenerateSpeechRequest(
@@ -82,6 +86,9 @@ class UiSettings:
             codec_repo=self.codec_repo,
             temperature=self.temperature,
             top_k=self.top_k,
+            piper_noise_scale=self.piper_noise_scale,
+            piper_noise_w=self.piper_noise_w,
+            piper_seed=self.piper_seed,
             f5_nfe_step=self.f5_nfe_step,
             f5_cfg_strength=self.f5_cfg_strength,
             f5_sway_sampling_coef=self.f5_sway_sampling_coef,
@@ -124,4 +131,5 @@ class UiSettings:
             mp3_bitrate_kbps=self.mp3_bitrate_kbps,
             output_srt=self.output_srt,
             join_split_output_audio=self.join_split_output_audio,
+            provider_options=dict(self.provider_options or {}),
         )

@@ -15,7 +15,8 @@ class EngineProfileCache:
 
     Structure:
         voices/cache/{profile_id}/{sample_id}/{provider}/{model_id}/
-            voice_clone_prompt.pkl   (omnivoice, qwen)
+            voice_clone_prompt.pt    (omnivoice >= 0.2.1, via VoiceClonePrompt.save)
+            voice_clone_prompt.pkl   (qwen, and legacy omnivoice caches)
             ref_codes.npy            (vieneu turbo, standard/gguf)
             meta.json                {"audio_hash", "transcript_hash", "created_at"}
 

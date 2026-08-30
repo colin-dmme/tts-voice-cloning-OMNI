@@ -23,6 +23,11 @@ TOOLTIPS: dict[str, str] = {
         "có clone giọng hay không và có những tham số tinh chỉnh nào.\n"
         "Thiết lập nào model không hỗ trợ sẽ bị ẩn hoặc khoá, không gửi giá trị rác."
     ),
+    "model_search": (
+        "Tìm model trong nhà cung cấp đang chọn theo tên hoặc mã model. "
+        "Có thể gõ không dấu, ví dụ 'ngoc' vẫn tìm thấy 'Ngọc'.\n"
+        "Chọn một gợi ý hoặc nhấn Enter để đổi model; việc gõ tìm kiếm không tự đổi model."
+    ),
     "language": (
         "Chỉ liệt kê ngôn ngữ model này được huấn luyện. Chọn sai ngôn ngữ làm phát âm "
         "sai hoặc đọc lơ lớ, kể cả khi model vẫn chạy."
@@ -66,13 +71,31 @@ TOOLTIPS: dict[str, str] = {
     "punctuation_reset": (
         "Đặt lại toàn bộ khoảng nghỉ tiêu chuẩn: cuối câu 0.32 giây, dấu phẩy "
         "0.09 giây, chấm phẩy/hai chấm 0.18 giây, dấu ba chấm 0.45 giây, "
-        "chunk kỹ thuật 0.12 giây, đoạn gốc 0.60 giây, tắt các khoảng ngẫu nhiên "
-        "và bật ACTIVE."
+        "điểm nối chunk về AUTO (giữ sẵn khoảng lặng 0.12 giây và crossfade "
+        "0.08 giây cho lúc tùy chỉnh), đoạn gốc 0.60 giây, tắt các khoảng "
+        "ngẫu nhiên và bật ACTIVE."
+    ),
+    "chunk_join_custom": (
+        "Tắt tùy chỉnh: dùng AUTO theo metadata của provider; app không ép cùng một "
+        "kiểu nối cho mọi model. Với VieNeu, SDK nhận nguyên đoạn gốc để tự chia và "
+        "tạo nhịp nối.\n"
+        "Bật tùy chỉnh: bạn chủ động chọn Chèn khoảng lặng, Crossfade hoặc Nối thẳng."
+    ),
+    "chunk_join_mode": (
+        "Chèn khoảng lặng: thêm im lặng cố định giữa hai chunk.\n"
+        "Crossfade: không thêm im lặng; chồng nhẹ cuối chunk trước với đầu chunk sau.\n"
+        "Nối thẳng: không thêm im lặng, không chồng audio; có thể gây dính chữ hoặc click.\n"
+        "Các lựa chọn CUSTOM áp dụng tại điểm nối do Core tạo. Nếu provider tự chia "
+        "nhỏ thêm bên trong một request, nhịp nối nội bộ đó vẫn do provider xử lý."
     ),
     "chunk_pause": (
-        "Khoảng lặng kỹ thuật khi app buộc phải chia một câu quá dài thành nhiều chunk.\n"
-        "Đây không phải nghỉ theo dấu câu. Với Piper, nếu chunk kết thúc bằng dấu câu "
-        "thì app dùng mức của dấu đó thay cho mức chunk; hai mức không cộng dồn."
+        "Chỉ dùng khi bật Tùy chỉnh và chọn Chèn khoảng lặng. App thêm đúng khoảng "
+        "im lặng này giữa hai audio chunk; đây không phải nghỉ giữa đoạn gốc."
+    ),
+    "chunk_crossfade": (
+        "Chỉ dùng khi bật Tùy chỉnh và chọn Crossfade. 0.08 giây = 80 ms. "
+        "App chồng hai đầu audio trong thời gian này, không chèn im lặng; đặt quá "
+        "lớn có thể làm chồng hoặc mờ phụ âm."
     ),
     "paragraph_pause": (
         "Khoảng lặng giữa các đoạn gốc (cách nhau bằng dòng trống) khi ghép file tổng "
@@ -80,7 +103,8 @@ TOOLTIPS: dict[str, str] = {
         "nghỉ đoạn gốc tại ranh giới này; không cộng thêm nghỉ cuối câu."
     ),
     "max_chunk": (
-        "App tự chia văn bản trước khi đưa vào model — đây KHÔNG phải model tự cắt.\n"
+        "Giới hạn dùng khi Core cần tự chia văn bản trước khi đưa vào model. Ở chế độ "
+        "AUTO, provider có bộ chia native như VieNeu có thể tự quản lý bên trong SDK.\n"
         "Thứ tự cắt: ưu tiên hết câu (. ! ?); câu nào dài hơn giới hạn mới cắt tiếp ở "
         "dấu phẩy/chấm phẩy; cuối cùng mới cắt theo từ — không bao giờ cắt giữa từ.\n"
         "Đặt quá nhỏ: câu dài bị chia vụn, dễ sai ngữ điệu. Đặt lớn: mỗi lượt model "
@@ -103,6 +127,26 @@ TOOLTIPS: dict[str, str] = {
     "tuning_activation": (
         "Bật: dùng các giá trị bên dưới khi chạy.\n"
         "Tắt: giữ nguyên giá trị đang nhập nhưng gửi mặc định của model."
+    ),
+    "piper_preset": (
+        "Preset chỉ điền Noise Scale và Noise W. Piper chuẩn giữ đúng mặc định của "
+        "worker hiện tại; Vbee tham chiếu dùng bộ số đã đối chiếu từ ứng dụng nguồn."
+    ),
+    "piper_noise_scale": (
+        "Độ biến thiên âm thanh của Piper. Thấp hơn thường ổn định hơn; cao hơn có thể "
+        "tự nhiên hơn nhưng cũng dễ làm lộ rung/rè của chính model. Áp dụng thật khi sinh ONNX."
+    ),
+    "piper_noise_w": (
+        "Độ biến thiên trường độ/nhịp phoneme của Piper (noise_w_scale). Giá trị này được "
+        "truyền trực tiếp vào worker cho mọi model Piper ONNX."
+    ),
+    "piper_seed": (
+        "Seed cố định giúp lặp lại phép A/B trên cùng văn bản và thông số. -1 là ngẫu nhiên "
+        "như hành vi Piper trước đây."
+    ),
+    "piper_recommendation": (
+        "Khuyến nghị lấy từ metadata package, không tự thay đổi thông số và không tạo hành vi "
+        "riêng cho từng model."
     ),
     # --- VieNeu ---------------------------------------------------------------
     "vieneu_codec": (

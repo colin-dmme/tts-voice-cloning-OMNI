@@ -1,11 +1,12 @@
 [project]
 name = "omni-tts-local"
-version = "0.3.1"
+version = "0.5.0"
 description = "Local Vietnamese-first TTS and voice cloning app with swappable UI layers."
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "cryptography>=42.0.0",
+    "filelock>=3.15.0",
     "gradio>=4.44.0",
     "huggingface-hub>=0.24.0",
     "numpy>=1.26.0",
@@ -18,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tts = [
-    "omnivoice>=0.1.5",
+    "omnivoice>=0.2.1",
     "torch",
     "torchaudio",
 ]
@@ -26,11 +27,15 @@ qt = [
     "PySide6>=6.6",
     "openai>=1.30.0",
 ]
+mcp = [
+    "mcp>=2,<3",
+]
 
 [project.scripts]
 omni-tts-gradio = "omni_tts_ui_gradio.main:main"
 omni-tts-tkinter = "omni_tts_ui_tkinter.main:main"
 omni-tts-qt = "omni_tts_ui_qt.main:main"
+colin-studio-tts-mcp = "colin_studio_tts_mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -44,4 +49,9 @@ packages = [
     "src/omni_tts_ui_gradio",
     "src/omni_tts_ui_tkinter",
     "src/omni_tts_ui_qt",
+    "src/colin_studio_tts_mcp",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

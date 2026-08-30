@@ -1,8 +1,11 @@
-# Colin TTS Local v0.3.1
+# Colin TTS Local v0.5.0
 
 App TTS local ưu tiên tiếng Việt, có lõi tách khỏi giao diện để sau này đổi Gradio sang CustomTkinter, PyQt6 hoặc giao diện khác mà không phải viết lại logic model.
 
-Phiên bản `0.3.1` bổ sung rào chắn chi tiết cho AI Performance Director:
+Phiên bản `0.5.0` bổ sung MCP server cục bộ để agent điều khiển cùng TTS core
+mà desktop app đang dùng. Bản này cũng kế thừa package Piper local có kiểm chứng,
+bộ tinh chỉnh Piper ONNX dùng thống nhất cho toàn provider và các rào chắn chi tiết
+của AI Performance Director:
 người dùng có thể bật/tắt từng nhóm điều khiển, cấm riêng từng cảm xúc,
 phong cách, prosody hoặc SFX. Prompt và bộ lọc core cùng cưỡng chế phạm vi đó.
 Ứng dụng cũng nhận diện kết quả đã áp dụng để tự dùng lại văn bản gốc và đúng
@@ -10,9 +13,10 @@ lịch sử thay vì phân tích chồng lên Higgs tags. Gemini/API key vẫn �
 trị riêng trong trang **AI / API**, không trộn với provider TTS.
 
 Tkinter và PySide6 phân biệt rõ **Giọng cố định** và **Clone từ Profile** theo
-contract của từng model. Catalog hiện có 33 model Piper tiếng Việt, tải/gỡ từng
-package; VIVOS x-low còn cho chọn đủ 65 speaker. VieNeu v3 Turbo cung cấp preset
-48 kHz và clone Profile trong hai chế độ tách biệt. Xem
+contract của từng model. Catalog hiện có 46 model Piper tiếng Việt; 13 mục
+`— Vbee Export` dùng luồng nhập package local riêng, các mục online vẫn tải/gỡ
+như cũ. VIVOS x-low còn cho chọn đủ 65 speaker. VieNeu v3 Turbo cung cấp preset
+ 3.3 có đủ 20 giọng 48 kHz và clone Profile trong hai chế độ tách biệt. Xem
 [quản lý giọng cố định](docs/fixed-voice-packages.md).
 
 ## Mục tiêu thiết kế
@@ -22,6 +26,20 @@ package; VIVOS x-low còn cho chọn đủ 65 speaker. VieNeu v3 Turbo cung cấ
 - UI không gọi trực tiếp OmniVoice.
 - Core xử lý model, chia câu, chuẩn hóa text, sinh audio và tạo SRT.
 - Mỗi file source nên nhỏ, giới hạn kiểm tra là 700 dòng.
+
+## MCP server
+
+MCP server nằm tại `src/colin_studio_tts_mcp/` và chỉ là lớp adapter:
+model contract, voice library, license, GPU safety, sinh audio và SRT vẫn do
+`omni_tts_core` xử lý. Chạy thủ công bằng:
+
+```powershell
+uv run --extra mcp colin-studio-tts-mcp
+```
+
+Server dùng stdio nên không được ghi log thường ra stdout. Xem hợp đồng tool,
+cấu hình Desktop Coworker, job nền, hủy/thử lại và chính sách đường dẫn tại
+[docs/mcp-server.md](docs/mcp-server.md).
 
 ## Chạy app
 
@@ -87,7 +105,25 @@ Bản UI và quản lý model chạy với nhóm thư viện nhẹ. Khi muốn d
 - `Cài worker/môi trường`: cài worker riêng hoặc thư viện TTS chính.
 - `Cài GPU/CUDA`: cài bộ tăng tốc CUDA phù hợp với provider/model.
 
-Các file `install_*.bat` vẫn tồn tại để core chạy đúng tác vụ trên Windows, nhưng không cần bấm trực tiếp khi dùng app. VieNeu, Qwen, Valtec, F5-TTS và Chatterbox chạy trong worker riêng dưới `engines/`, tách khỏi môi trường chính để tránh xung đột dependency với OmniVoice.
+Các file `install_*.bat` vẫn tồn tại để core chạy đúng tác vụ trên Windows, nhưng không cần bấm trực tiếp khi dùng app. VieNeu, Qwen, Valtec, F5-TTS, Chatterbox, Kokoro ONNX và Supertonic 3 chạy trong worker riêng dưới `engines/`, tách khỏi môi trường chính để tránh xung đột dependency với OmniVoice. Riêng VieNeu được tách rõ: `vieneu_v3_worker` cho v3.3 và `vieneu_worker` cho VieNeu v2/GGUF cũ; hai môi trường không dùng chung package.
+
+Hai provider ONNX đa ngôn ngữ mới được ghi rõ xuất xứ trong tên catalog:
+
+- `Kokoro 82M v1.0 Timestamped · ONNX Community · 54 giọng`: bản chuyển đổi
+  của `onnx-community`, hỗ trợ 8 ngôn ngữ nhưng **không có tiếng Việt**.
+- `Supertonic 3 · ONNX Official · 31 ngôn ngữ`: model chính thức của Supertone,
+  có tiếng Việt, 10 voice style `F1–F5/M1–M5`, chạy CPU 44,1 kHz.
+
+Thông số riêng của hai provider được khai báo trong Core và giao diện tự dựng:
+Kokoro có cắt im lặng/ngữ điệu liên tục; Supertonic có mức chất lượng 5–12.
+Tốc độ, chia chunk, nghỉ dấu câu, nghỉ đoạn gốc, đầu ra WAV/MP3, hàng đợi và SRT
+vẫn dùng cùng hành vi chung của ứng dụng.
+
+VieNeu v3.3 mặc định chạy **CPU ONNX INT8** bằng
+`install_vieneu_v3_worker.bat`, không cài PyTorch. Chỉ dùng
+`install_vieneu_v3_worker_cuda.bat` khi cần **GPU PyTorch** cho văn bản dài hoặc
+batch lớn. Màn hình sẽ ghi rõ `VieNeu v3`/`VieNeu v2` và backend thực tế để tránh
+chọn nhầm runtime.
 
 ### Higgs TTS 3 trên GPU từ xa
 
@@ -120,13 +156,13 @@ File này tự `uv sync --inexact --extra qt` (cài PySide6) rồi mở `omni-tt
 
 Điểm khác so với Tkinter:
 
-- Một cửa sổ studio: rail trái chuyển trang **Studio / Model / Giọng / Bản quyền /
-  Liên hệ**; giữa là danh sách giọng + bảng hàng đợi + tab văn bản; phải là panel
+- Một cửa sổ studio: rail trái chuyển trang **Studio / Model / Cách đọc / Giọng /
+  Bản quyền / Liên hệ**; giữa là danh sách giọng + bảng hàng đợi + tab văn bản; phải là panel
   thiết lập gập/mở theo từng model (dựa trên `generation_form_descriptor` và
   `provider_registry`, không hardcode logic vào GUI).
 - **Chọn model theo nhà cung cấp**: catalog có hơn 40 model nên cả hai giao diện
   (Qt và Tkinter) đều có combobox `Nhà cung cấp` kèm số lượng
-  (`VieNeu (19)`, `Piper ONNX (33)`…) đứng trước combobox `Model TTS`; chọn nhà cung
+  (`VieNeu (19)`, `Piper ONNX (46)`…) đứng trước combobox `Model TTS`; chọn nhà cung
   cấp trước rồi mới chọn model. Danh sách mở sẵn ở nhà cung cấp của model đang lưu.
   Tab **Quản lý model** dùng đúng cơ chế đó: có bộ lọc `Nhà cung cấp` + ô tìm kiếm,
   bảng luôn **nhóm theo nhà cung cấp** (thứ tự khai báo trong provider registry) rồi
@@ -136,6 +172,15 @@ File này tự `uv sync --inexact --extra qt` (cài PySide6) rồi mở `omni-tt
 - **Tìm kiếm không dấu**: mọi ô tìm kiếm (model, hàng đợi file, danh sách giọng) đi
   qua `omni_tts_core/ui_presenters/search.py`, nên gõ `ngoc` vẫn ra `Piper Ngọc
   Huyền` và `dat` vẫn ra `Đạt Phi`.
+- **Cách đọc / Từ điển phát âm theo preset**: trang quản lý tập trung cho phép lưu,
+  tìm kiếm, nhân bản, nhập/xuất JSON và gắn tag/dự án cho nhiều bộ quy tắc. Ví dụ
+  `IIKO → Y Cô` chỉ thay văn bản gửi tới engine; ô Văn bản, nội dung lịch sử và SRT
+  vẫn giữ `IIKO`. Tab Văn bản tô màu từng chỗ đang khớp và hiện số từ/số lần/xung
+  đột. Hàng đợi có thể theo preset Studio, tắt riêng, hoặc ghim một preset cho từng
+  nhóm file; đổi binding sẽ đánh dấu kết quả cũ là cần chạy lại. Mỗi job lưu snapshot
+  bất biến cùng `pronunciation_report.json`, nên sửa preset giữa lúc chạy không làm
+  các file sau đổi cách đọc. Matching, ưu tiên, thống kê và persistence đều nằm trong
+  `omni_tts_core/pronunciation/`; Qt chỉ hiển thị và chuyển thao tác vào Core.
 - **Chọn nhiều model + nút tự khoá đúng ngữ cảnh**: bảng model cho chọn nhiều dòng
   (Ctrl/Shift click) ở cả hai giao diện. `omni_tts_core/ui_presenters/model_actions.py`
   quyết định nút nào bật/tắt và **chạy trên đúng những model nào**:
@@ -144,7 +189,7 @@ File này tự `uv sync --inexact --extra qt` (cài PySide6) rồi mở `omni-tt
   - `Gỡ model` bỏ qua model bắt buộc và model chưa tải.
   - `Tải model` chỉ chạy cho các model còn thiếu trong nhóm đang chọn.
   - Tác vụ cấp provider (`Cài worker`, `Cài GPU/CUDA`) chỉ chạy **một lần cho mỗi
-    nhà cung cấp** — chọn 33 giọng Piper vẫn chỉ cài worker Piper một lần.
+    nhà cung cấp** — chọn 46 giọng Piper vẫn chỉ cài worker Piper một lần.
   - `Mở nơi lưu` chỉ bật khi chọn đúng một model.
   Nút bị tắt luôn kèm tooltip nói rõ lý do.
 - Thanh phần cứng trên cùng (GPU/VRAM/CPU/RAM) + biểu đồ nhiệt độ có đường cảnh báo
@@ -163,7 +208,7 @@ File này tự `uv sync --inexact --extra qt` (cài PySide6) rồi mở `omni-tt
     `Tinh chỉnh riêng · <Provider>`, chỉ hiện đúng những dòng model hỗ trợ (ví dụ
     VieNeu v3 Turbo có temperature/top-k nhưng không có codec và cảm xúc). Tắt
     `ACTIVE` ở section này sẽ gửi mặc định của model thay vì giá trị đang nhập.
-    Provider không có thông số riêng (OmniVoice, Piper, Qwen, Valtec) thì section
+    Provider không có thông số riêng (OmniVoice, Qwen, Valtec) thì section
     biến mất và app nói rõ lý do thay vì để trống.
   - Giá trị đang tinh chỉnh **chỉ bị nạp lại mặc định khi đổi model**; đổi
     `Giọng cố định ↔ Clone từ Profile` không còn xóa seed/temperature đang nhập,
@@ -211,7 +256,8 @@ models/
 ```
 
 App sẽ ưu tiên load model từ đường dẫn local trong dự án.
-VieNeu dùng worker riêng và cache Hugging Face chung trong `.hf_cache/`.
+VieNeu v3 và VieNeu v2 dùng hai worker độc lập, nhưng cùng tái sử dụng Hugging
+Face cache nằm trong `.hf_cache/`; không phụ thuộc Python hoặc project bên ngoài.
 
 ## Giao diện Tkinter
 

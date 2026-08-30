@@ -6,6 +6,7 @@ from pathlib import Path
 
 from omni_tts_core.file_queue import (
     FileQueueOutputManifest,
+    FileQueuePronunciationMode,
     FileQueueStatus,
     FileQueueStore,
     settings_fingerprint,
@@ -84,7 +85,7 @@ class TestFileQueueStore(unittest.TestCase):
             source.write_text("hello", encoding="utf-8")
             store = FileQueueStore(root / "queue.sqlite3")
 
-            item, added = store.add(source, 5)
+            item, added = store.add(source, 5, 3)
             duplicate, duplicate_added = store.add(source, 5)
             store.mark_running(item.item_id)
             store.mark_done(
@@ -101,6 +102,7 @@ class TestFileQueueStore(unittest.TestCase):
             self.assertEqual(restored.status, FileQueueStatus.DONE)
             self.assertEqual(restored.attempt_count, 1)
             self.assertEqual(restored.job_id, "job-1")
+            self.assertEqual(restored.unit_count, 3)
 
     def test_add_many_adds_batch_and_counts_duplicates(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -116,7 +118,7 @@ class TestFileQueueStore(unittest.TestCase):
             added, duplicates = store.add_many(
                 [
                     (existing, 8),
-                    (second, 6),
+                    (second, 6, 2),
                     (second, 6),
                     (third, 5),
                 ]
@@ -128,6 +130,7 @@ class TestFileQueueStore(unittest.TestCase):
                 [item.source_path.name for item in store.list_items()],
                 ["existing.txt", "second.txt", "third.txt"],
             )
+            self.assertEqual(store.get(added[0].item_id).unit_count, 2)
 
     def test_persists_output_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -253,6 +256,83 @@ class TestFileQueueStore(unittest.TestCase):
 
             self.assertEqual(changed, 1)
             self.assertEqual(store.get(item.item_id).status, FileQueueStatus.OUTDATED)
+
+    def test_pronunciation_binding_persists_stats_and_invalidates_completed_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.txt"
+            output = root / "source.wav"
+            source.write_text("IIKO và IIKO", encoding="utf-8")
+            output.write_bytes(b"wav")
+            store = FileQueueStore(root / "queue.sqlite3")
+            item, _ = store.add(source, len("IIKO và IIKO"))
+            store.mark_running(item.item_id)
+            store.mark_done(
+                item.item_id,
+                job_id="job-pronunciation",
+                output_paths=[output],
+                fingerprint="settings-1",
+            )
+
+            changed = store.set_pronunciation_binding(
+                [item.item_id],
+                mode=FileQueuePronunciationMode.PRESET,
+                preset_ids=["project-a"],
+            )
+            store.update_pronunciation_stats(
+                item.item_id,
+                term_count=1,
+                match_count=2,
+                conflict_count=0,
+                details="IIKO → Y Cô ×2",
+                snapshot_hash="revision-1",
+            )
+
+            restored = FileQueueStore(root / "queue.sqlite3").get(item.item_id)
+            self.assertEqual(changed, 1)
+            self.assertEqual(restored.status, FileQueueStatus.OUTDATED)
+            self.assertEqual(restored.pronunciation_mode, FileQueuePronunciationMode.PRESET)
+            self.assertEqual(restored.pronunciation_preset_ids, ("project-a",))
+            self.assertEqual(restored.pronunciation_term_count, 1)
+            self.assertEqual(restored.pronunciation_match_count, 2)
+            self.assertEqual(restored.pronunciation_details, "IIKO → Y Cô ×2")
+
+            store.mark_running(item.item_id)
+            store.mark_done(
+                item.item_id,
+                job_id="job-pronunciation-2",
+                output_paths=[output],
+                fingerprint="settings-1",
+            )
+            unchanged = store.set_pronunciation_binding(
+                [item.item_id],
+                mode=FileQueuePronunciationMode.PRESET,
+                preset_ids=["project-a"],
+            )
+            self.assertEqual(unchanged, 0)
+            self.assertEqual(store.get(item.item_id).status, FileQueueStatus.DONE)
+            store.update_pronunciation_stats(
+                item.item_id,
+                term_count=1,
+                match_count=2,
+                conflict_count=0,
+                snapshot_hash="revision-2",
+                invalidate_completed=False,
+            )
+            completed = store.get(item.item_id)
+            self.assertEqual(completed.status, FileQueueStatus.DONE)
+            self.assertEqual(completed.pronunciation_snapshot_hash, "revision-2")
+
+            store.update_pronunciation_stats(
+                item.item_id,
+                term_count=1,
+                match_count=2,
+                conflict_count=0,
+                snapshot_hash="revision-3",
+            )
+            revised = store.get(item.item_id)
+            self.assertEqual(revised.status, FileQueueStatus.OUTDATED)
+            self.assertEqual(revised.status_detail, "Preset cách đọc đã thay đổi")
 
 
 class TestFileBatchController(unittest.TestCase):

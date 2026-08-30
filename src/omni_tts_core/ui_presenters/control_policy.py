@@ -15,8 +15,10 @@ from dataclasses import dataclass
 
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.provider_registry import provider_descriptor
+from omni_tts_core.provider_options import ProviderSettingSpec
 from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES
 from omni_tts_core.ui_presenters.tooltips import tooltip
+from omni_tts_core.worker_installation import worker_label_for_spec
 from omni_tts_shared.languages import language_label
 from omni_tts_shared.schemas import ModelCapabilities, RuntimeStatus
 
@@ -35,9 +37,11 @@ PARAGRAPH_PAUSE_TOOLTIP = tooltip("paragraph_pause")
 # in ``policy.tuning_groups`` — that is what keeps the Chatterbox knobs off a
 # Piper model instead of merely greying them out.
 TUNING_VIENEU = "vieneu"
+TUNING_PIPER = "piper"
 TUNING_F5 = "f5"
 TUNING_CHATTERBOX = "chatterbox"
 TUNING_HIGGS_REMOTE = "higgs_remote"
+TUNING_PROVIDER_OPTIONS = "provider_options"
 
 _CUDA_TARGETS = {"cuda"}
 
@@ -73,13 +77,19 @@ class GenerationControlPolicy:
     emotions: tuple[str, ...]
     codec: ControlState
     sampling: ControlState
+    piper: ControlState
     f5: ControlState
     chatterbox: ControlState
     higgs_remote: ControlState
     higgs_script: ControlState
     punctuation_pauses: ControlState
     gpu_safety: ControlState
+    omnivoice: ControlState = ControlState(False)
     gpu_scope_note: str = ""
+    piper_recommendation: str = ""
+    provider_settings: tuple[ProviderSettingSpec, ...] = ()
+    speed_minimum: float = 0.5
+    speed_maximum: float = 1.8
 
     @property
     def tuning_groups(self) -> tuple[str, ...]:
@@ -87,12 +97,18 @@ class GenerationControlPolicy:
         groups: list[str] = []
         if any((self.codec, self.sampling, self.emotion)):
             groups.append(TUNING_VIENEU)
+        if self.piper:
+            groups.append(TUNING_PIPER)
         if self.f5:
             groups.append(TUNING_F5)
         if self.chatterbox:
             groups.append(TUNING_CHATTERBOX)
         if self.higgs_remote:
             groups.append(TUNING_HIGGS_REMOTE)
+        if self.provider_settings:
+            groups.append(TUNING_PROVIDER_OPTIONS)
+        # OmniVoice's one knob (num_step) lives inline in the basic form, not in
+        # a provider tuning box, so it is intentionally not a tuning group here.
         return tuple(groups)
 
     @property
@@ -134,7 +150,11 @@ def build_policy(
     supports_chatterbox: bool,
 ) -> GenerationControlPolicy:
     descriptor = provider_descriptor(spec.provider)
-    provider_label = descriptor.label if descriptor else (spec.provider or "Khác")
+    provider_label = (
+        worker_label_for_spec(spec)
+        if spec.provider == "vieneu"
+        else (descriptor.label if descriptor else (spec.provider or "Khác"))
+    )
     is_remote = bool(descriptor and descriptor.storage_mode == "remote")
     gpu_available = bool(runtime_status.gpu_available)
 
@@ -145,6 +165,24 @@ def build_policy(
     if is_remote:
         device_targets = (("GPU từ xa (server quyết định)", "auto"),)
         device_note = "Máy hiện tại chỉ gửi request; GPU và runtime nằm ở endpoint."
+    elif bool((getattr(spec, "runtime", {}) or {}).get("cpu_only")):
+        device_targets = (
+            ("Tự động · CPU ONNX (khuyến nghị)", "auto"),
+            ("CPU ONNX", "cpu"),
+        )
+        device_note = f"{provider_label} chạy ONNX trên CPU; không dùng GPU CUDA."
+    elif spec.provider == "vieneu" and str((getattr(spec, "runtime", {}) or {}).get("vieneu_mode") or "").lower() == "v3turbo":
+        device_targets = (
+            ("Tự động · CPU ONNX INT8 (khuyến nghị)", "auto"),
+            ("CPU ONNX · nhẹ, phù hợp câu ngắn", "cpu"),
+            *((("GPU CUDA · PyTorch, tối ưu batch dài", "cuda"),) if gpu_available else ()),
+        )
+        device_note = (
+            "VieNeu v3 chạy CPU ONNX khi chọn Tự động. GPU PyTorch chỉ có lợi rõ với "
+            "văn bản dài hoặc nhiều câu chạy batch."
+            if gpu_available
+            else "VieNeu v3 đang dùng CPU ONNX; muốn chạy batch GPU hãy cài CUDA cho worker VieNeu v3."
+        )
     else:
         device_targets = tuple(
             (label, value)
@@ -185,6 +223,11 @@ def build_policy(
             supports_sampling,
             "Model này không chỉnh được temperature/top-k.",
         ),
+        piper=_state(
+            bool(descriptor and "piper" in descriptor.controls),
+            "Chỉ áp dụng cho model Piper ONNX.",
+            tooltip("piper_noise_scale"),
+        ),
         f5=_state(supports_f5, "Chỉ áp dụng cho model F5-TTS."),
         chatterbox=_state(supports_chatterbox, "Chỉ áp dụng cho model Chatterbox."),
         higgs_remote=_state(
@@ -201,6 +244,11 @@ def build_policy(
             f"{provider_label} chưa có cơ chế ngắt nghỉ theo từng loại dấu câu.",
             tooltip("punctuation_section"),
         ),
+        omnivoice=_state(
+            spec.provider == "omnivoice",
+            "Chỉ áp dụng cho model OmniVoice.",
+            "Số bước diffusion: cao = chất lượng tốt hơn/chậm hơn, thấp = nhanh hơn.",
+        ),
         gpu_safety=_state(
             gpu_available and not is_remote,
             "Model đang chạy CPU nên bảo vệ GPU không can thiệp vào lần chạy này.",
@@ -211,11 +259,32 @@ def build_policy(
             if is_remote
             else _gpu_scope_note(spec.provider, gpu_available)
         ),
+        piper_recommendation=_piper_recommendation(spec),
+        provider_settings=descriptor.settings if descriptor else (),
+        speed_minimum=descriptor.speed_minimum if descriptor else 0.5,
+        speed_maximum=descriptor.speed_maximum if descriptor else 1.8,
     )
 
 
 def _state(supported: bool, reason: str, hint: str = "") -> ControlState:
     return ControlState(bool(supported), "" if supported else reason, hint)
+
+
+def _piper_recommendation(spec: ModelSpec) -> str:
+    if spec.provider != "piper":
+        return ""
+    profile = str(
+        (getattr(spec, "runtime", {}) or {}).get("piper_recommended_profile") or ""
+    ).lower()
+    if profile == "vbee":
+        return (
+            "Package Vbee Export: có thể thử preset Vbee tham chiếu (Noise 0.900, "
+            "Noise W 0.650). Đây chỉ là khuyến nghị; phần mềm không tự đổi thông số."
+        )
+    return (
+        "Khuyến nghị bắt đầu với preset Piper chuẩn (Noise 0.667, Noise W 0.800), "
+        "sau đó A/B trên cùng văn bản nếu cần."
+    )
 
 
 def _gpu_scope_note(provider_id: str, gpu_available: bool) -> str:

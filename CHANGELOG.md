@@ -3,6 +3,99 @@
 Tất cả thay đổi đáng chú ý của Colin TTS Studio được ghi theo từng phiên bản
 trong file này. Dự án sử dụng phiên bản theo Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- Thêm hệ thống Cách đọc/Từ điển phát âm theo nhiều preset: thay chữ ở đầu vào
+  engine nhưng giữ nguyên văn bản và SRT, tô màu chỗ khớp trong Studio, thống kê
+  từ/lần/xung đột, ghim preset theo mục hàng đợi và lưu báo cáo bất biến mỗi job.
+  Toàn bộ matching, snapshot, lưu preset và báo cáo nằm ở Core, không hardcode
+  business logic vào GUI.
+- Thêm MCP server cục bộ `colin_studio_tts_mcp` qua stdio với 10 tool:
+  khám phá model/form/voice, tạo giọng từ text hoặc TXT/MD/SRT theo job nền,
+  theo dõi tiến độ, hủy và thử lại; job metadata bền vững trong SQLite.
+- MCP dùng trực tiếp `AppController`, `TtsService`, capability/form descriptor
+  và voice library của Core. Không chép provider logic vào adapter hoặc GUI.
+- Thêm khóa sinh giọng liên tiến trình tại Core để Qt, Tkinter và MCP không
+  tranh model/GPU khi chạy đồng thời; mọi entry point cùng giữ GPU safety.
+- Thêm ô tìm Model TTS theo tên hoặc mã, hỗ trợ gõ tiếng Việt không dấu và
+  chỉ đổi model khi người dùng chọn gợi ý hoặc nhấn Enter.
+- Thêm bộ chặn con lăn cấp ứng dụng cho toàn bộ SpinBox, Slider và ComboBox
+  trong giao diện Qt; cuộn trên control sẽ cuộn trang gần nhất thay vì âm thầm
+  thay đổi tham số. Control tạo động từ metadata và các dialog cũng tự áp dụng.
+- Tích hợp hai provider CPU ONNX độc lập: `Kokoro ONNX` từ bản chuyển đổi
+  `onnx-community/Kokoro-82M-v1.0-ONNX-timestamped` (54 giọng, 8 ngôn ngữ)
+  và `Supertonic 3` chính thức từ `Supertone/supertonic-3` (10 voice style,
+  31 ngôn ngữ gồm tiếng Việt).
+- Thêm hợp đồng `provider_options` và schema `ProviderSettingSpec`: Core kiểm
+  tra kiểu/range, lưu preferences/history, rồi Qt và Tkinter tự dựng control từ
+  metadata. GUI không chứa nhánh riêng cho Kokoro hoặc Supertonic.
+- Thêm worker cô lập, bộ cài Windows/Linux và kiểm tra đầy đủ artifact cho cả
+  hai model. Kokoro có `Cắt im lặng đầu/cuối` và `Ngữ điệu liên tục`;
+  Supertonic có `Mức chất lượng` 5–12 (khuyến nghị 8).
+- Ngắt nghỉ theo dấu câu dùng chung của Core áp dụng cho cả hai provider và
+  được chèn trực tiếp vào PCM; A/B tích hợp đo được chênh lệch đúng bằng tổng
+  khoảng nghỉ đã cấu hình.
+
+- Tích hợp 13 package Piper ONNX khác biệt thực tế từ bộ `VbeeTTS/extracted_models`,
+  đặt tên hậu tố `— Vbee Export` để phân biệt xuất xứ package. Bảy package trùng
+  PCM với model sẵn có và một thư mục Ngạn trùng lặp đã được loại khỏi catalog.
+- Thêm nguồn model `manual` và hành động `Nhập model local`: kiểm tra SHA-256 của
+  cả ONNX/JSON, copy vào storage quản lý, không sửa nguồn và không nhầm với tải
+  Hugging Face.
+- Thêm hồ sơ tinh chỉnh chung cho mọi Piper ONNX: Piper chuẩn, Vbee tham chiếu,
+  Noise Scale, Noise W và Seed tái lập để A/B. Tham số đi thật tới worker ONNX;
+  tooltip theo package chỉ khuyến nghị, không tự đổi hành vi.
+
+- Thêm worker `vieneu_v3_worker` độc lập cho VieNeu v3 Turbo 3.3.0: mặc định
+  chạy CPU ONNX INT8 không cần PyTorch, có bộ cài GPU PyTorch riêng cho batch dài.
+- Thêm probe runtime theo từng model/worker, nhãn thiết bị rõ `CPU ONNX` hoặc
+  `GPU CUDA · PyTorch` và thông báo cài đặt chỉ đúng worker đang chọn.
+- Đồng bộ catalog VieNeu v3.3 đủ 20 giọng chính thức, gồm Ngọc Huyền, Mỹ Duyên,
+  Quỳnh Anh, Đức Trí, Kim Thanh và Adam.
+- Tab Văn bản: thêm ô "Nơi lưu" để chọn thư mục lưu audio riêng cho lần tạo,
+  và các nút "📂 Mở thư mục" + "⧉ Copy path" + "⧉ Copy content" cạnh "Nghe thử"
+  để mở nhanh thư mục kết quả, copy đường dẫn file audio, hoặc copy đúng đoạn
+  văn bản đã dùng để tạo file đang nghe thử.
+- Tên file mặc định cho audio từ Văn bản lấy 20 ký tự đầu của nội dung (đã lọc
+  dấu câu, khoảng trắng, ký tự đặc biệt) thay cho "output"; ô Tên file hiện
+  gợi ý tên tự động khi gõ.
+- Tùy chọn tự thêm hậu tố "_{giọng}_{thời lượng}" (định dạng giờ-phút-giây, ví
+  dụ `01m23s`, không dùng ký tự `:`) vào tên file. Tên tự động luôn thêm hậu
+  tố; khi tự đặt tên thì có checkbox bật/tắt. Thời lượng chỉ biết sau khi tạo
+  xong nên Core chốt tên file lúc lưu (bản gộp) hoặc theo từng file (bản tách).
+- Lịch sử: thêm cột "Giọng" và "Ngôn ngữ", cùng bộ lọc Thời gian/Trạng thái/
+  Loại và tìm kiếm theo giọng để dễ tra cứu.
+- Thêm chính sách nối chunk trung lập provider: AUTO, Crossfade, Nối thẳng và
+  Chèn khoảng lặng; thời gian crossfade mặc định là 80 ms.
+- Thêm điều khiển Qt cùng tooltip tiếng Việt và mô tả chính sách thực tế của
+  model đang chọn.
+
+### Compatibility
+
+- Mặc định Piper vẫn là Noise `0.667`, Noise W `0.800`, Seed ngẫu nhiên nên các
+  cấu hình cũ giữ nguyên hành vi. Logic nghỉ theo dấu câu, nối chunk và nghỉ giữa
+  đoạn gốc không thay đổi; chưa thêm xử lý cắt đuôi rung/rè.
+- Catalog Piper tăng từ 33 lên 46 mục; 13 package Vbee Export đã được nhập sẵn ở
+  máy hiện tại và có thể gỡ an toàn vào `.trash` rồi nhập lại từ nguồn.
+
+### Changed
+
+- Các model VieNeu cũ tiếp tục dùng worker hiện hữu nhưng được hiển thị rõ là
+  `VieNeu v2`; chọn đồng thời VieNeu v2 và v3 sẽ cài đúng hai runtime, không gộp
+  nhầm theo provider.
+- VieNeu v3 dùng giọng mặc định chính thức của SDK 3.3 là Adam; bỏ tham số style
+  đã bị SDK v3 ngừng hỗ trợ và bật denoise reference mặc định cho clone giọng.
+- Nút "Dán đường dẫn" đọc thẳng clipboard vào hàng đợi, bỏ hộp thoại nhập tay;
+  việc quét file nguồn chạy nền nên thêm số lượng lớn không làm treo giao diện.
+
+### Changed
+
+- AUTO của VieNeu giao việc chia/nối nội bộ cho SDK; Piper tiếp tục dùng nhịp
+  theo dấu câu. Logic chọn chính sách nằm ở Core và metadata provider, không ở GUI.
+- Loại bỏ crossfade ẩn toàn cục và tự di trú cấu hình nghỉ chunk cũ để giữ hành vi.
+
 ## [0.3.1] - 2026-07-29
 
 ### Added

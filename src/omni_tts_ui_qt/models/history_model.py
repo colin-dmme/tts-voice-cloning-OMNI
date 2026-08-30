@@ -12,17 +12,24 @@ from omni_tts_core.generation_history import (
     GenerationHistoryEntry,
     HistoryStatus,
 )
+from omni_tts_core.ui_presenters.history_columns import (
+    history_language_label,
+    history_voice_label,
+)
 from omni_tts_core.ui_presenters.labels import format_duration
 
 _COLUMNS = [
     "Thời gian",
     "Nguồn",
     "Loại",
+    "Giọng",
+    "Ngôn ngữ",
     "Ký tự",
     "Model",
     "Trạng thái",
     "Thời lượng",
 ]
+_STATUS_COLUMN = 7
 
 _STATUS_COLORS = {
     HistoryStatus.DONE: "#34d399",
@@ -35,11 +42,16 @@ class HistoryTableModel(QAbstractTableModel):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._items: list[GenerationHistoryEntry] = []
+        self._profile_names: dict[str, str] = {}
 
     def set_items(self, items: list[GenerationHistoryEntry]) -> None:
         self.beginResetModel()
         self._items = items
         self.endResetModel()
+
+    def set_profile_names(self, profile_names: dict[str, str]) -> None:
+        """Refresh the profile id → name map used for the Giọng column."""
+        self._profile_names = dict(profile_names or {})
 
     def item_at(self, row: int) -> GenerationHistoryEntry | None:
         if 0 <= row < len(self._items):
@@ -73,14 +85,18 @@ class HistoryTableModel(QAbstractTableModel):
             if column == 2:
                 return "Văn bản" if item.mode == "text" else "File"
             if column == 3:
-                return f"{item.char_count:,}"
+                return history_voice_label(item, self._profile_names)
             if column == 4:
-                return item.model_id
+                return history_language_label(item)
             if column == 5:
-                return HISTORY_STATUS_LABELS.get(item.status, item.status.value)
+                return f"{item.char_count:,}"
             if column == 6:
+                return item.model_id
+            if column == _STATUS_COLUMN:
+                return HISTORY_STATUS_LABELS.get(item.status, item.status.value)
+            if column == 8:
                 return format_duration(item.duration_seconds)
-        if role == Qt.ItemDataRole.ForegroundRole and column == 5:
+        if role == Qt.ItemDataRole.ForegroundRole and column == _STATUS_COLUMN:
             return QColor(_STATUS_COLORS.get(item.status, "#e4e4ef"))
         if role == Qt.ItemDataRole.ToolTipRole:
             details = [str(item.source_path or item.source_label)]

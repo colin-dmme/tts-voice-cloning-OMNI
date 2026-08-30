@@ -30,6 +30,10 @@ from omni_tts_core.authoring.schemas import (
 )
 from omni_tts_core.authoring.service import AuthoringService
 from omni_tts_core.authoring.voice_context import VoiceContextResolver
+from omni_tts_core.chunk_join import (
+    describe_chunk_join_policy,
+    resolve_chunk_join_policy,
+)
 from omni_tts_core.desktop_paths import DesktopPathService
 from omni_tts_core.file_queue import FileQueueOutputManifest, FileQueueStatus
 from omni_tts_core.higgs.endpoint_capabilities import (
@@ -64,7 +68,14 @@ from omni_tts_core.ui_presenters.model_actions import ModelActionPolicy, build_a
 from omni_tts_core.ui_presenters.settings_state import GenerationSettings
 from omni_tts_core.voice_profile_policy import ProfileCompatibility
 from omni_tts_shared.errors import GenerationCancelled, GpuSafetyError, OmniTtsError
+from omni_tts_shared.pronunciation import (
+    PronunciationAnalysis,
+    PronunciationPreset,
+    PronunciationRule,
+    PronunciationSelection,
+)
 from omni_tts_shared.schemas import (
+    GenerateSpeechRequest,
     GenerateSpeechResult,
     GenerationFormDescriptor,
     ModelCapabilities,
@@ -94,6 +105,15 @@ class FileGenerationOutcome:
     status: FileQueueStatus
     result: GenerateSpeechResult | None = None
     error: str = ""
+
+
+@dataclass(frozen=True)
+class FileGenerationTask:
+    """One queue file with an optional per-item pronunciation override."""
+
+    item_id: str
+    source_path: Path
+    pronunciation: PronunciationSelection | None = None
 
 
 FileEventCallback = Callable[[FileGenerationEvent], None]
@@ -143,11 +163,27 @@ class AppController:
             self.service
         )
 
+    # --- VRAM / engine lifecycle -------------------------------------------
+
+    def release_vram(self) -> list[str]:
+        """Unload every resident model and free its VRAM. Returns model ids freed."""
+        return self.service.release_engines()
+
+    def resident_models(self) -> list[str]:
+        """Model ids currently holding an engine (and possibly VRAM)."""
+        return self.service.resident_models()
+
     # --- Model catalog / choices -------------------------------------------
 
-    def model_choices(self, provider_id: str | None = None) -> list[tuple[str, str]]:
-        """Model choices, optionally limited to one provider."""
-        return model_groups.models_for_provider(self.service.registry.tts_models(), provider_id)
+    def model_choices(
+        self,
+        provider_id: str | None = None,
+        query: str = "",
+    ) -> list[tuple[str, str]]:
+        """Model choices, optionally limited by provider and search query."""
+        return model_groups.models_for_provider(
+            self.service.registry.tts_models(), provider_id, query
+        )
 
     def provider_choices(self) -> list[tuple[str, str]]:
         return model_groups.provider_choices(self.service.registry.tts_models())
@@ -203,6 +239,16 @@ class AppController:
             supports_sampling=self.service.supports_vieneu_sampling(model_id),
             supports_f5=self.service.supports_f5_settings(model_id),
             supports_chatterbox=self.service.supports_chatterbox_settings(model_id),
+        )
+
+    def chunk_join_description(self, model_id: str, requested_mode: str) -> str:
+        """Human-readable effective policy; frontends do not branch by provider."""
+        spec = self.service.registry.get(model_id)
+        return describe_chunk_join_policy(
+            resolve_chunk_join_policy(
+                requested_mode,
+                provider_descriptor(spec.provider),
+            )
         )
 
     # --- Provider-neutral AI authoring ------------------------------------
@@ -543,6 +589,54 @@ class AppController:
     def voice_profile(self, profile_id: str) -> VoiceProfile:
         return self.service.get_voice_profile(profile_id)
 
+    # --- Pronunciation dictionary ------------------------------------------
+
+    def pronunciation_presets(self) -> list[PronunciationPreset]:
+        return self.service.list_pronunciation_presets()
+
+    def pronunciation_preset(self, preset_id: str) -> PronunciationPreset:
+        return self.service.get_pronunciation_preset(preset_id)
+
+    def save_pronunciation_preset(
+        self,
+        *,
+        name: str,
+        rules: list[PronunciationRule | dict],
+        project: str = "",
+        tags: list[str] | None = None,
+        notes: str = "",
+        preset_id: str | None = None,
+    ) -> PronunciationPreset:
+        return self.service.save_pronunciation_preset(
+            name=name,
+            rules=rules,
+            project=project,
+            tags=tags,
+            notes=notes,
+            preset_id=preset_id,
+        )
+
+    def delete_pronunciation_preset(self, preset_id: str) -> bool:
+        return self.service.delete_pronunciation_preset(preset_id)
+
+    def duplicate_pronunciation_preset(
+        self, preset_id: str, name: str | None = None
+    ) -> PronunciationPreset:
+        return self.service.duplicate_pronunciation_preset(preset_id, name)
+
+    def import_pronunciation_preset(self, path: Path) -> PronunciationPreset:
+        return self.service.import_pronunciation_preset(path)
+
+    def export_pronunciation_preset(self, preset_id: str, path: Path) -> Path:
+        return self.service.export_pronunciation_preset(preset_id, path)
+
+    def preview_pronunciation(
+        self,
+        text: str,
+        selection: PronunciationSelection | None = None,
+    ) -> PronunciationAnalysis:
+        return self.service.preview_pronunciation(text, selection)
+
     def play_audio_file(self, path: Path | str | None) -> Path:
         """Open any audio file in the OS player — used for not-yet-saved samples."""
         return self.media_player.play_first_available(
@@ -568,6 +662,7 @@ class AppController:
         project: str,
         notes: str,
         profile_id: str | None = None,
+        tags: list[str] | None = None,
     ) -> tuple[VoiceProfile, list[ProfileSaveWarning]]:
         return self.service.save_voice_profile(
             name=name,
@@ -577,11 +672,59 @@ class AppController:
             project=project,
             notes=notes,
             profile_id=profile_id,
+            tags=tags,
         )
 
     def delete_voice_profile(self, profile_id: str) -> str:
         self.service.delete_voice_profile(profile_id)
         return "Đã xóa profile giọng."
+
+    # --- Designed voices + unified voice library ---------------------------
+
+    def all_designed_voices(self):
+        return self.service.list_designed_voices()
+
+    def designed_voice(self, voice_id: str):
+        return self.service.get_designed_voice(voice_id)
+
+    def save_designed_voice(
+        self,
+        name: str,
+        instruct: str,
+        language: str = "vi",
+        project: str = "",
+        tags: list[str] | None = None,
+        notes: str = "",
+        voice_id: str | None = None,
+    ):
+        return self.service.save_designed_voice(
+            name=name,
+            instruct=instruct,
+            language=language,
+            project=project,
+            tags=tags,
+            notes=notes,
+            voice_id=voice_id,
+        )
+
+    def delete_designed_voice(self, voice_id: str) -> str:
+        self.service.delete_designed_voice(voice_id)
+        return "Đã xóa giọng thiết kế."
+
+    def voice_kinds_for_model(self, model_id: str) -> tuple[str, ...]:
+        return self.service.voice_kinds_for_model(model_id)
+
+    def selectable_voice_items(
+        self,
+        model_id: str,
+        *,
+        query: str = "",
+        project: str | None = None,
+        tag: str | None = None,
+    ):
+        return self.service.selectable_voice_items(
+            model_id, query=query, project=project, tag=tag
+        )
 
     def profile_quality_for_model(self, profile_id: str, model_id: str) -> ProfileCompatibility:
         return self.service.profile_quality_for_model(profile_id, model_id)
@@ -623,6 +766,10 @@ class AppController:
     def download_model(self, model_id: str) -> str:
         status = self.service.download_model(model_id)
         return f"Đã tải xong: {status.display_name}"
+
+    def import_local_model(self, model_id: str, source_root: str | Path) -> str:
+        status = self.service.import_local_model(model_id, source_root)
+        return f"Đã nhập package local: {status.display_name}"
 
     def download_required_models(self) -> str:
         downloaded = self.service.download_missing_required_models()
@@ -716,7 +863,7 @@ class AppController:
 
     def generate_files(
         self,
-        tasks: list[tuple[str, Path]],
+        tasks: list[tuple[str, Path] | FileGenerationTask],
         settings: GenerationSettings,
         progress_callback: ProgressCallback | None = None,
         file_event_callback: FileEventCallback | None = None,
@@ -726,10 +873,39 @@ class AppController:
             raise OmniTtsError("Bạn chưa chọn file nguồn.")
         self.validate_license_for_model(settings.model_id)
         outcomes: list[FileGenerationOutcome] = []
-        template = settings.to_request("Nội dung sẽ được đọc từ file nguồn.")
-        total_files = len(tasks)
+        normalized_tasks = [
+            task
+            if isinstance(task, FileGenerationTask)
+            else FileGenerationTask(item_id=task[0], source_path=task[1])
+            for task in tasks
+        ]
+        base_template = settings.to_request("Nội dung sẽ được đọc từ file nguồn.")
+        # Freeze every distinct selection before the first file starts. Editing
+        # a preset while the queue is active must not change later files.
+        freeze_pronunciation = getattr(self.service, "freeze_pronunciation", None)
+        frozen_templates: dict[
+            tuple[bool, tuple[str, ...]], GenerateSpeechRequest
+        ] = {}
+        prepared_tasks: list[tuple[FileGenerationTask, GenerateSpeechRequest]] = []
+        for task in normalized_tasks:
+            selection = task.pronunciation or base_template.pronunciation
+            key = (selection.enabled, tuple(selection.preset_ids))
+            template = frozen_templates.get(key)
+            if template is None:
+                template = base_template.model_copy(
+                    update={
+                        "pronunciation": selection,
+                        "pronunciation_snapshot": None,
+                    }
+                )
+                if callable(freeze_pronunciation):
+                    template = freeze_pronunciation(template)
+                frozen_templates[key] = template
+            prepared_tasks.append((task, template))
+        total_files = len(prepared_tasks)
         status_callback = _status_from(progress_callback)
-        for file_index, (item_id, source_path) in enumerate(tasks, start=1):
+        for file_index, (task, template) in enumerate(prepared_tasks, start=1):
+            item_id, source_path = task.item_id, task.source_path
             check_cancel(cancel_event)
             _emit_file_event(
                 file_event_callback,

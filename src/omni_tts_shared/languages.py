@@ -3,6 +3,10 @@ from __future__ import annotations
 
 LANGUAGE_LABELS = {
     "auto": "Tự động",
+    "ar": "Arabic",
+    "bg": "Bulgarian",
+    "cs": "Czech",
+    "da": "Danish",
     "vi": "Tiếng Việt",
     "en": "English",
     "zh": "Chinese",
@@ -14,6 +18,23 @@ LANGUAGE_LABELS = {
     "pt": "Portuguese",
     "es": "Spanish",
     "it": "Italian",
+    "el": "Greek",
+    "et": "Estonian",
+    "fi": "Finnish",
+    "hi": "Hindi",
+    "hr": "Croatian",
+    "hu": "Hungarian",
+    "id": "Indonesian",
+    "lt": "Lithuanian",
+    "lv": "Latvian",
+    "nl": "Dutch",
+    "pl": "Polish",
+    "ro": "Romanian",
+    "sk": "Slovak",
+    "sl": "Slovenian",
+    "sv": "Swedish",
+    "tr": "Turkish",
+    "uk": "Ukrainian",
 }
 LANGUAGE_CODES = {label: code for code, label in LANGUAGE_LABELS.items()}
 

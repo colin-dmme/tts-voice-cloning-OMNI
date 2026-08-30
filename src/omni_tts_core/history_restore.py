@@ -59,6 +59,9 @@ def restore_setting_mismatches(
     """Fields a GUI failed to apply, excluding values restored elsewhere."""
     excluded = {
         "output_stem",
+        # Applied via the text-tab suffix checkbox / auto-name rule, not the
+        # settings panel — so it is never reflected in the panel's snapshot.
+        "append_stem_suffix",
         "reference_audio_path",
         "reference_text",
         "srt_file_padding_ms",

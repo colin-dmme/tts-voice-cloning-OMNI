@@ -36,7 +36,15 @@ class OmniVoiceEngine(BaseTtsEngine):
         if language_name:
             kwargs["language"] = language_name
 
-        if request.reference_audio_path:
+        generation_config = _build_generation_config(request.num_step)
+        if generation_config is not None:
+            kwargs["generation_config"] = generation_config
+
+        instruct = (request.instruct or "").strip()
+        if instruct:
+            # Voice Design: synthesise from the description; no reference/preset.
+            kwargs["instruct"] = instruct
+        elif request.reference_audio_path:
             if request.cached_prompt_path is not None:
                 voice_prompt = _load_or_build_voice_prompt(
                     model,
@@ -68,6 +76,28 @@ class OmniVoiceEngine(BaseTtsEngine):
         check_cancel(request.cancel_event)
         return TtsEngineResult(audio=_first_audio_array(audio), sample_rate=self.sample_rate)
 
+    def close(self) -> None:
+        """Drop the in-process model(s) and release their VRAM.
+
+        OmniVoice loads the model into the main app process (unlike subprocess
+        engines), so nothing frees it until we clear the cache and ask CUDA to
+        release the now-unreferenced allocations.
+        """
+        if not self._models:
+            return
+        self._models.clear()
+        try:
+            import gc
+
+            import torch
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except Exception:
+            pass
+
     def _load_model(self, runtime_target: str = "auto"):
         try:
             import torch
@@ -89,7 +119,15 @@ class OmniVoiceEngine(BaseTtsEngine):
             self.spec.runtime,
         )
         _patch_tokenizer_resolver(omnivoice_module)
-        self._models[cache_key] = OmniVoice.from_pretrained(model_path, device_map=device, dtype=dtype)
+        # Keep the Whisper ASR model (used only to auto-transcribe reference
+        # audio when a profile has no transcript) off the GPU. On an 11 GB
+        # Pascal card the main model already runs in fp32 near the VRAM cap, so
+        # letting ASR (~1.5 GB) land on CUDA can push a clone over the edge.
+        # asr_device is an OmniVoice >= 0.2.1 from_pretrained kwarg; on older
+        # builds it is silently ignored.
+        self._models[cache_key] = OmniVoice.from_pretrained(
+            model_path, device_map=device, dtype=dtype, asr_device="cpu"
+        )
         return self._models[cache_key]
 
 
@@ -100,10 +138,24 @@ def _load_or_build_voice_prompt(
     transcript: str,
 ) -> Any | None:
     """
-    Try to load a cached voice_clone_prompt from asset_dir/voice_clone_prompt.pkl.
-    If not found or unloadable, create via model.create_voice_clone_prompt() and save.
-    Returns None if the model API is unavailable.
+    Load a cached voice clone prompt from asset_dir, else build it via
+    model.create_voice_clone_prompt() and cache it.
+
+    Prefers OmniVoice >= 0.2.1's ``VoiceClonePrompt.save()/load()`` (a
+    torch-serialised dict, safe to load with ``weights_only=True``) over
+    pickling the live object, which was fragile across torch/transformers
+    upgrades. Legacy ``.pkl`` caches are still read once, then superseded by a
+    ``.pt`` on the next build. Returns None if the model API is unavailable.
     """
+    prompt_cls = _voice_clone_prompt_cls()
+    pt_path = asset_dir / "voice_clone_prompt.pt"
+    if prompt_cls is not None and hasattr(prompt_cls, "load") and pt_path.exists():
+        try:
+            return prompt_cls.load(str(pt_path))
+        except Exception:
+            pt_path.unlink(missing_ok=True)
+
+    # Legacy pickle cache written by pre-0.2.1 builds — read once if present.
     pkl_path = asset_dir / "voice_clone_prompt.pkl"
     if pkl_path.exists():
         try:
@@ -120,14 +172,58 @@ def _load_or_build_voice_prompt(
     except Exception:
         return None
 
+    _cache_voice_prompt(prompt, asset_dir, pt_path, pkl_path)
+    return prompt
+
+
+def _voice_clone_prompt_cls() -> Any | None:
+    try:
+        from omnivoice import VoiceClonePrompt
+
+        return VoiceClonePrompt
+    except Exception:
+        return None
+
+
+def _build_generation_config(num_step: int | None) -> Any | None:
+    """Build an OmniVoiceGenerationConfig overriding the diffusion step count.
+
+    Returns None (model defaults) when num_step is unset or the config class is
+    unavailable, so a missing value never blocks generation.
+    """
+    if not num_step:
+        return None
+    try:
+        from omnivoice import OmniVoiceGenerationConfig
+    except Exception:
+        return None
+    try:
+        return OmniVoiceGenerationConfig(num_step=int(num_step))
+    except Exception:
+        return None
+
+
+def _cache_voice_prompt(
+    prompt: Any, asset_dir: Path, pt_path: Path, pkl_path: Path
+) -> None:
     try:
         asset_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+    saver = getattr(prompt, "save", None)
+    if callable(saver):
+        try:
+            saver(str(pt_path))
+            pkl_path.unlink(missing_ok=True)  # retire any stale legacy cache
+            return
+        except Exception:
+            pass
+    # Fallback for builds without VoiceClonePrompt.save().
+    try:
         with pkl_path.open("wb") as f:
             pickle.dump(prompt, f)
     except Exception:
         pass
-
-    return prompt
 
 
 def _best_device(torch_module, runtime_target: str = "auto"):

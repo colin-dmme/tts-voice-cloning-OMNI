@@ -7,15 +7,18 @@ from omni_tts_core.engines.base import BaseTtsEngine
 from omni_tts_core.engines.chatterbox_engine import ChatterboxSubprocessEngine
 from omni_tts_core.engines.f5tts_engine import F5TtsSubprocessEngine
 from omni_tts_core.engines.higgs_remote_engine import HiggsRemoteEngine
+from omni_tts_core.engines.preset_onnx_engine import PresetOnnxSubprocessEngine
 from omni_tts_core.engines.omnivoice_engine import OmniVoiceEngine
 from omni_tts_core.engines.piper_engine import PiperSubprocessEngine
 from omni_tts_core.engines.qwen_engine import QwenSubprocessEngine
 from omni_tts_core.engines.valtec_engine import ValtecSubprocessEngine
 from omni_tts_core.engines.vieneu_engine import VieneuSubprocessEngine
 from omni_tts_core.model_registry import ModelSpec
+from omni_tts_core.provider_options import ProviderSettingSpec
 
 
 StorageMode = Literal["folder", "hf_cache", "remote"]
+AutomaticChunkJoin = Literal["native", "punctuation", "silence"]
 EngineFactory = Callable[[ModelSpec, object | None], BaseTtsEngine]
 
 
@@ -33,6 +36,12 @@ class ProviderDescriptor:
     # branches on provider_id.
     authoring_dialect: str | None = None
     authoring_features: frozenset[str] = frozenset()
+    # Core owns the generic join modes, while each provider declares what
+    # "Auto" means.  Frontends only display the resulting metadata.
+    automatic_chunk_join: AutomaticChunkJoin = "silence"
+    settings: tuple[ProviderSettingSpec, ...] = ()
+    speed_minimum: float = 0.5
+    speed_maximum: float = 1.8
 
 
 def _omnivoice(spec: ModelSpec, cache: object | None) -> BaseTtsEngine:
@@ -51,6 +60,10 @@ def _simple(factory):
     return lambda spec, _cache: factory(spec)
 
 
+def _preset_onnx(spec: ModelSpec, _cache: object | None) -> BaseTtsEngine:
+    return PresetOnnxSubprocessEngine(spec)
+
+
 PROVIDERS: dict[str, ProviderDescriptor] = {
     "omnivoice": ProviderDescriptor(
         "omnivoice", "OmniVoice", "folder", None, _omnivoice,
@@ -59,6 +72,7 @@ PROVIDERS: dict[str, ProviderDescriptor] = {
     "vieneu": ProviderDescriptor(
         "vieneu", "VieNeu", "hf_cache", "vieneu_worker", _vieneu,
         frozenset({"codec", "sampling", "emotion"}),
+        automatic_chunk_join="native",
     ),
     "qwen": ProviderDescriptor(
         "qwen", "Qwen", "folder", "qwen_worker", _qwen,
@@ -76,7 +90,58 @@ PROVIDERS: dict[str, ProviderDescriptor] = {
     ),
     "piper": ProviderDescriptor(
         "piper", "Piper ONNX", "folder", "piper_worker", _simple(PiperSubprocessEngine),
-        frozenset({"speed", "punctuation_pauses"}), 2,
+        frozenset({"speed", "punctuation_pauses", "piper"}), 2,
+        automatic_chunk_join="punctuation",
+    ),
+    "kokoro_onnx": ProviderDescriptor(
+        "kokoro_onnx",
+        "Kokoro ONNX",
+        "folder",
+        "kokoro_worker",
+        _preset_onnx,
+        frozenset({"speed", "punctuation_pauses", "provider_options"}),
+        1,
+        automatic_chunk_join="punctuation",
+        settings=(
+            ProviderSettingSpec(
+                "trim_silence",
+                "Cắt im lặng đầu/cuối",
+                "boolean",
+                True,
+                "Bỏ khoảng im lặng dư do model tạo ở đầu và cuối từng đoạn nhỏ.",
+            ),
+            ProviderSettingSpec(
+                "continuous_prosody",
+                "Ngữ điệu liên tục",
+                "boolean",
+                False,
+                "Giữ mạch ngữ điệu tốt hơn giữa các câu; chậm hơn và chỉ dùng với model timestamped.",
+            ),
+        ),
+    ),
+    "supertonic": ProviderDescriptor(
+        "supertonic",
+        "Supertonic 3",
+        "folder",
+        "supertonic_worker",
+        _preset_onnx,
+        frozenset({"speed", "punctuation_pauses", "provider_options"}),
+        1,
+        automatic_chunk_join="punctuation",
+        settings=(
+            ProviderSettingSpec(
+                "total_steps",
+                "Mức chất lượng",
+                "integer",
+                8,
+                "Số bước khử nhiễu: cao hơn thường rõ hơn nhưng xử lý chậm hơn. Khuyến nghị 8.",
+                minimum=5,
+                maximum=12,
+                step=1,
+            ),
+        ),
+        speed_minimum=0.7,
+        speed_maximum=1.8,
     ),
     "higgs_remote": ProviderDescriptor(
         "higgs_remote",

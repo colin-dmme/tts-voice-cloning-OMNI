@@ -16,7 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from omni_tts_core.engines.base import TtsEngineResult
 from omni_tts_core.model_registry import ModelSpec
+from omni_tts_core.pronunciation import PronunciationPresetStore
 from omni_tts_core.service import TtsService
+from omni_tts_shared.pronunciation import PronunciationRule, PronunciationSelection
 from omni_tts_shared.schemas import GenerateSpeechRequest, ModelCapabilities
 
 
@@ -93,7 +95,172 @@ class StreamingEngine:
         return results
 
 
+class StemSuffixServiceTest(unittest.TestCase):
+    def _service(self, root: Path) -> tuple[TtsService, ModelSpec]:
+        spec = ModelSpec(
+            model_id="fake_qwen",
+            display_name="Fake Qwen",
+            provider="qwen",
+            model_type="tts",
+            local_path=root / "model",
+            hf_repo="fake/qwen",
+            language_priority="multilingual",
+            capabilities=ModelCapabilities(supported_languages=["vi"]),
+        )
+        service = TtsService(
+            settings=DummySettings(root),
+            registry=FakeRegistry(spec),
+            storage=FakeStorage(),
+        )
+        service._engines[spec.model_id] = RecordingEngine()
+        return service, spec
+
+    def test_merged_filename_gains_duration_suffix_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            service, spec = self._service(root)
+            request = GenerateSpeechRequest(
+                text="Xin chào các bạn",
+                language="vi",
+                model_id=spec.model_id,
+                output_mode="merged",
+                output_dir=root,
+                append_stem_suffix=True,
+            )
+            result = service.generate_audio(request)
+            # Base slug from the text, plus a "_NNmSSs" duration token (no voice
+            # configured on this fake model), no colons in the name.
+            self.assertTrue(result.audio_path.name.startswith("Xin_chào_các_bạn"))
+            self.assertRegex(result.audio_path.name, r"_\d\dm\d\ds\.wav$")
+            self.assertNotIn(":", result.audio_path.name)
+            self.assertTrue(result.audio_path.exists())
+
+    def test_merged_filename_unchanged_when_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            service, spec = self._service(root)
+            request = GenerateSpeechRequest(
+                text="Xin chào các bạn",
+                language="vi",
+                model_id=spec.model_id,
+                output_mode="merged",
+                output_dir=root,
+                append_stem_suffix=False,
+            )
+            result = service.generate_audio(request)
+            self.assertEqual(result.audio_path.name, "Xin_chào_các_bạn.wav")
+
+
 class SplitBatchServiceTest(unittest.TestCase):
+    def test_merged_pronunciation_changes_engine_text_but_not_srt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            spec = ModelSpec(
+                model_id="fake_qwen",
+                display_name="Fake Qwen",
+                provider="qwen",
+                model_type="tts",
+                local_path=root / "model",
+                hf_repo="fake/qwen",
+                language_priority="multilingual",
+                capabilities=ModelCapabilities(supported_languages=["vi"]),
+            )
+            preset_store = PronunciationPresetStore(root / "presets")
+            preset = preset_store.save(
+                name="Tên sản phẩm",
+                rules=[PronunciationRule(written="IIKO", spoken="Y Cô")],
+            )
+            service = TtsService(
+                settings=DummySettings(root),
+                registry=FakeRegistry(spec),
+                storage=FakeStorage(),
+                pronunciation_presets=preset_store,
+            )
+            engine = RecordingEngine()
+            service._engines[spec.model_id] = engine
+
+            result = service.generate_audio(
+                GenerateSpeechRequest(
+                    text="Sản phẩm IIKO rất tốt.",
+                    language="vi",
+                    model_id=spec.model_id,
+                    output_mode="merged",
+                    output_dir=root,
+                    output_stem="pronunciation_merged",
+                    output_srt=True,
+                    pronunciation=PronunciationSelection(
+                        enabled=True,
+                        preset_ids=[preset.preset_id],
+                    ),
+                )
+            )
+
+            spoken_text = " ".join(item.text for item in engine.batch_calls[0])
+            self.assertIn("y cô", spoken_text.casefold())
+            self.assertNotIn("IIKO", spoken_text)
+            subtitle = result.srt_path.read_text(encoding="utf-8")
+            self.assertIn("IIKO", subtitle)
+            self.assertNotIn("Y Cô", subtitle)
+            self.assertEqual(result.pronunciation_match_count, 1)
+            self.assertTrue(result.pronunciation_report_path.exists())
+            report = json.loads(
+                result.pronunciation_report_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(report["match_count"], 1)
+
+    def test_split_pronunciation_changes_engine_text_but_not_source_srt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "pronunciation.srt"
+            source.write_text(
+                "1\n00:00:00,000 --> 00:00:01,000\nSản phẩm IIKO rất tốt.",
+                encoding="utf-8",
+            )
+            spec = ModelSpec(
+                model_id="fake_qwen",
+                display_name="Fake Qwen",
+                provider="qwen",
+                model_type="tts",
+                local_path=root / "model",
+                hf_repo="fake/qwen",
+                language_priority="multilingual",
+                capabilities=ModelCapabilities(supported_languages=["vi"]),
+            )
+            preset_store = PronunciationPresetStore(root / "presets")
+            preset = preset_store.save(
+                name="Tên sản phẩm",
+                rules=[PronunciationRule(written="IIKO", spoken="Y Cô")],
+            )
+            service = TtsService(
+                settings=DummySettings(root),
+                registry=FakeRegistry(spec),
+                storage=FakeStorage(),
+                pronunciation_presets=preset_store,
+            )
+            engine = RecordingEngine()
+            service._engines[spec.model_id] = engine
+            request = GenerateSpeechRequest(
+                text="file input",
+                language="vi",
+                model_id=spec.model_id,
+                output_mode="split",
+                output_srt=True,
+                pronunciation=PronunciationSelection(
+                    enabled=True,
+                    preset_ids=[preset.preset_id],
+                ),
+            )
+
+            result = service.generate_from_source_file(source, request, output_dir=root)
+
+            spoken_text = " ".join(item.text for item in engine.batch_calls[0])
+            self.assertIn("y cô", spoken_text.casefold())
+            self.assertNotIn("IIKO", spoken_text)
+            subtitle = result.srt_path.read_text(encoding="utf-8")
+            self.assertIn("IIKO", subtitle)
+            self.assertNotIn("Y Cô", subtitle)
+            self.assertEqual(result.pronunciation_match_count, 1)
+
     def test_split_source_file_batches_all_chunks_before_writing_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

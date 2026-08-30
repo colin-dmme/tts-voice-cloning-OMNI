@@ -4,8 +4,8 @@ Each action carries the exact model ids it will run on, so a GUI never has to
 guess: it enables a button only when there is something to do, explains why not
 otherwise, and runs the action on `state.targets` — never on the raw selection.
 
-That matters for provider-level actions: selecting 33 Piper voices and pressing
-"Cài worker" must install the Piper worker once, not 33 times.
+That matters for provider-level actions: selecting 46 Piper voices and pressing
+"Cài worker" must install the Piper worker once, not 46 times.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from omni_tts_core.worker_installation import (
 from omni_tts_shared.schemas import ModelStatus
 
 DOWNLOAD = "download"
+IMPORT_LOCAL = "import_local"
 DOWNLOAD_REQUIRED = "download_required"
 REMOVE = "remove"
 INSTALL_WORKER = "install_worker"
@@ -65,11 +66,12 @@ def build_action_policy(selected: Sequence[ModelStatus]) -> ModelActionPolicy:
     }
 
     if not selected:
-        for action in (DOWNLOAD, REMOVE, INSTALL_WORKER, INSTALL_GPU, OPEN_STORAGE):
+        for action in (DOWNLOAD, IMPORT_LOCAL, REMOVE, INSTALL_WORKER, INSTALL_GPU, OPEN_STORAGE):
             states[action] = ActionState(False, NO_SELECTION)
         return ModelActionPolicy(0, states)
 
     states[DOWNLOAD] = _download_state(selected)
+    states[IMPORT_LOCAL] = _import_local_state(selected)
     states[REMOVE] = _remove_state(selected)
     states[INSTALL_WORKER] = _provider_state(
         selected,
@@ -94,11 +96,30 @@ def _download_state(selected: Sequence[ModelStatus]) -> ActionState:
     targets = tuple(
         item.model_id
         for item in selected
-        if item.storage_kind != "Remote endpoint" and not payload_ready(item)
+        if item.storage_kind != "Remote endpoint"
+        and item.source_kind != "manual"
+        and not payload_ready(item)
     )
     if targets:
         return ActionState(True, f"Tải {len(targets)} model đang thiếu.", targets)
     return ActionState(False, "Các model đang chọn đã tải đủ.")
+
+
+def _import_local_state(selected: Sequence[ModelStatus]) -> ActionState:
+    targets = tuple(
+        item.model_id
+        for item in selected
+        if item.source_kind == "manual" and not payload_ready(item)
+    )
+    if targets:
+        return ActionState(
+            True,
+            f"Nhập {len(targets)} package local; có thể chọn thư mục bộ sưu tập hoặc thư mục package.",
+            targets,
+        )
+    if any(item.source_kind == "manual" for item in selected):
+        return ActionState(False, "Các package local đang chọn đã được nhập đủ.")
+    return ActionState(False, "Model đang chọn không dùng package local.")
 
 
 def _remove_state(selected: Sequence[ModelStatus]) -> ActionState:
@@ -121,21 +142,26 @@ def _provider_state(
     supported: "callable",
     missing_suffix: str,
 ) -> ActionState:
-    """One target per distinct provider so an install runs once, not per model."""
+    """One target per distinct worker so shared installs run exactly once.
+
+    A provider may own multiple isolated runtimes (VieNeu v2 and VieNeu v3), so
+    provider-only deduplication would silently skip one of them.
+    """
     targets: list[str] = []
     unsupported: list[str] = []
     seen: set[str] = set()
     for item in selected:
         provider = item.provider
-        if provider in seen:
+        install_key = item.worker_name or provider
+        if install_key in seen:
             continue
-        seen.add(provider)
+        seen.add(install_key)
         if supported(provider):
             targets.append(item.model_id)
         else:
             unsupported.append(_provider_label(provider))
     if targets:
-        detail = f"Chạy cho {len(targets)} nhà cung cấp."
+        detail = f"Chạy cho {len(targets)} môi trường độc lập."
         if unsupported:
             detail += " Bỏ qua: " + ", ".join(unsupported) + "."
         return ActionState(True, detail, tuple(targets))

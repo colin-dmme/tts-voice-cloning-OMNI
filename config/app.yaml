@@ -1,6 +1,6 @@
 app:
   name: "Colin TTS Local"
-  version: "0.3.1"
+  version: "0.5.0"
   host: "127.0.0.1"
   port: 7860
   contact:
@@ -22,10 +22,11 @@ generation:
   comma_pause_ms: 90
   clause_pause_ms: 180
   ellipsis_pause_ms: 450
+  chunk_join_mode: "auto"
   chunk_pause_ms: 120
+  chunk_crossfade_ms: 80
   paragraph_pause_ms: 600
   srt_file_padding_ms: 0
   output_audio_format: "wav"
   mp3_bitrate_kbps: 192
   max_chunk_chars: 220
-  crossfade_ms: 80

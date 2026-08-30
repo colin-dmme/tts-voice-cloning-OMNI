@@ -14,13 +14,14 @@ from omni_tts_core.runtime_status import RuntimeStatusService
 from omni_tts_core.storage_paths import local_storage_config_path, storage_roots
 from omni_tts_core.worker_installation import (
     base_installer_for_provider,
-    gpu_installer_for_provider,
+    base_installer_for_spec,
+    gpu_installer_for_spec,
     host_gpu_summary,
-    install_base_runtime,
-    install_gpu_acceleration,
-    provider_label,
-    worker_for_provider,
+    install_base_runtime_for_spec,
+    install_gpu_acceleration_for_spec,
+    worker_for_spec,
     worker_install_path,
+    worker_label_for_spec,
 )
 from omni_tts_shared.errors import ConfigError
 from omni_tts_shared.schemas import SetupTaskStatus
@@ -83,7 +84,7 @@ class SetupService:
         base = _base_runtime_status(
             spec,
             model_status,
-            self.runtime_status.detector.info_for_provider(spec.provider),
+            self.runtime_status.detector.info_for_spec(spec),
         )
         if base is not None:
             statuses.append(base)
@@ -101,7 +102,7 @@ class SetupService:
     def install_base_for_model(self, model_id: str) -> str:
         spec = self.registry.get(model_id)
         try:
-            message = install_base_runtime(spec.provider)
+            message = install_base_runtime_for_spec(spec)
         except RuntimeError as exc:
             raise ConfigError(str(exc)) from exc
         self.runtime_status.detector.clear()
@@ -110,7 +111,7 @@ class SetupService:
     def install_gpu_for_model(self, model_id: str) -> str:
         spec = self.registry.get(model_id)
         try:
-            message = install_gpu_acceleration(spec.provider)
+            message = install_gpu_acceleration_for_spec(spec)
         except RuntimeError as exc:
             raise ConfigError(str(exc)) from exc
         self.runtime_status.detector.clear()
@@ -140,9 +141,16 @@ def _model_payload_status(spec: ModelSpec, model_status) -> SetupTaskStatus:
         detail_missing = "Chưa có đủ cache model; bấm Tải model để tải đúng repo cần cho model này."
     else:
         ready = bool(model_status.installed)
-        label = "Model payload"
-        detail_ready = "Payload model đã có trong storage."
-        detail_missing = "Chưa tải payload model; bấm Tải model khi cần dùng."
+        is_manual = spec.source_kind == "manual"
+        label = "Package model local" if is_manual else "Model payload"
+        detail_ready = (
+            "Package local đã được nhập và kiểm tra toàn vẹn."
+            if is_manual else "Payload model đã có trong storage."
+        )
+        detail_missing = (
+            "Chưa nhập package; bấm Nhập model local và chọn extracted_models."
+            if is_manual else "Chưa tải payload model; bấm Tải model khi cần dùng."
+        )
     return SetupTaskStatus(
         task_id=f"model:{spec.model_id}:payload",
         label=label,
@@ -154,7 +162,7 @@ def _model_payload_status(spec: ModelSpec, model_status) -> SetupTaskStatus:
         required=spec.required,
         recommended=not ready,
         can_run=not ready,
-        action_label="Tải model",
+        action_label="Nhập model local" if spec.source_kind == "manual" else "Tải model",
     )
 
 
@@ -181,14 +189,14 @@ def _base_runtime_status(spec: ModelSpec, model_status, runtime_info) -> SetupTa
             script_name=script.name if script else "",
         )
 
-    worker_name = worker_for_provider(spec.provider)
+    worker_name = worker_for_spec(spec)
     if not worker_name:
         return None
-    script = base_installer_for_provider(spec.provider)
+    script = base_installer_for_spec(spec)
     ready = model_status.worker_installed is True
     return SetupTaskStatus(
         task_id=f"model:{spec.model_id}:worker",
-        label=f"Worker {provider_label(spec.provider)}",
+        label=f"Worker {worker_label_for_spec(spec)}",
         scope="worker",
         status="ok" if ready else "missing",
         detail=(
@@ -200,14 +208,14 @@ def _base_runtime_status(spec: ModelSpec, model_status, runtime_info) -> SetupTa
         model_id=spec.model_id,
         required=True,
         recommended=not ready,
-        can_run=bool(script and script.exists() and not ready),
+        can_run=bool((script is None or script.exists()) and not ready),
         action_label="Cài worker",
         script_name=script.name if script else "",
     )
 
 
 def _gpu_runtime_status(spec: ModelSpec, runtime) -> SetupTaskStatus | None:
-    script = gpu_installer_for_provider(spec.provider)
+    script = gpu_installer_for_spec(spec)
     if script is None:
         return None
     configured_cuda = configured_runtime_device(spec) == "cuda"
@@ -220,7 +228,7 @@ def _gpu_runtime_status(spec: ModelSpec, runtime) -> SetupTaskStatus | None:
         detail = "CUDA là tùy chọn; chỉ cài nếu muốn chạy model này bằng GPU."
     return SetupTaskStatus(
         task_id=f"model:{spec.model_id}:gpu",
-        label=f"CUDA cho {provider_label(spec.provider)}",
+        label=f"CUDA cho {worker_label_for_spec(spec)}",
         scope="gpu",
         status=status,
         detail=detail,

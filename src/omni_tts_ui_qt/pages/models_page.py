@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QThreadPool, Qt
+from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -96,6 +97,7 @@ class ModelsPage(QWidget):
         self._buttons = {}
         specs = [
             ("download", "Tải model", self._download),
+            ("import_local", "Nhập model local", self._import_local),
             ("download_required", "Tải model bắt buộc", self._download_required),
             ("remove", "Gỡ model", self._remove),
             ("install_worker", "Cài worker", self._install_worker),
@@ -125,7 +127,7 @@ class ModelsPage(QWidget):
         for row, item in enumerate(models):
             values = [
                 item.display_name,
-                self.ctrl.provider_display_label(item.provider),
+                item.worker_label or self.ctrl.provider_display_label(item.provider),
                 "Có" if item.required else "",
                 labels.model_status_label(item),
                 labels.format_model_size(item),
@@ -251,6 +253,23 @@ class ModelsPage(QWidget):
 
     def _download(self) -> None:
         self._run_for_each(model_actions.DOWNLOAD, "Đang tải model", self.ctrl.download_model)
+
+    def _import_local(self) -> None:
+        targets = self._targets(model_actions.IMPORT_LOCAL)
+        if not targets:
+            return
+        source_root = QFileDialog.getExistingDirectory(
+            self,
+            "Chọn thư mục extracted_models hoặc một package model",
+            "",
+        )
+        if not source_root:
+            return
+        self._run_for_each(
+            model_actions.IMPORT_LOCAL,
+            "Đang nhập package model local",
+            lambda model_id: self.ctrl.import_local_model(model_id, source_root),
+        )
 
     def _download_required(self) -> None:
         self._run_task("Đang tải các model bắt buộc còn thiếu…", self.ctrl.download_required_models)

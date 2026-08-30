@@ -42,6 +42,7 @@ class VoiceProfileManager:
         project: str = "",
         notes: str = "",
         profile_id: str | None = None,
+        tags: list[str] | None = None,
     ) -> tuple[VoiceProfile, list[ProfileSaveWarning]]:
         if not name.strip():
             raise ConfigError("Tên profile giọng không được để trống.")
@@ -77,6 +78,7 @@ class VoiceProfileManager:
             transcript=clean_transcript,
             language=language if language in valid_langs else "vi",
             project=project.strip(),
+            tags=_clean_tags(tags if tags is not None else (existing.tags if existing else [])),
             notes=notes.strip(),
             created_at=existing.created_at if existing else now,
             updated_at=now,
@@ -216,6 +218,17 @@ class VoiceProfileManager:
         if value.name and sample_candidate.exists():
             return sample_candidate
         return project_path(value) if not value.is_absolute() else value
+
+
+def _clean_tags(tags: list[str] | None) -> list[str]:
+    if not tags:
+        return []
+    seen: dict[str, None] = {}
+    for tag in tags:
+        cleaned = str(tag).strip()
+        if cleaned:
+            seen.setdefault(cleaned, None)
+    return list(seen)
 
 
 def _new_profile_id(name: str) -> str:

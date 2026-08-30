@@ -136,10 +136,11 @@ class TuningTest(unittest.TestCase):
             ("vieneu",),
         )
 
-    def test_no_groups_for_a_provider_without_tuning(self) -> None:
+    def test_piper_has_one_provider_wide_tuning_group(self) -> None:
         policy = _policy(spec=_Spec(provider="piper"))
-        self.assertEqual(policy.tuning_groups, ())
-        self.assertIn("Piper ONNX", policy.tuning_absent_note())
+        self.assertEqual(policy.tuning_groups, ("piper",))
+        self.assertTrue(policy.piper)
+        self.assertIn("Piper chuẩn", policy.piper_recommendation)
 
 
 class PunctuationPauseCapabilityTest(unittest.TestCase):

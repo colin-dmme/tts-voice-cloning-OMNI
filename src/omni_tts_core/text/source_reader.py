@@ -30,7 +30,34 @@ def read_source_text(path: Path, *, preserve_higgs_tags: bool = False) -> str:
 
 
 def count_source_text_chars(path: Path) -> int:
-    return len(read_source_text(path))
+    return source_text_stats(path)[0]
+
+
+def count_source_units(path: Path) -> int:
+    """Count the output units produced by the split-per-paragraph workflow."""
+    return source_text_stats(path)[1]
+
+
+def source_text_stats(path: Path) -> tuple[int, int]:
+    """Return ``(character_count, unit_count)`` from one source-file read.
+
+    The unit count deliberately reuses the same TXT/Markdown paragraph and SRT
+    cue parsing rules as generation, so it predicts the number of split output
+    files rather than merely counting physical lines.
+    """
+    if not path.exists():
+        raise ConfigError(f"Không tìm thấy file nguồn: {path}")
+    if path.suffix.lower() not in SUPPORTED_TEXT_EXTENSIONS:
+        allowed = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS))
+        raise ConfigError(f"File nguồn chưa được hỗ trợ. Định dạng hiện có: {allowed}")
+    content = path.read_text(encoding="utf-8-sig")
+    if path.suffix.lower() == ".srt":
+        text = strip_srt_markup(content)
+        units = parse_srt_units(content)
+    else:
+        text = content.strip()
+        units = paragraph_units(content)
+    return len(text), len(units)
 
 
 def read_source_units(path: Path, *, preserve_higgs_tags: bool = False) -> list[SourceUnit]:

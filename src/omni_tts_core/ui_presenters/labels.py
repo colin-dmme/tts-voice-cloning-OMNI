@@ -51,6 +51,7 @@ def category_badge(category: str) -> str:
         "experimental": "Debug/Legacy",
         "multilingual": "Multilingual",
         "support": "Support",
+        "local-package": "Local package",
     }.get(category, "Custom" if category else "")
 
 
@@ -59,6 +60,7 @@ def origin_badge(origin: str) -> str:
         "official": "Official",
         "community": "Community",
         "custom": "Custom",
+        "vbee_export": "Vbee Export",
     }.get(origin, "")
 
 
@@ -78,6 +80,7 @@ def category_label(category: str) -> str:
         "experimental": "Debug/Legacy",
         "multilingual": "Multilingual",
         "support": "Support",
+        "local-package": "Package local",
     }.get(category, "Custom/Unknown" if category else "")
 
 
@@ -86,6 +89,7 @@ def origin_label(origin: str) -> str:
         "official": "Official",
         "community": "Community",
         "custom": "Custom",
+        "vbee_export": "Vbee Export",
     }.get(origin, "")
 
 
@@ -168,10 +172,12 @@ def model_status_label(item: ModelStatus) -> str:
     if item.hf_cached is False:
         return "Thiếu HF cache"
     if item.installed:
+        if item.source_kind == "manual":
+            return "Package đã nhập" if item.worker_installed is not True else "Worker + package OK"
         return "Model đã tải" if item.worker_installed is not True else "Worker + model OK"
     if item.worker_installed is True:
         return "Worker OK, thiếu model"
-    return "Chưa tải"
+    return "Chưa nhập" if item.source_kind == "manual" else "Chưa tải"
 
 
 def format_model_size(item: ModelStatus) -> str:
@@ -227,6 +233,7 @@ def short_text(value: str, limit: int) -> str:
 # --- Generation result ------------------------------------------------------
 
 def format_result(result: GenerateSpeechResult) -> str:
+    pronunciation_line = _format_pronunciation_result(result)
     if result.item_audio_paths:
         joined = "\n".join(str(path) for path in result.item_audio_paths)
         merged_line = ""
@@ -241,12 +248,27 @@ def format_result(result: GenerateSpeechResult) -> str:
         return (
             f"{result.message}\n"
             f"Số đoạn nhỏ: {result.segment_count}, tổng {result.duration_seconds:.1f} giây\n"
-            f"Audio:\n{joined}{merged_line}{srt_line}"
+            f"Audio:\n{joined}{merged_line}{srt_line}{pronunciation_line}"
         )
     srt_line = f"\nSRT: {result.srt_path}" if result.srt_path else ""
     return (
         f"Hoàn tất {result.segment_count} đoạn, {result.duration_seconds:.1f} giây\n"
-        f"Audio: {result.audio_path}{srt_line}"
+        f"Audio: {result.audio_path}{srt_line}{pronunciation_line}"
+    )
+
+
+def _format_pronunciation_result(result: GenerateSpeechResult) -> str:
+    if result.pronunciation_report_path is None:
+        return ""
+    conflict = (
+        f" · {result.pronunciation_conflict_count} xung đột"
+        if result.pronunciation_conflict_count
+        else ""
+    )
+    return (
+        f"\nCách đọc: {result.pronunciation_term_count} từ khác nhau · "
+        f"{result.pronunciation_match_count} lần áp dụng{conflict}"
+        f"\nBáo cáo cách đọc: {result.pronunciation_report_path}"
     )
 
 

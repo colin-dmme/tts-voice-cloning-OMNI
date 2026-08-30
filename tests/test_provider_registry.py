@@ -20,6 +20,8 @@ class ProviderRegistryTest(unittest.TestCase):
 
     def test_hf_cache_policy_is_declared_by_provider(self) -> None:
         self.assertEqual(provider_descriptor("vieneu").storage_mode, "hf_cache")
+        self.assertEqual(provider_descriptor("vieneu").automatic_chunk_join, "native")
+        self.assertEqual(provider_descriptor("piper").automatic_chunk_join, "punctuation")
         self.assertEqual(provider_descriptor("valtec").storage_mode, "hf_cache")
         self.assertEqual(provider_descriptor("omnivoice").storage_mode, "folder")
 

@@ -67,9 +67,15 @@ class TkinterController:
         self.service = service or TtsService()
         self.license_provider = license_provider or LocalSignedLicenseProvider()
 
-    def model_choices(self, provider_id: str | None = None) -> list[tuple[str, str]]:
-        """Model choices, optionally limited to one provider."""
-        return model_groups.models_for_provider(self.service.registry.tts_models(), provider_id)
+    def model_choices(
+        self,
+        provider_id: str | None = None,
+        query: str = "",
+    ) -> list[tuple[str, str]]:
+        """Model choices, optionally limited by provider and search query."""
+        return model_groups.models_for_provider(
+            self.service.registry.tts_models(), provider_id, query
+        )
 
     def provider_choices(self) -> list[tuple[str, str]]:
         return model_groups.provider_choices(self.service.registry.tts_models())
@@ -281,6 +287,10 @@ class TkinterController:
     def download_model(self, model_id: str) -> str:
         status = self.service.download_model(model_id)
         return f"Đã tải xong: {status.display_name}"
+
+    def import_local_model(self, model_id: str, source_root: str | Path) -> str:
+        status = self.service.import_local_model(model_id, source_root)
+        return f"Đã nhập package local: {status.display_name}"
 
     def download_required_models(self) -> str:
         downloaded = self.service.download_missing_required_models()

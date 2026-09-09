@@ -4,7 +4,7 @@ import hashlib
 import shutil
 import tempfile
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from huggingface_hub import snapshot_download
 
@@ -391,25 +391,55 @@ class ModelStorage:
     def _precache_hf_repos(self, spec: ModelSpec) -> None:
         hf_cache = str(ensure_hf_hub_cache_root())
         for repo in _repos_for_spec(spec):
-            if not self.is_hf_cached(repo):
+            allow_patterns = (
+                _runtime_list(spec, "download_allow_patterns")
+                if repo == spec.hf_repo
+                else []
+            )
+            if not self.is_hf_cached(repo, required_patterns=allow_patterns):
                 try:
                     kwargs = {"repo_id": repo, "cache_dir": hf_cache}
-                    allow_patterns = _runtime_list(spec, "download_allow_patterns")
-                    if repo == spec.hf_repo and allow_patterns:
+                    if allow_patterns:
                         kwargs["allow_patterns"] = allow_patterns
                     snapshot_download(**kwargs)
                 except Exception as exc:
                     raise ModelDownloadError(f"Tải model thất bại: {repo}") from exc
 
     def _is_hf_fully_cached(self, spec: ModelSpec) -> bool:
-        return all(self.is_hf_cached(repo) for repo in _repos_for_spec(spec))
+        return all(
+            self.is_hf_cached(
+                repo,
+                required_patterns=(
+                    _runtime_list(spec, "download_allow_patterns")
+                    if repo == spec.hf_repo
+                    else []
+                ),
+            )
+            for repo in _repos_for_spec(spec)
+        )
 
     @staticmethod
-    def is_hf_cached(hf_repo: str) -> bool:
+    def is_hf_cached(
+        hf_repo: str,
+        required_patterns: list[str] | None = None,
+    ) -> bool:
+        patterns = [pattern for pattern in (required_patterns or []) if pattern]
         for cache_dir in hf_repo_cache_dirs(hf_repo):
             snapshots = cache_dir / "snapshots"
-            if snapshots.exists() and any(snapshots.iterdir()):
-                return True
+            if not snapshots.exists():
+                continue
+            for snapshot in snapshots.iterdir():
+                if not snapshot.is_dir():
+                    continue
+                if not patterns:
+                    return True
+                files = {
+                    PurePosixPath(path.relative_to(snapshot).as_posix())
+                    for path in snapshot.rglob("*")
+                    if path.is_file()
+                }
+                if all(any(path.match(pattern) for path in files) for pattern in patterns):
+                    return True
         return False
 
     @staticmethod

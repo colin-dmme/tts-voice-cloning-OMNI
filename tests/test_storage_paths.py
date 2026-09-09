@@ -31,6 +31,41 @@ class _Registry:
 
 
 class StoragePathsTest(unittest.TestCase):
+    def test_hf_cache_requires_every_configured_pattern_in_one_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cache_dir = Path(temp) / "models--owner--model"
+            stale = cache_dir / "snapshots" / "old"
+            (stale / "onnx_int8").mkdir(parents=True)
+            (stale / "onnx_int8" / "model.onnx").write_bytes(b"old")
+            (stale / "config.json").write_text("{}", encoding="utf-8")
+            spec = ModelSpec(
+                model_id="vieneu_v3_cache_test",
+                display_name="VieNeu v3 Cache Test",
+                provider="vieneu",
+                model_type="tts",
+                local_path=Path(temp) / "worker",
+                hf_repo="owner/model",
+                language_priority="vi",
+                runtime={
+                    "download_allow_patterns": ["onnx_update/*", "config.json"]
+                },
+                capabilities=ModelCapabilities(),
+            )
+            storage = ModelStorage(_Registry(spec))
+
+            with patch(
+                "omni_tts_core.model_storage.hf_repo_cache_dirs",
+                return_value=[cache_dir],
+            ):
+                self.assertFalse(storage._is_hf_fully_cached(spec))
+
+                current = cache_dir / "snapshots" / "current"
+                (current / "onnx_update").mkdir(parents=True)
+                (current / "onnx_update" / "model.onnx").write_bytes(b"new")
+                (current / "config.json").write_text("{}", encoding="utf-8")
+
+                self.assertTrue(storage._is_hf_fully_cached(spec))
+
     def test_models_root_env_redirects_catalog_model_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             model_root = Path(temp) / "model-store"

@@ -13,17 +13,30 @@ from omni_tts_core.worker_installation import (
 )
 
 
-def test_vieneu_v3_catalog_matches_sdk_330_snapshot() -> None:
+def test_vieneu_v3_catalog_matches_sdk_364_snapshot() -> None:
     spec = ModelRegistry().get("vieneu_v3_turbo")
 
-    assert spec.display_name == "VieNeu v3 Turbo 3.3 · 48 kHz"
+    assert spec.display_name == "VieNeu v3 Turbo 3.6.4 · 48 kHz"
     assert worker_for_spec(spec) == "vieneu_v3_worker"
     assert worker_label_for_spec(spec) == "VieNeu v3"
-    assert spec.default_voice_preset == "Adam"
-    assert len(spec.voice_presets) == 20
-    assert {"Ngọc Huyền", "Mỹ Duyên", "Quỳnh Anh", "Đức Trí", "Kim Thanh", "Adam"} <= set(
+    assert spec.default_voice_preset == "Minh Quân"
+    assert len(spec.voice_presets) == 23
+    assert {
+        "Ngọc Huyền",
+        "Mỹ Duyên",
+        "Quỳnh Anh",
+        "Đức Trí",
+        "Kim Thanh",
+        "Adam",
+        "Mạnh Dũng",
+        "Minh Quân",
+        "Anh Khôi",
+    } <= set(
         spec.voice_presets
     )
+    assert spec.voice_presets["Xuân Vĩnh"] == "Xuân Vĩnh · Nam · Bắc · Tự nhiên"
+    assert spec.runtime["precision"] == "fp32"
+    assert "onnx_update/*" in spec.runtime["download_allow_patterns"]
 
 
 def test_vieneu_v2_keeps_the_existing_worker_with_clear_label() -> None:
@@ -48,8 +61,8 @@ def test_vieneu_v3_runtime_status_names_actual_cpu_backend() -> None:
 
     status = RuntimeStatusService().status_for(spec.model_id)
     assert status.actual_device == "cpu"
-    assert "SDK 3.3.0" in status.message
-    assert "CPU ONNX INT8" in status.message
+    assert "SDK 3.6.4" in status.message
+    assert "CPU ONNX FP32" in status.message
     assert "CPU / ONNX Runtime" in status.device_name
 
 
@@ -58,4 +71,4 @@ def test_catalog_distinguishes_vieneu_v3_from_vieneu_v2() -> None:
 
     assert "vieneu_v3_turbo · VieNeu v3" in html
     assert "vieneu_v2_standard · VieNeu v2" in html
-    assert "CPU ONNX INT8 mặc định · GPU PyTorch tùy chọn" in html
+    assert "CPU ONNX FP32 mặc định · GPU PyTorch tùy chọn" in html

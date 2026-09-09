@@ -1,11 +1,11 @@
 [project]
 name = "omni-vieneu-v3-worker"
 version = "0.1.0"
-description = "Independent VieNeu v3 Turbo 3.3 runtime for tts-voice-cloning-OMNI."
+description = "Independent VieNeu v3 Turbo 3.6.4 runtime for tts-voice-cloning-OMNI."
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "vieneu==3.3.0",
-    "sea-g2p>=0.9.0,<1.0.0",
+    "vieneu==3.6.4",
+    "sea-g2p>=0.9.1,<1.0.0",
     "kaldi-native-fbank>=1.20",
     "librosa>=0.11.0",
     "soundfile>=0.13.1",

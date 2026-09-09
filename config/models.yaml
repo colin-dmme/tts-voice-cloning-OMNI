@@ -136,7 +136,7 @@ tts_models:
       install_note: "Cài Piper worker một lần, sau đó tải riêng package giọng."
 
   vieneu_v3_turbo:
-    display_name: "VieNeu v3 Turbo 3.3 · 48 kHz"
+    display_name: "VieNeu v3 Turbo 3.6.4 · 48 kHz"
     provider: "vieneu"
     model_type: "tts"
     local_path: "engines/vieneu_v3_worker/.venv"
@@ -146,8 +146,8 @@ tts_models:
     voice_input:
       modes: ["fixed", "profile"]
       default_mode: "fixed"
-      fixed_label: "20 giọng dựng sẵn VieNeu v3.3"
-      fixed_tooltip: "20 giọng 48 kHz chính thức trong VieNeu SDK 3.3.0; không cần audio mẫu."
+      fixed_label: "23 giọng dựng sẵn VieNeu v3.6.4"
+      fixed_tooltip: "23 giọng 48 kHz chính thức trong VieNeu SDK 3.6.4; không cần audio mẫu."
       profile_label: "Clone từ Profile (3-5 giây)"
       profile_tooltip: "Chỉ khi chọn chế độ này app mới đọc audio mẫu trong Profile."
     capabilities:
@@ -169,7 +169,7 @@ tts_models:
       backend: "auto"
       device: "cpu"
       prefer_cpu_auto: true
-      precision: "int8"
+      precision: "fp32"
       model_subfolder: "update"
       threads: 8
       max_batch_size: 16
@@ -179,19 +179,19 @@ tts_models:
       denoise_reference: true
       download_allow_patterns:
         - "update/*"
-        - "onnx_int8/*"
+        - "onnx_update/*"
         - "config.json"
         - "tokenizer.json"
         - "tokenizer_config.json"
         - "special_tokens_map.json"
         - "denoiser.onnx"
         - "speaker_encoder.onnx"
-    default_voice_preset: "Adam"
+    default_voice_preset: "Minh Quân"
     voice_presets:
       "Minh Đức": "Minh Đức · Nam · Bắc · Tin tức"
       "Phạm Tuyên": "Phạm Tuyên · Nam · Bắc · Tự nhiên"
       "Thái Sơn": "Thái Sơn · Nam · Nam · Kể chuyện"
-      "Xuân Vĩnh": "Xuân Vĩnh · Nam · Nam · Tự nhiên"
+      "Xuân Vĩnh": "Xuân Vĩnh · Nam · Bắc · Tự nhiên"
       "Thanh Bình": "Thanh Bình · Nam · Bắc · Kể chuyện"
       "Trúc Ly": "Trúc Ly · Nữ · Bắc · Tự nhiên"
       "Ngọc Linh": "Ngọc Linh · Nữ · Bắc · Kể chuyện"
@@ -207,8 +207,11 @@ tts_models:
       "Đức Trí": "Đức Trí · Nam · Nam · Đọc truyện"
       "Kim Thanh": "Kim Thanh · Nữ · Nam · Đọc truyện"
       "Ngọc Huyền": "Ngọc Huyền · Nữ · Bắc · Tự nhiên"
-      "Adam": "Adam · Nam · Nam · Tự nhiên (mặc định SDK 3.3)"
-    notes: "VieNeu SDK 3.3.0, 48 kHz; Auto dùng CPU ONNX INT8, GPU PyTorch dành cho batch dài; worker độc lập với VieNeu v2."
+      "Adam": "Adam · Nam · Nam · Tự nhiên"
+      "Mạnh Dũng": "Mạnh Dũng · Nam · Bắc · Tự nhiên"
+      "Minh Quân": "Minh Quân · Nam · Bắc · Tự nhiên"
+      "Anh Khôi": "Anh Khôi · Nam · Bắc · Kể chuyện"
+    notes: "VieNeu SDK 3.6.4, 48 kHz; Auto dùng CPU ONNX FP32, GPU PyTorch dành cho batch dài; worker độc lập với VieNeu v2."
     ref_audio_hints:
       min_seconds: 3.0
       max_seconds: 8.0
@@ -219,17 +222,17 @@ tts_models:
       category: "official-cpu"
       origin: "official"
       family: "VieNeu"
-      variant: "v3 Turbo 3.3 · 48 kHz"
-      variant_badge: "v3.3 48k"
+      variant: "v3 Turbo 3.6.4 · 48 kHz"
+      variant_badge: "v3.6.4 48k"
       source_repo: "pnnbao-ump/VieNeu-TTS-v3-Turbo"
       risk: "test"
-      description: "VieNeu v3 Turbo 3.3 chạy CPU ONNX INT8 hoặc GPU PyTorch, có 20 giọng dựng sẵn, clone 3-8 giây và batch generation."
-      highlight: "20 giọng · CPU ONNX nhẹ · GPU batch"
+      description: "VieNeu v3 Turbo 3.6.4 chạy CPU ONNX FP32 hoặc GPU PyTorch, có 23 giọng dựng sẵn, clone 3-8 giây và batch generation."
+      highlight: "23 giọng · CPU ONNX chất lượng cao · GPU batch"
       quality_score: 5
-      speed_score: 5
+      speed_score: 4
       vram_mb: 5000
       ram_mb: 6000
-      hardware_label: "CPU ONNX INT8 mặc định · GPU PyTorch tùy chọn (~5 GB VRAM)"
+      hardware_label: "CPU ONNX FP32 mặc định · GPU PyTorch tùy chọn (~5 GB VRAM)"
       recommend_for: "Narration chất lượng cao, podcast nhiều chunk, A/B với Piper CPU"
       install_note: "Cài worker VieNeu v3 độc lập; CPU không cần PyTorch, GPU là tùy chọn cho batch dài."
 

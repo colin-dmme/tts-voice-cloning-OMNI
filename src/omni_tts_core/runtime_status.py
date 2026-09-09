@@ -174,7 +174,11 @@ def _worker_status(
         default_note += f"; SDK {info.runtime_version}"
     default_note += "."
     if str(spec.runtime.get("vieneu_mode") or "").lower() == "v3turbo":
-        default_note += " Auto mặc định dùng CPU ONNX INT8; GPU PyTorch chỉ dùng khi chọn GPU CUDA."
+        precision = str(spec.runtime.get("precision") or "fp32").strip().upper()
+        default_note += (
+            f" Auto mặc định dùng CPU ONNX {precision}; "
+            "GPU PyTorch chỉ dùng khi chọn GPU CUDA."
+        )
     if spec.provider == "valtec":
         default_note = "Worker đã cài; mặc định vẫn ưu tiên CPU, CUDA là tùy chọn nâng cao."
     return RuntimeStatus(

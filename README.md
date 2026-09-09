@@ -1,9 +1,10 @@
-# Colin TTS Local v0.5.0
+# Colin TTS Local v0.5.1
 
 App TTS local ưu tiên tiếng Việt, có lõi tách khỏi giao diện để sau này đổi Gradio sang CustomTkinter, PyQt6 hoặc giao diện khác mà không phải viết lại logic model.
 
-Phiên bản `0.5.0` bổ sung MCP server cục bộ để agent điều khiển cùng TTS core
-mà desktop app đang dùng. Bản này cũng kế thừa package Piper local có kiểm chứng,
+Phiên bản `0.5.1` nâng VieNeu v3 Turbo lên SDK 3.6.4 và tiếp tục cung cấp MCP
+server cục bộ để agent điều khiển cùng TTS core mà desktop app đang dùng. Bản
+này cũng kế thừa package Piper local có kiểm chứng,
 bộ tinh chỉnh Piper ONNX dùng thống nhất cho toàn provider và các rào chắn chi tiết
 của AI Performance Director:
 người dùng có thể bật/tắt từng nhóm điều khiển, cấm riêng từng cảm xúc,
@@ -16,7 +17,7 @@ Tkinter và PySide6 phân biệt rõ **Giọng cố định** và **Clone từ P
 contract của từng model. Catalog hiện có 46 model Piper tiếng Việt; 13 mục
 `— Vbee Export` dùng luồng nhập package local riêng, các mục online vẫn tải/gỡ
 như cũ. VIVOS x-low còn cho chọn đủ 65 speaker. VieNeu v3 Turbo cung cấp preset
- 3.3 có đủ 20 giọng 48 kHz và clone Profile trong hai chế độ tách biệt. Xem
+3.6.4 có đủ 23 giọng 48 kHz và clone Profile trong hai chế độ tách biệt. Xem
 [quản lý giọng cố định](docs/fixed-voice-packages.md).
 
 ## Mục tiêu thiết kế
@@ -105,7 +106,7 @@ Bản UI và quản lý model chạy với nhóm thư viện nhẹ. Khi muốn d
 - `Cài worker/môi trường`: cài worker riêng hoặc thư viện TTS chính.
 - `Cài GPU/CUDA`: cài bộ tăng tốc CUDA phù hợp với provider/model.
 
-Các file `install_*.bat` vẫn tồn tại để core chạy đúng tác vụ trên Windows, nhưng không cần bấm trực tiếp khi dùng app. VieNeu, Qwen, Valtec, F5-TTS, Chatterbox, Kokoro ONNX và Supertonic 3 chạy trong worker riêng dưới `engines/`, tách khỏi môi trường chính để tránh xung đột dependency với OmniVoice. Riêng VieNeu được tách rõ: `vieneu_v3_worker` cho v3.3 và `vieneu_worker` cho VieNeu v2/GGUF cũ; hai môi trường không dùng chung package.
+Các file `install_*.bat` vẫn tồn tại để core chạy đúng tác vụ trên Windows, nhưng không cần bấm trực tiếp khi dùng app. VieNeu, Qwen, Valtec, F5-TTS, Chatterbox, Kokoro ONNX và Supertonic 3 chạy trong worker riêng dưới `engines/`, tách khỏi môi trường chính để tránh xung đột dependency với OmniVoice. Riêng VieNeu được tách rõ: `vieneu_v3_worker` cho v3.6.4 và `vieneu_worker` cho VieNeu v2/GGUF cũ; hai môi trường không dùng chung package.
 
 Hai provider ONNX đa ngôn ngữ mới được ghi rõ xuất xứ trong tên catalog:
 
@@ -119,7 +120,7 @@ Kokoro có cắt im lặng/ngữ điệu liên tục; Supertonic có mức chấ
 Tốc độ, chia chunk, nghỉ dấu câu, nghỉ đoạn gốc, đầu ra WAV/MP3, hàng đợi và SRT
 vẫn dùng cùng hành vi chung của ứng dụng.
 
-VieNeu v3.3 mặc định chạy **CPU ONNX INT8** bằng
+VieNeu v3.6.4 mặc định chạy **CPU ONNX FP32** bằng
 `install_vieneu_v3_worker.bat`, không cài PyTorch. Chỉ dùng
 `install_vieneu_v3_worker_cuda.bat` khi cần **GPU PyTorch** cho văn bản dài hoặc
 batch lớn. Màn hình sẽ ghi rõ `VieNeu v3`/`VieNeu v2` và backend thực tế để tránh

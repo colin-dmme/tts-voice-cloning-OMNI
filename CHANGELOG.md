@@ -96,6 +96,22 @@ trong file này. Dự án sử dụng phiên bản theo Semantic Versioning.
   theo dấu câu. Logic chọn chính sách nằm ở Core và metadata provider, không ở GUI.
 - Loại bỏ crossfade ẩn toàn cục và tự di trú cấu hình nghỉ chunk cũ để giữ hành vi.
 
+## [0.5.1] - 2026-09-10
+
+### Changed
+
+- Nâng worker VieNeu v3 Turbo từ SDK 3.3.0 lên 3.6.4 và `sea-g2p` lên 0.9.1.
+- Đồng bộ catalog lên 23 giọng chính thức, dùng Minh Quân làm mặc định cho lượt
+  chọn mới và giữ tương thích với lựa chọn giọng đã lưu trước đó.
+- Chuyển cấu hình CPU mặc định sang ONNX FP32 và tải đúng thư mục
+  `onnx_update` của model 3.6.4.
+
+### Fixed
+
+- Kiểm tra cache Hugging Face theo toàn bộ pattern bắt buộc thay vì chỉ kiểm tra
+  sự tồn tại của một snapshot bất kỳ.
+- MCP không còn công bố lựa chọn fixed voice có `voice_id` rỗng.
+
 ## [0.3.1] - 2026-07-29
 
 ### Added

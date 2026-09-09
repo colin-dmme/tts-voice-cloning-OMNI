@@ -85,7 +85,10 @@ def get_generation_contract(model_id: str) -> dict[str, Any]:
         "form": descriptor.model_dump(mode="json"),
         "fixed_voices": [
             {"label": label, "voice_id": voice_id}
-            for label, voice_id in service.list_voice_presets(model_id)
+            for label, voice_id in service.list_voice_presets(
+                model_id, include_none=False
+            )
+            if voice_id
         ],
         "advanced_fields": advanced_setting_fields(),
     }
@@ -102,7 +105,10 @@ def list_voices(
     service = runtime.controller.service
     fixed = [
         {"voice_id": voice_id, "name": label, "mode": "fixed"}
-        for label, voice_id in service.list_voice_presets(model_id)
+        for label, voice_id in service.list_voice_presets(
+            model_id, include_none=False
+        )
+        if voice_id
         if not query or query.casefold() in f"{label} {voice_id}".casefold()
     ]
     library = [

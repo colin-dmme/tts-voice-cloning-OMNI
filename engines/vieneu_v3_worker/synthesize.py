@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import inspect
 import json
 import sys
 from importlib.metadata import PackageNotFoundError, version
@@ -73,11 +74,15 @@ def _cached_tts(vieneu_factory: type, payload: dict) -> Any:
         "model_subfolder",
         "moss_tokenizer",
         "device",
+        "dtype",
         "backend",
+        "onnx_repo",
+        "onnx_dir",
         "precision",
         "onnx_subfolder",
         "threads",
         "max_batch_size",
+        "babble_retries",
     )
     constructor = {
         key: payload[key]
@@ -126,6 +131,7 @@ def _serve(vieneu_factory: type) -> None:
 
 def _describe() -> dict[str, Any]:
     presets, default_voice = _preset_catalog()
+    sdk_defaults = _sdk_v3_defaults()
     onnx_providers: list[str] = []
     try:
         import onnxruntime as ort
@@ -150,9 +156,10 @@ def _describe() -> dict[str, Any]:
         "worker_label": "VieNeu v3",
         "sdk_version": _package_version("vieneu"),
         "sea_g2p_version": _package_version("sea-g2p"),
-        "backend_default": "onnx",
-        "device_default": "cpu",
-        "precision_default": "int8",
+        "backend_default": sdk_defaults.get("backend", "auto"),
+        "device_default": sdk_defaults.get("device", "auto"),
+        "precision_default": sdk_defaults.get("precision", ""),
+        "supported_precisions": ["fp32", "int8"],
         "onnx_providers": onnx_providers,
         "torch_version": torch_version,
         "cuda_available": cuda_available,
@@ -161,6 +168,22 @@ def _describe() -> dict[str, Any]:
         "preset_count": len(presets),
         "presets": presets,
     }
+
+
+def _sdk_v3_defaults() -> dict[str, Any]:
+    try:
+        from vieneu.v3turbo import V3TurboVieNeuTTS
+
+        parameters = inspect.signature(V3TurboVieNeuTTS.__init__).parameters
+        defaults: dict[str, Any] = {}
+        for key in ("backend", "device", "precision", "babble_retries"):
+            parameter = parameters.get(key)
+            if parameter is None or parameter.default is inspect.Parameter.empty:
+                continue
+            defaults[key] = parameter.default
+        return defaults
+    except Exception:
+        return {}
 
 
 def _preset_catalog() -> tuple[dict[str, str], str]:

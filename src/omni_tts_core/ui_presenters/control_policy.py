@@ -172,9 +172,12 @@ def build_policy(
         )
         device_note = f"{provider_label} chạy ONNX trên CPU; không dùng GPU CUDA."
     elif spec.provider == "vieneu" and str((getattr(spec, "runtime", {}) or {}).get("vieneu_mode") or "").lower() == "v3turbo":
+        precision = str(
+            (getattr(spec, "runtime", {}) or {}).get("precision") or "fp32"
+        ).strip().upper()
         device_targets = (
-            ("Tự động · CPU ONNX INT8 (khuyến nghị)", "auto"),
-            ("CPU ONNX · nhẹ, phù hợp câu ngắn", "cpu"),
+            (f"Tự động · CPU ONNX {precision} (khuyến nghị)", "auto"),
+            ("CPU ONNX · chất lượng cao, phù hợp câu ngắn", "cpu"),
             *((("GPU CUDA · PyTorch, tối ưu batch dài", "cuda"),) if gpu_available else ()),
         )
         device_note = (

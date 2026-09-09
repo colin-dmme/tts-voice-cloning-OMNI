@@ -6,7 +6,7 @@ set HF_HOME=%CD%\.hf_cache
 set HF_HUB_CACHE=%CD%\.hf_cache\hub
 set HF_HUB_DISABLE_SYMLINKS_WARNING=1
 
-echo Installing independent VieNeu v3 Turbo 3.3 CPU/ONNX worker...
+echo Installing independent VieNeu v3 Turbo 3.6.4 CPU/ONNX worker...
 cd engines\vieneu_v3_worker
 uv sync --inexact
 if errorlevel 1 goto fail

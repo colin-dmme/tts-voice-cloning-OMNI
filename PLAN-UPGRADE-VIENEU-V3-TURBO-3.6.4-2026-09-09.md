@@ -794,26 +794,26 @@ Không:
 
 Upgrade chỉ coi là hoàn tất khi đạt tất cả:
 
-- [ ] `vieneu==3.6.4`
-- [ ] `sea-g2p>=0.9.1`
-- [ ] `uv.lock` cập nhật đúng
-- [ ] worker `.venv` describe báo 3.6.4
-- [ ] 23 preset voice
-- [ ] default preset = Minh Quân
-- [ ] ba voice mới xuất hiện
-- [ ] preset Ngọc Huyền vẫn hoạt động
-- [ ] CPU ONNX FP32 là default
-- [ ] INT8 không còn bị mô tả là default bắt buộc
-- [ ] fixed voice generation PASS
-- [ ] voice cloning PASS
-- [ ] batch PASS
-- [ ] WAV output 48 kHz
-- [ ] runtime status/UI không còn string 3.3.0 sai
-- [ ] tests VieNeu v3 PASS
-- [ ] tests VieNeu v2 regression PASS
-- [ ] không phá provider khác
-- [ ] không xóa/thay đổi file không liên quan
-- [ ] nếu chỉnh GPU installer: GTX 1080 Ti generation thật PASS
+- [x] `vieneu==3.6.4`
+- [x] `sea-g2p>=0.9.1`
+- [x] `uv.lock` cập nhật đúng
+- [x] worker `.venv` describe báo 3.6.4
+- [x] 23 preset voice
+- [x] default preset = Minh Quân
+- [x] ba voice mới xuất hiện
+- [x] preset Ngọc Huyền vẫn hoạt động
+- [x] CPU ONNX FP32 là default
+- [x] INT8 không còn bị mô tả là default bắt buộc
+- [x] fixed voice generation PASS
+- [x] voice cloning PASS
+- [x] batch PASS
+- [x] WAV output 48 kHz
+- [x] runtime status/UI không còn string 3.3.0 sai
+- [x] tests VieNeu v3 PASS
+- [x] tests VieNeu v2 regression PASS
+- [x] không phá provider khác
+- [x] không xóa/thay đổi file không liên quan
+- [x] GTX 1080 Ti generation thật PASS
 
 ---
 
@@ -897,3 +897,29 @@ Các điều chỉnh dưới đây là một phần bắt buộc của kế ho�
     README và CHANGELOG sau khi mọi smoke test đạt yêu cầu.
 11. Rollback dùng worker/lock cũ đã giữ lại hoặc revert commit nâng cấp. Không dùng
     `git reset --hard` hay `git clean` vì repo có dữ liệu untracked của người dùng.
+
+---
+
+## 16. Kết quả triển khai ngày 2026-09-10
+
+Trạng thái: **Hoàn tất compatibility upgrade 0.5.1**.
+
+- [x] Worker production: `vieneu==3.6.4`, `sea-g2p==0.9.1`.
+- [x] Catalog: 23 preset, mặc định Minh Quân, vẫn giữ Adam và Ngọc Huyền.
+- [x] CPU mặc định: ONNX FP32, WAV 48 kHz.
+- [x] Fixed voice: Adam, Ngọc Huyền và Minh Quân sinh audio thật thành công.
+- [x] Clone từ audio Ngọc Huyền sinh audio thật thành công.
+- [x] Batch 5 câu sinh đủ 5 WAV 48 kHz.
+- [x] MCP stdio 0.5.1 đọc đúng 23 giọng và sinh WAV thật bằng Minh Quân.
+- [x] GPU canary: GTX 1080 Ti, PyTorch 2.7.1+cu118, `sm_61`, sinh WAV 48 kHz.
+- [x] Targeted tests: 44 passed.
+- [x] Full suite: 390 passed, 292 subtests passed, 1 deprecation warning không
+  liên quan đến VieNeu.
+
+Baseline, canary và báo cáo đo được lưu dưới `outputs/qa/`. Các file audio này
+không được đưa vào Git. Worker 3.3.0 cũ được giữ tại
+`C:\Coder\_venvs\omni-vieneu-v3-330-backup-20260910` để rollback độc lập.
+
+MCP SDK không được nâng từ 2.0.0 lên 2.2.0 trong change set này. Protocol test
+và real stdio generation đều đạt với 2.0.0, nên việc nâng SDK không cần thiết
+cho compatibility upgrade VieNeu và được tách thành thay đổi bảo trì riêng.

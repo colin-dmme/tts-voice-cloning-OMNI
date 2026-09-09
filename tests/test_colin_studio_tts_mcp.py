@@ -133,6 +133,7 @@ class McpProtocolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 result.structured_content["server"], "colin_studio_tts_mcp"
             )
+            self.assertEqual(result.structured_content["version"], "0.5.1")
             models = await client.call_tool("list_models", {})
             self.assertGreater(models.structured_content["count"], 0)
             model_id = models.structured_content["models"][0]["model_id"]
@@ -142,6 +143,30 @@ class McpProtocolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(contract.structured_content["model_id"], model_id)
             voices = await client.call_tool("list_voices", {"model_id": model_id})
             self.assertIn("voices", voices.structured_content)
+
+            vieneu_contract = await client.call_tool(
+                "get_generation_contract", {"model_id": "vieneu_v3_turbo"}
+            )
+            fixed = vieneu_contract.structured_content["fixed_voices"]
+            self.assertEqual(len(fixed), 23)
+            self.assertTrue(all(item["voice_id"] for item in fixed))
+            self.assertEqual(
+                vieneu_contract.structured_content["form"]["default_fixed_voice_id"],
+                "Minh Quân",
+            )
+            self.assertIn("Adam", {item["voice_id"] for item in fixed})
+            self.assertIn("Anh Khôi", {item["voice_id"] for item in fixed})
+
+            vieneu_voices = await client.call_tool(
+                "list_voices", {"model_id": "vieneu_v3_turbo"}
+            )
+            fixed_voices = [
+                item
+                for item in vieneu_voices.structured_content["voices"]
+                if item["mode"] == "fixed"
+            ]
+            self.assertEqual(len(fixed_voices), 23)
+            self.assertTrue(all(item["voice_id"] for item in fixed_voices))
 
     async def test_real_stdio_process_has_clean_protocol_output(self) -> None:
         params = StdioServerParameters(

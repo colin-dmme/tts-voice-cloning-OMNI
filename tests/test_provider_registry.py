@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import unittest
 import tempfile
+import unittest
 from pathlib import Path
 
 from omni_tts_core.model_storage import _move_to_trash
@@ -24,6 +24,18 @@ class ProviderRegistryTest(unittest.TestCase):
         self.assertEqual(provider_descriptor("piper").automatic_chunk_join, "punctuation")
         self.assertEqual(provider_descriptor("valtec").storage_mode, "hf_cache")
         self.assertEqual(provider_descriptor("omnivoice").storage_mode, "folder")
+
+    def test_zerotts_owns_text_preprocessing_and_native_chunking(self) -> None:
+        descriptor = provider_descriptor("zerotts")
+
+        self.assertIsNotNone(descriptor)
+        self.assertEqual(descriptor.worker_name, "zerotts_worker")
+        self.assertEqual(descriptor.storage_mode, "folder")
+        self.assertEqual(descriptor.automatic_chunk_join, "native")
+        self.assertTrue(descriptor.native_text_preprocessing)
+        self.assertIn(
+            "normalize_vi_text", {setting.key for setting in descriptor.settings}
+        )
 
     def test_removal_moves_payload_to_recoverable_trash(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

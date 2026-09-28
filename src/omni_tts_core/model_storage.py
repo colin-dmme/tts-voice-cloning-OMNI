@@ -152,6 +152,9 @@ class ModelStorage:
         download_kwargs = {
             "repo_id": spec.hf_repo,
         }
+        revision = _runtime_text(spec, "hf_revision")
+        if revision:
+            download_kwargs["revision"] = revision
         if not _uses_ephemeral_download_cache(spec):
             download_kwargs["cache_dir"] = str(ensure_hf_hub_cache_root())
         allow_patterns = _runtime_list(spec, "download_allow_patterns")
@@ -399,6 +402,9 @@ class ModelStorage:
             if not self.is_hf_cached(repo, required_patterns=allow_patterns):
                 try:
                     kwargs = {"repo_id": repo, "cache_dir": hf_cache}
+                    revision = _runtime_text(spec, "hf_revision")
+                    if repo == spec.hf_repo and revision:
+                        kwargs["revision"] = revision
                     if allow_patterns:
                         kwargs["allow_patterns"] = allow_patterns
                     snapshot_download(**kwargs)

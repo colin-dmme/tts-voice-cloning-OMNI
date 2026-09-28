@@ -6,6 +6,7 @@
 |---|---|---|
 | [engine-architecture.md](engine-architecture.md) | Sơ đồ kiến trúc toàn bộ engine system, provider mapping, YAML model registry, capabilities system | 2026-05-15 |
 | [vieneu-engine.md](vieneu-engine.md) | Chi tiết VieNeu integration: 4 modes, 16 models, GPU setup, cách thêm model/mode, known issues, roadmap | 2026-05-15 |
+| [zerotts-engine.md](zerotts-engine.md) | Nghiên cứu ZeroTTS 0.1.2, ONNX và GGUF F32/Q8_0/Q4_0, setting, giới hạn voice clone, benchmark và kiểm chứng MCP thật | 2026-09-13 |
 | [voice-profile-optimization.md](voice-profile-optimization.md) | Hiện trạng và kế hoạch dài hạn tối ưu Profile giọng cho app đa engine | 2026-05-15 |
 | [runtime-device-policy.md](runtime-device-policy.md) | Quy ước Auto/CPU/GPU CUDA cho app đa engine, detector/policy/runtime target | 2026-05-16 |
 | [rented-machine-workflow.md](rented-machine-workflow.md) | Cách dùng GitHub làm state source cho máy thuê mới hoàn toàn | 2026-05-17 |

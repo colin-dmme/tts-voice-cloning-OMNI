@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
-import sys
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -99,6 +99,7 @@ class McpJobStoreTests(unittest.TestCase):
 try:
     from mcp import Client
     from mcp.client.stdio import StdioServerParameters, stdio_client
+
     from colin_studio_tts_mcp.server import mcp
 except ImportError:  # The MCP dependency is an optional project extra.
     Client = None
@@ -167,6 +168,46 @@ class McpProtocolTests(unittest.IsolatedAsyncioTestCase):
             ]
             self.assertEqual(len(fixed_voices), 23)
             self.assertTrue(all(item["voice_id"] for item in fixed_voices))
+
+            zerotts_contract = await client.call_tool(
+                "get_generation_contract", {"model_id": "zerotts_202m_official"}
+            )
+            zero_data = zerotts_contract.structured_content
+            self.assertEqual(zero_data["provider"], "zerotts")
+            self.assertEqual(
+                zero_data["form"]["default_fixed_voice_id"], "maichi"
+            )
+            self.assertIn(
+                "audio_temperature",
+                {item["key"] for item in zero_data["provider_settings"]},
+            )
+            zero_models = await client.call_tool(
+                "list_models", {"provider_id": "zerotts"}
+            )
+            self.assertEqual(zero_models.structured_content["count"], 4)
+            self.assertEqual(
+                {
+                    item["model_id"]
+                    for item in zero_models.structured_content["models"]
+                },
+                {
+                    "zerotts_202m_official",
+                    "zerotts_202m_gguf_f32",
+                    "zerotts_202m_gguf_q8_0",
+                    "zerotts_202m_gguf_q4_0",
+                },
+            )
+            gguf_contract = await client.call_tool(
+                "get_generation_contract",
+                {"model_id": "zerotts_202m_gguf_q8_0"},
+            )
+            gguf_keys = {
+                item["key"]
+                for item in gguf_contract.structured_content["provider_settings"]
+            }
+            self.assertEqual(len(gguf_keys), 20)
+            self.assertNotIn("cfg_scale", gguf_keys)
+            self.assertNotIn("warmup", gguf_keys)
 
     async def test_real_stdio_process_has_clean_protocol_output(self) -> None:
         params = StdioServerParameters(

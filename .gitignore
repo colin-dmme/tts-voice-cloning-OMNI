@@ -15,6 +15,7 @@ env/
 engines/*/.venv/
 engines/*/vendor/
 engines/*/pretrained/
+engines/*/native/bin/
 
 # Build, obfuscation, and release outputs
 build/

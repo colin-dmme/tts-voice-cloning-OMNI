@@ -17,7 +17,6 @@ from .contracts import (
 )
 from .runtime import McpRuntime
 
-
 # stdout belongs exclusively to the stdio protocol.
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
@@ -78,6 +77,7 @@ def get_generation_contract(model_id: str) -> dict[str, Any]:
     """Đọc capability, form động và giọng cố định của model từ core."""
     service = runtime.controller.service
     descriptor = service.generation_form_descriptor(model_id)
+    policy = runtime.controller.control_policy(model_id)
     return {
         "model_id": model_id,
         "provider": service.model_provider(model_id),
@@ -90,6 +90,7 @@ def get_generation_contract(model_id: str) -> dict[str, Any]:
             )
             if voice_id
         ],
+        "provider_settings": [asdict(setting) for setting in policy.provider_settings],
         "advanced_fields": advanced_setting_fields(),
     }
 

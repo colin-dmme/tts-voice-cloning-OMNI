@@ -22,7 +22,10 @@ from omni_tts_core.engines.batch_progress import report_ready_chunks
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
 from omni_tts_core.progress import check_cancel
-from omni_tts_core.provider_options import normalize_provider_options
+from omni_tts_core.provider_options import (
+    normalize_provider_options,
+    provider_settings_for_model,
+)
 from omni_tts_core.text.punctuation_pauses import (
     PauseRange,
     PunctuationPauseConfig,
@@ -54,10 +57,15 @@ class _JsonLineWorker:
         if process is None or process.poll() is not None:
             return
         try:
-            process.terminate()
+            if process.stdin is not None:
+                process.stdin.close()
             process.wait(timeout=3)
         except Exception:
-            process.kill()
+            try:
+                process.terminate()
+                process.wait(timeout=2)
+            except Exception:
+                process.kill()
 
     def run(self, payload: dict, *, timeout: float, cancel_event, tick_callback) -> None:
         with self._lock:
@@ -175,7 +183,9 @@ class PresetOnnxSubprocessEngine(BaseTtsEngine):
         if not requests:
             return []
         options = normalize_provider_options(
-            self.descriptor, requests[0].provider_options
+            self.descriptor,
+            requests[0].provider_options,
+            settings=provider_settings_for_model(self.descriptor, self.spec.runtime),
         )
         outputs_root = PROJECT_ROOT / "outputs"
         outputs_root.mkdir(parents=True, exist_ok=True)

@@ -78,7 +78,7 @@ Desktop Coworker sẽ công bố tool dưới dạng `tts__health`,
 |---|---|
 | `health` | Kiểm tra server, version, DB job và model đang resident |
 | `list_models` | Tìm model, lọc provider hoặc chỉ model đã cài |
-| `get_generation_contract` | Đọc capability, form động, giọng cố định và advanced fields |
+| `get_generation_contract` | Đọc capability, form động, giọng cố định, provider settings và advanced fields |
 | `list_voices` | Liệt kê preset cố định, profile clone và voice design |
 | `start_text_generation` | Tạo job nền từ văn bản |
 | `start_file_generation` | Tạo job nền từ 1–100 file TXT/MD/SRT |
@@ -130,6 +130,37 @@ Ba kiểu voice:
 - `fixed`: `voice_id` là preset/speaker ID; có thể null nếu model không bắt buộc.
 - `profile`: `voice_id` là profile ID đã lưu; bắt buộc.
 - `design`: `voice_id` là designed voice ID đã lưu; bắt buộc.
+
+MCP không hardcode tham số riêng của provider. Ví dụ với
+`zerotts_202m_gguf_q8_0`, hãy đọc `provider_settings` từ
+`get_generation_contract`, rồi gửi các giá trị cần đổi trong
+`generation.provider_options`:
+
+```json
+{
+  "request": {
+    "text": "Ngày 13/09/2026, ZeroTTS được gọi qua MCP.",
+    "model_id": "zerotts_202m_gguf_q8_0",
+    "voice": {"mode": "fixed", "voice_id": "maichi"},
+    "generation": {
+      "language": "vi",
+      "runtime_target": "cpu",
+      "provider_options": {
+        "normalize_vi_text": true,
+        "audio_temperature": 0.8,
+        "audio_topk": 25,
+        "audio_topp": 0.95,
+        "streaming_decoder": true,
+        "intra_op_num_threads": 4
+      }
+    }
+  }
+}
+```
+
+Provider ZeroTTS hiện trả bốn model: ONNX, GGUF F32, GGUF Q8_0 và GGUF Q4_0.
+Contract ONNX có 22 setting. Mỗi contract GGUF có 20 setting và không nhận
+`cfg_scale` hoặc `warmup`, đúng giới hạn runtime C++ upstream.
 
 ## Chính sách an toàn và dữ liệu
 

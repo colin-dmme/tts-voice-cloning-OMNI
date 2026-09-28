@@ -152,7 +152,7 @@ class TkinterApp(GenerationTabsMixin):
         self.provider_option_vars: dict[str, tk.Variable] = {}
         self._provider_option_cache: dict[str, dict] = {}
         self._provider_option_signature: tuple | None = None
-        self._provider_option_provider: str | None = None
+        self._provider_option_model: str | None = None
         self.emotion_combos: list[ttk.Combobox] = []
         self.profile_compat_labels: list[ttk.Label] = []
         self._preference_trace_ready = False
@@ -1906,7 +1906,7 @@ class TkinterApp(GenerationTabsMixin):
 
     def _configure_declarative_tuning(self, policy) -> None:
         signature = (
-            policy.provider_id,
+            policy.model_id,
             tuple(
                 (item.key, item.kind, item.default, item.minimum, item.maximum, item.step)
                 for item in policy.provider_settings
@@ -1914,11 +1914,11 @@ class TkinterApp(GenerationTabsMixin):
         )
         if signature == self._provider_option_signature:
             return
-        if self._provider_option_provider:
-            self._provider_option_cache[self._provider_option_provider] = (
+        if self._provider_option_model:
+            self._provider_option_cache[self._provider_option_model] = (
                 self._current_provider_options()
             )
-        saved = self._provider_option_cache.get(policy.provider_id)
+        saved = self._provider_option_cache.get(policy.model_id)
         if saved is None and self.preference_data.get("model_id") == policy.model_id:
             saved = dict(self.preference_data.get("provider_options") or {})
         saved = saved or {}
@@ -1965,7 +1965,7 @@ class TkinterApp(GenerationTabsMixin):
                     )
                     widget.pack(fill="x", pady=(4, 8))
                 attach_tooltip(widget, setting.tooltip)
-        self._provider_option_provider = policy.provider_id
+        self._provider_option_model = policy.model_id
         self._provider_option_signature = signature
 
     def _sync_punctuation_tabs(self, policy) -> None:

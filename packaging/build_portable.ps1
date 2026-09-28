@@ -174,7 +174,9 @@ function Copy-Config {
 
 function Copy-PortableTools {
     $tools = @(
-        "Fix-RTX50-CUDA.bat"
+        "Fix-RTX50-CUDA.bat",
+        "install_zerotts_worker.bat",
+        "install_zerotts_gguf_worker.bat"
     )
     foreach ($tool in $tools) {
         $source = Join-Path $ProjectRoot $tool
@@ -254,13 +256,23 @@ function Build-Worker {
         Copy-Directory `
             -Source $sourceDir `
             -Destination $targetDir `
-            -ExcludeDirs @(".venv", "__pycache__", "vendor", "pretrained", "site-packages")
+            -ExcludeDirs @(".venv", "__pycache__", "vendor", "pretrained", "site-packages", "build")
     } else {
         Copy-Item -LiteralPath (Join-Path $sourceDir "README.md") -Destination $targetDir -Force -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath (Join-Path $sourceDir "pyproject.toml") -Destination $targetDir -Force -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath (Join-Path $sourceDir "uv.lock") -Destination $targetDir -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath (Join-Path $sourceDir "build_native.py") -Destination $targetDir -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath (Join-Path $sourceDir "native")) {
+            Copy-Directory `
+                -Source (Join-Path $sourceDir "native") `
+                -Destination (Join-Path $targetDir "native") `
+                -ExcludeDirs @("build")
+        }
     }
-    if (Test-Path -LiteralPath (Join-Path $sourceDir "vendor")) {
+    if (
+        $Name -ne "zerotts_gguf_worker" -and
+        (Test-Path -LiteralPath (Join-Path $sourceDir "vendor"))
+    ) {
         Copy-Directory `
             -Source (Join-Path $sourceDir "vendor") `
             -Destination (Join-Path $targetDir "vendor") `
@@ -354,6 +366,8 @@ Copy-MainRuntime
 Build-Worker -Name "vieneu_worker"
 Build-Worker -Name "qwen_worker"
 Build-Worker -Name "valtec_worker"
+Build-Worker -Name "zerotts_worker"
+Build-Worker -Name "zerotts_gguf_worker"
 
 New-Item -ItemType Directory -Force -Path (Join-Path $PortableRoot "models") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $PortableRoot "voices") | Out-Null

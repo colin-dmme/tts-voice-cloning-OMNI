@@ -14,8 +14,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from omni_tts_core.model_registry import ModelSpec
+from omni_tts_core.provider_options import (
+    ProviderSettingSpec,
+    provider_settings_for_model,
+)
 from omni_tts_core.provider_registry import provider_descriptor
-from omni_tts_core.provider_options import ProviderSettingSpec
 from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES
 from omni_tts_core.ui_presenters.tooltips import tooltip
 from omni_tts_core.worker_installation import worker_label_for_spec
@@ -159,26 +162,40 @@ def build_policy(
     gpu_available = bool(runtime_status.gpu_available)
 
     languages = tuple(
-        (_language_choice_label(code), code) for code in capabilities.supported_languages
+        (_language_choice_label(code), code)
+        for code in capabilities.supported_languages
     ) or (("Tiếng Việt", "vi"),)
 
     if is_remote:
         device_targets = (("GPU từ xa (server quyết định)", "auto"),)
         device_note = "Máy hiện tại chỉ gửi request; GPU và runtime nằm ở endpoint."
     elif bool((getattr(spec, "runtime", {}) or {}).get("cpu_only")):
+        cpu_backend = str(
+            (getattr(spec, "runtime", {}) or {}).get("cpu_backend_label") or "CPU ONNX"
+        ).strip()
         device_targets = (
-            ("Tự động · CPU ONNX (khuyến nghị)", "auto"),
-            ("CPU ONNX", "cpu"),
+            (f"Tự động · {cpu_backend} (khuyến nghị)", "auto"),
+            (cpu_backend, "cpu"),
         )
-        device_note = f"{provider_label} chạy ONNX trên CPU; không dùng GPU CUDA."
-    elif spec.provider == "vieneu" and str((getattr(spec, "runtime", {}) or {}).get("vieneu_mode") or "").lower() == "v3turbo":
-        precision = str(
-            (getattr(spec, "runtime", {}) or {}).get("precision") or "fp32"
-        ).strip().upper()
+        device_note = f"{provider_label} chạy {cpu_backend}; không dùng GPU CUDA."
+    elif (
+        spec.provider == "vieneu"
+        and str((getattr(spec, "runtime", {}) or {}).get("vieneu_mode") or "").lower()
+        == "v3turbo"
+    ):
+        precision = (
+            str((getattr(spec, "runtime", {}) or {}).get("precision") or "fp32")
+            .strip()
+            .upper()
+        )
         device_targets = (
             (f"Tự động · CPU ONNX {precision} (khuyến nghị)", "auto"),
             ("CPU ONNX · chất lượng cao, phù hợp câu ngắn", "cpu"),
-            *((("GPU CUDA · PyTorch, tối ưu batch dài", "cuda"),) if gpu_available else ()),
+            *(
+                (("GPU CUDA · PyTorch, tối ưu batch dài", "cuda"),)
+                if gpu_available
+                else ()
+            ),
         )
         device_note = (
             "VieNeu v3 chạy CPU ONNX khi chọn Tự động. GPU PyTorch chỉ có lợi rõ với "
@@ -221,7 +238,9 @@ def build_policy(
             tooltip("vieneu_emotion"),
         ),
         emotions=tuple(capabilities.emotions or ()),
-        codec=_state(supports_codec, "Model này không chọn được codec.", tooltip("vieneu_codec")),
+        codec=_state(
+            supports_codec, "Model này không chọn được codec.", tooltip("vieneu_codec")
+        ),
         sampling=_state(
             supports_sampling,
             "Model này không chỉnh được temperature/top-k.",
@@ -263,7 +282,11 @@ def build_policy(
             else _gpu_scope_note(spec.provider, gpu_available)
         ),
         piper_recommendation=_piper_recommendation(spec),
-        provider_settings=descriptor.settings if descriptor else (),
+        provider_settings=(
+            provider_settings_for_model(descriptor, getattr(spec, "runtime", {}) or {})
+            if descriptor
+            else ()
+        ),
         speed_minimum=descriptor.speed_minimum if descriptor else 0.5,
         speed_maximum=descriptor.speed_maximum if descriptor else 1.8,
     )

@@ -106,19 +106,29 @@ Bản UI và quản lý model chạy với nhóm thư viện nhẹ. Khi muốn d
 - `Cài worker/môi trường`: cài worker riêng hoặc thư viện TTS chính.
 - `Cài GPU/CUDA`: cài bộ tăng tốc CUDA phù hợp với provider/model.
 
-Các file `install_*.bat` vẫn tồn tại để core chạy đúng tác vụ trên Windows, nhưng không cần bấm trực tiếp khi dùng app. VieNeu, Qwen, Valtec, F5-TTS, Chatterbox, Kokoro ONNX và Supertonic 3 chạy trong worker riêng dưới `engines/`, tách khỏi môi trường chính để tránh xung đột dependency với OmniVoice. Riêng VieNeu được tách rõ: `vieneu_v3_worker` cho v3.6.4 và `vieneu_worker` cho VieNeu v2/GGUF cũ; hai môi trường không dùng chung package.
+Các file `install_*.bat` vẫn tồn tại để core chạy đúng tác vụ trên Windows, nhưng không cần bấm trực tiếp khi dùng app. VieNeu, Qwen, Valtec, F5-TTS, Chatterbox, Kokoro ONNX, Supertonic 3 và ZeroTTS chạy trong worker riêng dưới `engines/`, tách khỏi môi trường chính để tránh xung đột dependency với OmniVoice. Riêng VieNeu được tách rõ: `vieneu_v3_worker` cho v3.6.4 và `vieneu_worker` cho VieNeu v2/GGUF cũ; hai môi trường không dùng chung package.
 
-Hai provider ONNX đa ngôn ngữ mới được ghi rõ xuất xứ trong tên catalog:
+Ba provider ONNX độc lập được ghi rõ xuất xứ trong tên catalog:
 
 - `Kokoro 82M v1.0 Timestamped · ONNX Community · 54 giọng`: bản chuyển đổi
   của `onnx-community`, hỗ trợ 8 ngôn ngữ nhưng **không có tiếng Việt**.
 - `Supertonic 3 · ONNX Official · 31 ngôn ngữ`: model chính thức của Supertone,
   có tiếng Việt, 10 voice style `F1–F5/M1–M5`, chạy CPU 44,1 kHz.
+- ZeroTTS có bốn lựa chọn để A/B trên CPU: ONNX, GGUF F32, GGUF Q8_0 và GGUF
+  Q4_0. Cả bốn dùng cùng model 202M, ưu tiên tiếng Việt, hỗ trợ code-switch
+  tiếng Anh, decoder 48 kHz và tám voice latent dựng sẵn.
 
-Thông số riêng của hai provider được khai báo trong Core và giao diện tự dựng:
+Thông số riêng của ba provider được khai báo trong Core và giao diện tự dựng:
 Kokoro có cắt im lặng/ngữ điệu liên tục; Supertonic có mức chất lượng 5–12.
+ZeroTTS ONNX công bố 22 điều khiển cho chuẩn hóa, chia đoạn, sampling, seed,
+streaming, số frame, số luồng và warmup. Ba bản GGUF công bố 20 điều khiển vì
+runtime ggml upstream chưa hỗ trợ CFG và không cần warmup ONNX model.
 Tốc độ, chia chunk, nghỉ dấu câu, nghỉ đoạn gốc, đầu ra WAV/MP3, hàng đợi và SRT
 vẫn dùng cùng hành vi chung của ứng dụng.
+
+Bản mã nguồn mở ZeroTTS 0.1.2 không phát hành voice encoder, nên provider này
+không hiển thị Clone từ Profile. Xem kiến trúc, bằng chứng source, benchmark và
+kết quả MCP thật tại [docs/zerotts-engine.md](docs/zerotts-engine.md).
 
 VieNeu v3.6.4 mặc định chạy **CPU ONNX FP32** bằng
 `install_vieneu_v3_worker.bat`, không cài PyTorch. Chỉ dùng

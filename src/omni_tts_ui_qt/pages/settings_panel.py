@@ -96,7 +96,7 @@ class SettingsPanel(QScrollArea):
         # widgets; used to avoid re-seeding on every apply_model() call.
         self._seeded_model_id: str | None = None
         self._provider_option_cache: dict[str, dict] = {}
-        self._configured_option_provider: str | None = None
+        self._configured_option_model: str | None = None
         self._model_search_matches: list[tuple[str, str]] = []
 
         container = QWidget()
@@ -708,15 +708,15 @@ class SettingsPanel(QScrollArea):
         self.vieneu_group.set_row_visible("sampling_topk", policy.sampling.supported)
         self.vieneu_group.set_row_visible("emotion", policy.emotion.supported)
         groups = policy.tuning_groups
-        if self._configured_option_provider:
-            self._provider_option_cache[self._configured_option_provider] = (
+        if self._configured_option_model:
+            self._provider_option_cache[self._configured_option_model] = (
                 self.declarative_provider_group.values()
             )
-        option_values = self._provider_option_cache.get(policy.provider_id, {})
+        option_values = self._provider_option_cache.get(policy.model_id, {})
         self.declarative_provider_group.configure(
             policy.provider_settings, option_values
         )
-        self._configured_option_provider = policy.provider_id
+        self._configured_option_model = policy.model_id
         self.piper_group.recommendation.setText(policy.piper_recommendation)
         for group, group_id in (
             (self.vieneu_group, control_policy.TUNING_VIENEU),
@@ -1558,7 +1558,7 @@ class SettingsPanel(QScrollArea):
             self.declarative_provider_group.set_values(
                 data.get("provider_options") or {}
             )
-            self._provider_option_cache[policy.provider_id] = (
+            self._provider_option_cache[policy.model_id] = (
                 self.declarative_provider_group.values()
             )
         # Values just restored belong to this model; do not overwrite them.

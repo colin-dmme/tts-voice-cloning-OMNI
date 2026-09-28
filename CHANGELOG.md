@@ -7,6 +7,22 @@ trong file này. Dự án sử dụng phiên bản theo Semantic Versioning.
 
 ### Added
 
+- Tích hợp `ZeroTTS 202M Official` từ ZeroWeight AI bằng worker ONNX CPU cô lập,
+  snapshot model ghim revision, đầu ra mono 48 kHz và tám voice pack chính thức.
+- Thêm đầy đủ 22 thiết lập ZeroTTS vào provider contract: chuẩn hóa tiếng Việt,
+  dọn dấu câu, chia đoạn dài, khoảng nghỉ, CFG, text/audio sampling, giới hạn
+  frame, seed, streaming decoder, số luồng ONNX và warmup. Qt, Tkinter và MCP
+  tự dựng từ cùng metadata, không hardcode control trong GUI.
+- Thêm cài đặt Windows/Linux, kiểm tra artifact model, test forwarding worker và
+  smoke test MCP thật tạo WAV/SRT. Profile clone được tắt đúng theo bản 0.1.2 vì
+  upstream chưa phát hành voice encoder.
+- Tích hợp thêm toàn bộ ba artifact chính thức của `ZeroTTS-GGUF`: F32, Q8_0 và
+  Q4_0. Worker native ggml giữ model resident, dùng tokenizer và voice latent
+  chính thức, rồi giải mã frame bằng MOSS codec ONNX thành WAV mono 48 kHz.
+- Hợp đồng setting nay lọc theo runtime model. Ba model GGUF ẩn và từ chối CFG
+  cùng warmup vì C++ upstream chưa triển khai, trong khi ONNX vẫn giữ đủ 22 key.
+- Sửa signal thay đổi của nhóm provider setting động trên Qt để checkbox,
+  spinbox và combobox lưu thay đổi mà không phát sinh lỗi sai chữ ký signal.
 - Thêm hệ thống Cách đọc/Từ điển phát âm theo nhiều preset: thay chữ ở đầu vào
   engine nhưng giữ nguyên văn bản và SRT, tô màu chỗ khớp trong Studio, thống kê
   từ/lần/xung đột, ghim preset theo mục hàng đợi và lưu báo cáo bất biến mỗi job.

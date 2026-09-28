@@ -32,7 +32,10 @@ from omni_tts_core.pronunciation import (
     freeze_pronunciation_selection,
 )
 from omni_tts_core.provider_registry import provider_descriptor
-from omni_tts_core.provider_options import normalize_provider_options
+from omni_tts_core.provider_options import (
+    normalize_provider_options,
+    provider_settings_for_model,
+)
 from omni_tts_core.runtime_status import RuntimeStatusService
 from omni_tts_core.setup_tasks import SetupService
 from omni_tts_core.subtitles.srt_builder import write_srt
@@ -1600,8 +1603,12 @@ def _chunks_for_provider(
                 "Higgs Script không hợp lệ: " + " ".join(errors[:3])
             )
         return compile_higgs_chunks(text, language, max_chunk_chars, higgs)
-    prepared = _prepare_text(text, language)
     descriptor = provider_descriptor(provider)
+    prepared = (
+        text.strip()
+        if descriptor is not None and descriptor.native_text_preprocessing
+        else _prepare_text(text, language)
+    )
     policy = resolve_chunk_join_policy(chunk_join_mode, descriptor)
     if policy.delegates_text_boundaries:
         return [prepared] if prepared else []
@@ -1775,7 +1782,9 @@ def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec)
     if descriptor is not None:
         try:
             request.provider_options = normalize_provider_options(
-                descriptor, request.provider_options
+                descriptor,
+                request.provider_options,
+                settings=provider_settings_for_model(descriptor, spec.runtime),
             )
         except ValueError as exc:
             raise ConfigError(str(exc)) from exc

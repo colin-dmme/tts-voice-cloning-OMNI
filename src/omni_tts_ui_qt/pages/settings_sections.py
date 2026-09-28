@@ -79,13 +79,13 @@ class DeclarativeProviderGroup(_Group):
             if setting.kind == "boolean":
                 widget = QCheckBox()
                 widget.setChecked(bool(value))
-                widget.toggled.connect(self.changed.emit)
+                widget.toggled.connect(lambda _checked: self.changed.emit())
             elif setting.kind == "integer":
                 widget = QSpinBox()
                 widget.setRange(int(setting.minimum or 0), int(setting.maximum or 999999))
                 widget.setSingleStep(max(1, int(setting.step or 1)))
                 widget.setValue(int(value))
-                widget.valueChanged.connect(self.changed.emit)
+                widget.valueChanged.connect(lambda _value: self.changed.emit())
             elif setting.kind == "number":
                 widget = QDoubleSpinBox()
                 widget.setDecimals(setting.decimals)
@@ -95,14 +95,14 @@ class DeclarativeProviderGroup(_Group):
                 )
                 widget.setSingleStep(float(setting.step or 0.1))
                 widget.setValue(float(value))
-                widget.valueChanged.connect(self.changed.emit)
+                widget.valueChanged.connect(lambda _value: self.changed.emit())
             else:
                 widget = QComboBox()
                 for label, choice_value in setting.choices:
                     widget.addItem(label, choice_value)
                 index = widget.findData(str(value))
-                widget.setCurrentIndex(index if index >= 0 else 0)
-                widget.currentIndexChanged.connect(self.changed.emit)
+                widget.setCurrentIndex(max(index, 0))
+                widget.currentIndexChanged.connect(lambda _index: self.changed.emit())
             widget.setToolTip(setting.tooltip)
             self._widgets[setting.key] = widget
             self.add(setting.key, f"{setting.label}:", widget)
@@ -113,9 +113,7 @@ class DeclarativeProviderGroup(_Group):
             widget = self._widgets[setting.key]
             if isinstance(widget, QCheckBox):
                 result[setting.key] = widget.isChecked()
-            elif isinstance(widget, QSpinBox):
-                result[setting.key] = widget.value()
-            elif isinstance(widget, QDoubleSpinBox):
+            elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
                 result[setting.key] = widget.value()
             elif isinstance(widget, QComboBox):
                 result[setting.key] = str(widget.currentData())

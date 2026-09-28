@@ -141,7 +141,7 @@ tts_models:
     model_type: "tts"
     local_path: "engines/vieneu_v3_worker/.venv"
     hf_repo: "pnnbao-ump/VieNeu-TTS-v3-Turbo"
-    language_priority: "vi-en"
+    language_priority: "vi-code-switch-en"
     required: false
     voice_input:
       modes: ["fixed", "profile"]
@@ -1691,6 +1691,268 @@ tts_models:
       ram_mb: 1000
       recommend_for: "Audio tiếng Anh/Á/Âu nhanh trên CPU; không dùng cho tiếng Việt"
       install_note: "Cài Kokoro worker một lần rồi tải model từ onnx-community."
+
+  zerotts_202m_official:
+    display_name: "ZeroTTS 202M Official - 48 kHz CPU"
+    provider: "zerotts"
+    model_type: "tts"
+    local_path: "models/zerotts/zeroweight-ai/ZeroTTS"
+    hf_repo: "zeroweight-ai/ZeroTTS"
+    language_priority: "vi-en"
+    required: false
+    voice_input: &zerotts_voice_input
+      modes: ["fixed"]
+      default_mode: "fixed"
+      fixed_label: "8 voice pack ZeroTTS"
+      fixed_tooltip: "Voice latent dựng sẵn của ZeroTTS; bản mã nguồn mở hiện không có voice encoder để clone từ audio Profile."
+    capabilities: &zerotts_capabilities
+      supported_languages: ["vi"]
+      supports_voice_profile: false
+      requires_voice_profile: false
+      supports_voice_presets: true
+      supports_reference_text: false
+      supports_speed: false
+      supports_pitch_shift: false
+      supports_emotion: false
+    default_voice_preset: "maichi"
+    voice_presets: &zerotts_voice_presets
+      maichi: "Mai Chi - nữ, trẻ, kể chuyện, nhẹ nhàng"
+      baotrang: "Bảo Trang - nữ, trưởng thành, tin tức, rõ ràng"
+      kimoanh: "Kim Oanh - nữ, trung niên, kể chuyện, ấm áp"
+      hamy: "Hà My - nữ, trẻ, hoạt hình, biểu cảm"
+      giahuy: "Gia Huy - nam, trẻ, kể chuyện, trầm ấm"
+      huuduc: "Hữu Đức - nam, lớn tuổi, kể chuyện, điềm đạm"
+      quangminh: "Quang Minh - nam, trẻ, tin tức, dứt khoát"
+      tiendat: "Tiến Đạt - nam, trẻ, bình luận, năng lượng cao"
+      __unconditioned__: "Không điều kiện - giọng thay đổi giữa các lần chạy"
+    runtime:
+      worker_name: "zerotts_worker"
+      worker_label: "ZeroTTS 0.1.2 Official"
+      cpu_only: true
+      hf_revision: "8a0c3c29f6f047011f5cae02d0b14475a690be86"
+      model_file: "onnx/prefix_step.onnx"
+      config_file: "config.json"
+      required_files:
+        - "tokenizer.json"
+        - "null_voice_emb.npy"
+        - "silence_frame.npy"
+        - "onnx/text_encoder.onnx"
+        - "onnx/local_frame_decode.onnx"
+        - "onnx/codec/codec_browser_onnx_meta.json"
+        - "onnx/codec/moss_audio_tokenizer_decode_full.onnx"
+        - "onnx/codec/moss_audio_tokenizer_decode_shared.data"
+        - "onnx/codec/moss_audio_tokenizer_decode_step.onnx"
+        - "voices/index.json"
+        - "voices/maichi/voice.npz"
+        - "voices/baotrang/voice.npz"
+        - "voices/kimoanh/voice.npz"
+        - "voices/hamy/voice.npz"
+        - "voices/giahuy/voice.npz"
+        - "voices/huuduc/voice.npz"
+        - "voices/quangminh/voice.npz"
+        - "voices/tiendat/voice.npz"
+      download_allow_patterns:
+        - "config.json"
+        - "tokenizer.json"
+        - "null_voice_emb.npy"
+        - "silence_frame.npy"
+        - "onnx/*"
+        - "onnx/codec/*"
+        - "voices/index.json"
+        - "voices/*/voice.npz"
+        - "voices/*/meta.json"
+        - "voices/*/preview.wav"
+    notes: "ZeroTTS 0.1.2 chính thức, 202M tham số, 48 kHz, CPU ONNX, streaming decoder và 8 voice pack; chưa hỗ trợ clone voice từ audio trong bản mã nguồn mở."
+    catalog_info:
+      category: "official-cpu"
+      origin: "official"
+      family: "ZeroTTS"
+      variant: "202M ONNX 48 kHz"
+      variant_badge: "Official 0.1.2"
+      source_repo: "zeroweight-ai/ZeroTTS"
+      risk: "test"
+      description: "Model tiếng Việt 202M chạy ONNX trên CPU, có long-form preprocessing, streaming decoder và tám voice latent dựng sẵn."
+      highlight: "48 kHz, CPU, 8 voice pack"
+      quality_score: 5
+      speed_score: 3
+      vram_mb: 0
+      recommend_for: "A/B tiếng Việt và tiếng Anh xen kẽ trên CPU; máy i9-10900 thử nghiệm chưa đạt realtime nên cần đo trước khi chạy batch dài"
+      install_note: "Cài ZeroTTS worker 0.1.2 rồi tải snapshot model chính thức đã ghim revision."
+
+  zerotts_202m_gguf_f32:
+    display_name: "ZeroTTS 202M GGUF F32 - 48 kHz CPU"
+    provider: "zerotts"
+    model_type: "tts"
+    local_path: "models/zerotts/zeroweight-ai/ZeroTTS-GGUF/f32"
+    hf_repo: "zeroweight-ai/ZeroTTS-GGUF"
+    language_priority: "vi-en"
+    required: false
+    voice_input: *zerotts_voice_input
+    capabilities: *zerotts_capabilities
+    default_voice_preset: "maichi"
+    voice_presets: *zerotts_voice_presets
+    runtime:
+      worker_name: "zerotts_gguf_worker"
+      worker_label: "ZeroTTS GGUF F32 Official"
+      base_installer_windows: "install_zerotts_gguf_worker.bat"
+      base_installer_linux: "scripts/install_zerotts_gguf_worker_linux.sh"
+      cpu_only: true
+      cpu_backend_label: "CPU ggml/GGUF"
+      hf_revision: "92ca8651645d4733df56620b3aadc768a76f7c46"
+      model_file: "gguf/zerotts-f32.gguf"
+      config_file: "config.json"
+      unsupported_provider_settings: ["cfg_scale", "warmup"]
+      required_files: &zerotts_gguf_required_files
+        - "tokenizer.json"
+        - "null_voice_emb.npy"
+        - "silence_frame.npy"
+        - "onnx/codec/codec_browser_onnx_meta.json"
+        - "onnx/codec/moss_audio_tokenizer_decode_full.onnx"
+        - "onnx/codec/moss_audio_tokenizer_decode_shared.data"
+        - "onnx/codec/moss_audio_tokenizer_decode_step.onnx"
+        - "voices/index.json"
+        - "voices/maichi/voice.bin"
+        - "voices/baotrang/voice.bin"
+        - "voices/kimoanh/voice.bin"
+        - "voices/hamy/voice.bin"
+        - "voices/giahuy/voice.bin"
+        - "voices/huuduc/voice.bin"
+        - "voices/quangminh/voice.bin"
+        - "voices/tiendat/voice.bin"
+      download_allow_patterns:
+        - "config.json"
+        - "tokenizer.json"
+        - "null_voice_emb.npy"
+        - "silence_frame.npy"
+        - "gguf/zerotts-f32.gguf"
+        - "onnx/codec/*"
+        - "voices/index.json"
+        - "voices/*/voice.bin"
+        - "voices/*/meta.json"
+        - "voices/*/preview.wav"
+    notes: "ZeroTTS GGUF F32 chính thức, cùng trọng số và bit-exact frame với ONNX khi dùng cùng chuỗi random; ggml sinh frame và ONNX codec giải mã WAV 48 kHz."
+    catalog_info:
+      category: "official-cpu"
+      origin: "official"
+      family: "ZeroTTS"
+      variant: "202M GGUF F32 48 kHz"
+      variant_badge: "GGUF F32"
+      source_repo: "zeroweight-ai/ZeroTTS-GGUF"
+      risk: "test"
+      description: "Bản GGUF F32 809 MB, ưu tiên tốc độ CPU và độ tương đương frame với ONNX."
+      highlight: "F32 bit-exact, CPU ggml, 8 voice pack"
+      quality_score: 5
+      speed_score: 4
+      vram_mb: 0
+      ram_mb: 1800
+      recommend_for: "Mốc chất lượng và tốc độ để A/B với ONNX, Q8_0 và Q4_0 trên cùng máy"
+      install_note: "Cài worker GGUF native một lần rồi tải snapshot F32 đã ghim revision."
+
+  zerotts_202m_gguf_q8_0:
+    display_name: "ZeroTTS 202M GGUF Q8_0 - 48 kHz CPU"
+    provider: "zerotts"
+    model_type: "tts"
+    local_path: "models/zerotts/zeroweight-ai/ZeroTTS-GGUF/q8_0"
+    hf_repo: "zeroweight-ai/ZeroTTS-GGUF"
+    language_priority: "vi-en"
+    required: false
+    voice_input: *zerotts_voice_input
+    capabilities: *zerotts_capabilities
+    default_voice_preset: "maichi"
+    voice_presets: *zerotts_voice_presets
+    runtime:
+      worker_name: "zerotts_gguf_worker"
+      worker_label: "ZeroTTS GGUF Q8_0 Official"
+      base_installer_windows: "install_zerotts_gguf_worker.bat"
+      base_installer_linux: "scripts/install_zerotts_gguf_worker_linux.sh"
+      cpu_only: true
+      cpu_backend_label: "CPU ggml/GGUF"
+      hf_revision: "92ca8651645d4733df56620b3aadc768a76f7c46"
+      model_file: "gguf/zerotts-q8_0.gguf"
+      config_file: "config.json"
+      unsupported_provider_settings: ["cfg_scale", "warmup"]
+      required_files: *zerotts_gguf_required_files
+      download_allow_patterns:
+        - "config.json"
+        - "tokenizer.json"
+        - "null_voice_emb.npy"
+        - "silence_frame.npy"
+        - "gguf/zerotts-q8_0.gguf"
+        - "onnx/codec/*"
+        - "voices/index.json"
+        - "voices/*/voice.bin"
+        - "voices/*/meta.json"
+        - "voices/*/preview.wav"
+    notes: "ZeroTTS GGUF Q8_0 chính thức, 216 MB; upstream đo 4,9% code drift so với F32 theo teacher forcing."
+    catalog_info:
+      category: "official-cpu"
+      origin: "official"
+      family: "ZeroTTS"
+      variant: "202M GGUF Q8_0 48 kHz"
+      variant_badge: "GGUF Q8_0"
+      source_repo: "zeroweight-ai/ZeroTTS-GGUF"
+      risk: "test"
+      description: "Bản GGUF Q8_0 216 MB, cân bằng kích thước và độ lệch lấy mẫu để A/B."
+      highlight: "Q8_0 216 MB, CPU ggml, 8 voice pack"
+      quality_score: 4
+      speed_score: 4
+      vram_mb: 0
+      ram_mb: 1000
+      recommend_for: "Thử bản nén vừa để so kích thước, tốc độ và chất giọng với F32"
+      install_note: "Cài worker GGUF native một lần rồi tải snapshot Q8_0 đã ghim revision."
+
+  zerotts_202m_gguf_q4_0:
+    display_name: "ZeroTTS 202M GGUF Q4_0 - 48 kHz CPU"
+    provider: "zerotts"
+    model_type: "tts"
+    local_path: "models/zerotts/zeroweight-ai/ZeroTTS-GGUF/q4_0"
+    hf_repo: "zeroweight-ai/ZeroTTS-GGUF"
+    language_priority: "vi-en"
+    required: false
+    voice_input: *zerotts_voice_input
+    capabilities: *zerotts_capabilities
+    default_voice_preset: "maichi"
+    voice_presets: *zerotts_voice_presets
+    runtime:
+      worker_name: "zerotts_gguf_worker"
+      worker_label: "ZeroTTS GGUF Q4_0 Official"
+      base_installer_windows: "install_zerotts_gguf_worker.bat"
+      base_installer_linux: "scripts/install_zerotts_gguf_worker_linux.sh"
+      cpu_only: true
+      cpu_backend_label: "CPU ggml/GGUF"
+      hf_revision: "92ca8651645d4733df56620b3aadc768a76f7c46"
+      model_file: "gguf/zerotts-q4_0.gguf"
+      config_file: "config.json"
+      unsupported_provider_settings: ["cfg_scale", "warmup"]
+      required_files: *zerotts_gguf_required_files
+      download_allow_patterns:
+        - "config.json"
+        - "tokenizer.json"
+        - "null_voice_emb.npy"
+        - "silence_frame.npy"
+        - "gguf/zerotts-q4_0.gguf"
+        - "onnx/codec/*"
+        - "voices/index.json"
+        - "voices/*/voice.bin"
+        - "voices/*/meta.json"
+        - "voices/*/preview.wav"
+    notes: "ZeroTTS GGUF Q4_0 chính thức, 130 MB; upstream đo 36,5% code drift và xem đây là lựa chọn khi kích thước là ràng buộc chính."
+    catalog_info:
+      category: "official-cpu"
+      origin: "official"
+      family: "ZeroTTS"
+      variant: "202M GGUF Q4_0 48 kHz"
+      variant_badge: "GGUF Q4_0"
+      source_repo: "zeroweight-ai/ZeroTTS-GGUF"
+      risk: "test"
+      description: "Bản GGUF Q4_0 130 MB để đo đổi chác kích thước, tốc độ và khác biệt chất giọng."
+      highlight: "Q4_0 130 MB, CPU ggml, 8 voice pack"
+      quality_score: 3
+      speed_score: 4
+      vram_mb: 0
+      ram_mb: 800
+      recommend_for: "A/B khi cần footprint nhỏ và chấp nhận một take nghe khác rõ hơn F32"
+      install_note: "Cài worker GGUF native một lần rồi tải snapshot Q4_0 đã ghim revision."
 
   supertonic_3_official_onnx:
     display_name: "Supertonic 3 · ONNX Official · 31 ngôn ngữ"

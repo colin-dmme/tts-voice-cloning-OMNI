@@ -21,6 +21,7 @@ PROVIDER_WORKERS = {
     "piper": "piper_worker",
     "kokoro_onnx": "kokoro_worker",
     "supertonic": "supertonic_worker",
+    "zerotts": "zerotts_worker",
 }
 
 PROVIDER_LABELS = {
@@ -33,6 +34,7 @@ PROVIDER_LABELS = {
     "piper": "Piper ONNX",
     "kokoro_onnx": "Kokoro ONNX",
     "supertonic": "Supertonic 3",
+    "zerotts": "ZeroTTS",
 }
 
 # Providers that ship a CUDA installer script. Keep in sync with the script maps
@@ -49,6 +51,7 @@ _WINDOWS_BASE_INSTALLERS = {
     "piper": "install_piper_worker.bat",
     "kokoro_onnx": "install_kokoro_worker.bat",
     "supertonic": "install_supertonic_worker.bat",
+    "zerotts": "install_zerotts_worker.bat",
 }
 
 _LINUX_BASE_INSTALLERS = {
@@ -59,6 +62,7 @@ _LINUX_BASE_INSTALLERS = {
     "chatterbox": "scripts/install_chatterbox_worker_linux.sh",
     "kokoro_onnx": "scripts/install_kokoro_worker_linux.sh",
     "supertonic": "scripts/install_supertonic_worker_linux.sh",
+    "zerotts": "scripts/install_zerotts_worker_linux.sh",
 }
 
 
@@ -87,13 +91,27 @@ def portable_python_path() -> Path:
 
 def is_worker_installed(worker_name: str) -> bool:
     if worker_venv_python(worker_name).exists():
-        return True
+        return _worker_artifacts_ready(worker_name)
     site_packages = worker_site_packages(worker_name)
     return (
         portable_python_path().exists()
         and site_packages.exists()
         and any(site_packages.iterdir())
+        and _worker_artifacts_ready(worker_name)
     )
+
+
+def _worker_artifacts_ready(worker_name: str) -> bool:
+    if worker_name != "zerotts_gguf_worker":
+        return True
+    executable = (
+        "omni-zerotts-gguf-server.exe"
+        if os.name == "nt"
+        else "omni-zerotts-gguf-server"
+    )
+    return project_path(
+        f"engines/{worker_name}/native/bin/{executable}"
+    ).is_file()
 
 
 def worker_install_path(worker_name: str) -> Path:

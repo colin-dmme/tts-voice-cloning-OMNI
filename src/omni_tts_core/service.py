@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Event, Lock
+from typing import Callable
 
 from omni_tts_core.audio.wav_tools import (
     concatenate_segments_with_pauses,
@@ -120,6 +121,7 @@ class TtsService:
         )
         self._engines: dict[str, BaseTtsEngine] = {}
         self._engine_lock = Lock()
+        self._remote_switch_confirm: Callable[..., bool] | None = None
 
     # --- Pronunciation presets ---------------------------------------------
 
@@ -948,7 +950,21 @@ class TtsService:
                     raise ConfigError(f"Provider chưa được hỗ trợ: {spec.provider}")
                 engine = descriptor.engine_factory(spec, self.engine_cache)
                 self._engines[spec.model_id] = engine
+            set_confirm_switch = getattr(engine, "set_confirm_switch", None)
+            if callable(set_confirm_switch):
+                set_confirm_switch(self._remote_switch_confirm)
         return engine
+
+    def set_remote_switch_confirm(
+        self, callback: Callable[..., bool] | None
+    ) -> None:
+        """Install the UI confirmation hook used by ask-before-switch mode."""
+        with self._engine_lock:
+            self._remote_switch_confirm = callback
+            for engine in self._engines.values():
+                set_confirm_switch = getattr(engine, "set_confirm_switch", None)
+                if callable(set_confirm_switch):
+                    set_confirm_switch(callback)
 
     def _release_engines_locked(self, keep_model_id: str | None = None) -> list[str]:
         """Close and drop cached engines. Caller must hold ``_engine_lock``."""
@@ -989,7 +1005,12 @@ class TtsService:
 
     def _ensure_request_can_generate(self, request: GenerateSpeechRequest, spec: ModelSpec) -> None:
         _validate_request_for_model(request, spec)
-        if not self.storage.is_installed(spec):
+        uses_remote_zerotts = (
+            request.runtime_target == "remote"
+            and spec.provider == "zerotts"
+            and spec.model_id == "zerotts_202m_official"
+        )
+        if not uses_remote_zerotts and not self.storage.is_installed(spec):
             if spec.provider in ("vieneu", "valtec"):
                 raise ModelMissingError(
                     f"{spec.display_name} chưa được cài. "
@@ -1000,7 +1021,7 @@ class TtsService:
             )
         missing_required = []
         descriptor = provider_descriptor(spec.provider)
-        if not descriptor or descriptor.storage_mode != "remote":
+        if not uses_remote_zerotts and (not descriptor or descriptor.storage_mode != "remote"):
             missing_required = [
                 item
                 for item in self.missing_required_models()
@@ -1737,6 +1758,10 @@ def _resolve_output_stem(request: GenerateSpeechRequest) -> str:
 
 
 def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec) -> None:
+    if request.runtime_target == "remote" and not (
+        spec.provider == "zerotts" and spec.model_id == "zerotts_202m_official"
+    ):
+        raise ConfigError("Colab từ xa hiện chỉ hỗ trợ ZeroTTS 202M Official.")
     caps = _effective_capabilities(spec)
     voice_mode = request.voice_source_mode or "fixed"
     voice_input = effective_voice_input(spec)

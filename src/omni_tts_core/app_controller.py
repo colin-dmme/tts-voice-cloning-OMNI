@@ -173,6 +173,9 @@ class AppController:
         """Model ids currently holding an engine (and possibly VRAM)."""
         return self.service.resident_models()
 
+    def set_remote_switch_confirm(self, callback: Callable[..., bool] | None) -> None:
+        self.service.set_remote_switch_confirm(callback)
+
     # --- Model catalog / choices -------------------------------------------
 
     def model_choices(

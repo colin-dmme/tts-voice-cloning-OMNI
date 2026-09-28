@@ -105,6 +105,53 @@ class BrokerClientTest(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 self.client.get_job("job-1")
 
+    def test_authenticated_call_can_read_token_from_secret_file(self) -> None:
+        job = RemoteTtsJob(job_id="job-1", request=_request())
+        with tempfile.TemporaryDirectory() as folder:
+            token_file = Path(folder) / "broker-token.txt"
+            token_file.write_text("file-secret\n", encoding="utf-8")
+            client = BrokerClient(
+                BrokerConnectionOptions(
+                    base_url="https://broker.example.test",
+                    auth_env="MISSING_TEST_TOKEN",
+                    auth_token_file=token_file,
+                    max_retries=0,
+                )
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                with patch(
+                    "omni_tts_core.remote_compute.client.urlopen",
+                    return_value=_Response(job.model_dump_json().encode("utf-8")),
+                ) as mocked:
+                    try:
+                        client.get_job("job-1")
+                    except ConfigError as error:
+                        self.fail(f"Phải đọc được token từ secret file: {error}")
+
+        self.assertEqual(
+            mocked.call_args.args[0].get_header("Authorization"),
+            "Bearer file-secret",
+        )
+
+    def test_get_by_idempotency_reconciles_uncertain_submission(self) -> None:
+        job = RemoteTtsJob(job_id="job-1", request=_request())
+        with patch.dict(os.environ, {"TEST_COLIN_BROKER_TOKEN": "secret"}, clear=False):
+            with patch(
+                "omni_tts_core.remote_compute.client.urlopen",
+                return_value=_Response(job.model_dump_json().encode("utf-8")),
+            ) as mocked:
+                self.assertTrue(
+                    hasattr(self.client, "get_job_by_idempotency"),
+                    "BrokerClient phải có API đối soát idempotency",
+                )
+                result = self.client.get_job_by_idempotency("studio:unit:worker-1")
+
+        self.assertEqual(result.job_id, "job-1")
+        self.assertIn(
+            "/v1/jobs/by-idempotency/studio%3Aunit%3Aworker-1",
+            mocked.call_args.args[0].full_url,
+        )
+
     def test_download_validates_sha256_before_writing(self) -> None:
         audio = b"RIFF-test-wave"
         metadata = RemoteTtsResultMetadata(

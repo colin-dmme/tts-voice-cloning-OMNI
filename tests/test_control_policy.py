@@ -74,6 +74,18 @@ class DeviceTargetsTest(unittest.TestCase):
         self.assertEqual(policy.default_device("cuda"), "auto")
         self.assertEqual(policy.default_device("cpu"), "cpu")
 
+    def test_official_zerotts_offers_remote_colab_without_changing_gguf_targets(self) -> None:
+        official = _policy(
+            spec=_Spec(model_id="zerotts_202m_official", provider="zerotts"),
+            runtime=_runtime(gpu=False),
+        )
+        gguf = _policy(
+            spec=_Spec(model_id="zerotts_202m_gguf_q8_0", provider="zerotts"),
+            runtime=_runtime(gpu=False),
+        )
+        self.assertIn("remote", [value for _label, value in official.device_targets])
+        self.assertNotIn("remote", [value for _label, value in gguf.device_targets])
+
 
 class LanguageTest(unittest.TestCase):
     def test_languages_come_from_capabilities(self) -> None:

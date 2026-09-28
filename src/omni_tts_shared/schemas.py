@@ -15,7 +15,7 @@ LanguageCode = Literal[
 ]
 OutputMode = Literal["merged", "split"]
 OutputAudioFormat = Literal["wav", "mp3"]
-RuntimeTarget = Literal["auto", "cpu", "cuda"]
+RuntimeTarget = Literal["auto", "cpu", "cuda", "remote"]
 VoiceSourceMode = Literal["fixed", "profile", "design"]
 ChunkJoinMode = Literal["auto", "crossfade", "direct", "silence"]
 RemoteAuthMode = Literal["none", "bearer_env"]

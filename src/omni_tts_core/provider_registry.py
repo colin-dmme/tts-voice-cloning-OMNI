@@ -14,6 +14,7 @@ from omni_tts_core.engines.preset_onnx_engine import PresetOnnxSubprocessEngine
 from omni_tts_core.engines.qwen_engine import QwenSubprocessEngine
 from omni_tts_core.engines.valtec_engine import ValtecSubprocessEngine
 from omni_tts_core.engines.vieneu_engine import VieneuSubprocessEngine
+from omni_tts_core.engines.zerotts_routing_engine import ZeroTtsRoutingEngine
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.provider_options import ProviderSettingSpec
 
@@ -66,6 +67,10 @@ def _simple(factory):
 
 def _preset_onnx(spec: ModelSpec, _cache: object | None) -> BaseTtsEngine:
     return PresetOnnxSubprocessEngine(spec)
+
+
+def _zerotts(spec: ModelSpec, _cache: object | None) -> BaseTtsEngine:
+    return ZeroTtsRoutingEngine(spec)
 
 
 PROVIDERS: dict[str, ProviderDescriptor] = {
@@ -152,7 +157,7 @@ PROVIDERS: dict[str, ProviderDescriptor] = {
         "ZeroTTS",
         "folder",
         "zerotts_worker",
-        _preset_onnx,
+        _zerotts,
         frozenset({"provider_options"}),
         1,
         automatic_chunk_join="native",

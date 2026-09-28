@@ -56,6 +56,7 @@ from omni_tts_core.ui_presenters.tooltips import tooltip
 from omni_tts_ui_qt.context import AppContext
 from omni_tts_ui_qt.background import FunctionTask
 from omni_tts_ui_qt.pages.higgs_remote_section import HiggsRemoteGroup
+from omni_tts_ui_qt.pages.remote_compute_section import RemoteComputeGroup
 from omni_tts_ui_qt.pages.settings_sections import (
     ChatterboxGroup,
     F5Group,
@@ -106,6 +107,7 @@ class SettingsPanel(QScrollArea):
         self._layout.setSpacing(8)
 
         self._build_basic()
+        self._build_remote_compute()
         self._build_pronunciation()
         self._build_punctuation()
         self._build_voice_source()
@@ -120,6 +122,18 @@ class SettingsPanel(QScrollArea):
         self.apply_model(self.current_model_id())
 
     # --- Section builders ---------------------------------------------------
+
+    def _build_remote_compute(self) -> None:
+        self.remote_compute_section = CollapsibleSection(
+            "Điện toán Colab", expanded=True
+        )
+        self.remote_compute_group = RemoteComputeGroup()
+        self.remote_compute_group.changed.connect(self._emit_changed)
+        self.remote_compute_section.body_layout.addWidget(
+            self.remote_compute_group
+        )
+        self.remote_compute_section.setVisible(False)
+        self._layout.addWidget(self.remote_compute_section)
 
     def _section(self, title: str, *, expanded: bool = True, active: bool | None = None,
                  active_text: str = "ACTIVE · ĐANG ÁP DỤNG",
@@ -687,6 +701,11 @@ class SettingsPanel(QScrollArea):
                            policy.default_device(self.device_combo.currentData()))
         self.device_note.setText(policy.device_note)
         self.device_note.setVisible(bool(policy.device_note))
+        self.remote_compute_section.setVisible(
+            policy.model_id == "zerotts_202m_official"
+        )
+        if policy.model_id == "zerotts_202m_official":
+            self.remote_compute_group.reload()
 
         self._apply_control(self.speed, policy.speed, NEUTRAL_SPEED)
         self.speed.setRange(policy.speed_minimum, policy.speed_maximum)

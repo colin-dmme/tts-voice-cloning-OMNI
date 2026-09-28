@@ -19,7 +19,7 @@ from omni_tts_core.worker_installation import (
 )
 from omni_tts_shared.errors import ConfigError
 
-RuntimeTarget = Literal["auto", "cpu", "cuda"]
+RuntimeTarget = Literal["auto", "cpu", "cuda", "remote"]
 RUNTIME_TARGET_CHOICES: list[tuple[str, RuntimeTarget]] = [
     ("Auto (khuyến nghị)", "auto"),
     ("CPU", "cpu"),
@@ -189,7 +189,7 @@ class RuntimeDevicePolicy:
 
 def normalize_runtime_target(value: str | None) -> RuntimeTarget:
     value = (value or "auto").strip().lower()
-    if value in {"auto", "cpu", "cuda"}:
+    if value in {"auto", "cpu", "cuda", "remote"}:
         return value  # type: ignore[return-value]
     return "auto"
 
@@ -200,6 +200,7 @@ def runtime_target_label(value: str | None) -> str:
         "auto": "Auto",
         "cpu": "CPU",
         "cuda": "GPU CUDA",
+        "remote": "Colab từ xa",
     }[target]
 
 

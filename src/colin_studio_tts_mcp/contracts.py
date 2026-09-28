@@ -74,7 +74,7 @@ class GenerationOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     language: str = Field(default="vi", min_length=2, max_length=16)
-    runtime_target: Literal["auto", "cpu", "cuda"] = "auto"
+    runtime_target: Literal["auto", "cpu", "cuda", "remote"] = "auto"
     speed: float = Field(default=1.0, ge=0.5, le=1.8)
     pitch_shift: float = Field(default=0.0, ge=-12.0, le=12.0)
     emotion: str = Field(default="natural", max_length=100)

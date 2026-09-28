@@ -54,6 +54,12 @@ class BrokerClient:
             self._json_request("GET", f"/v1/jobs/{quote(job_id, safe='')}")
         )
 
+    def get_job_by_idempotency(self, idempotency_key: str) -> RemoteTtsJob:
+        encoded = quote(idempotency_key, safe="")
+        return RemoteTtsJob.model_validate(
+            self._json_request("GET", f"/v1/jobs/by-idempotency/{encoded}")
+        )
+
     def cancel(self, job_id: str) -> RemoteTtsJob:
         return RemoteTtsJob.model_validate(
             self._json_request("POST", f"/v1/jobs/{quote(job_id, safe='')}/cancel")
@@ -155,8 +161,21 @@ class BrokerClient:
 
     def _auth_headers(self) -> dict[str, str]:
         token = os.environ.get(self.options.auth_env, "").strip()
+        token_file = self.options.auth_token_file
+        if not token and token_file is not None:
+            try:
+                token = token_file.expanduser().read_text(encoding="utf-8").strip()
+            except OSError:
+                token = ""
         if not token:
-            raise ConfigError(f"Thiếu token trong biến môi trường {self.options.auth_env}.")
+            source = (
+                f" hoặc file {token_file}"
+                if token_file is not None
+                else ""
+            )
+            raise ConfigError(
+                f"Thiếu token trong biến môi trường {self.options.auth_env}{source}."
+            )
         return {"Authorization": f"Bearer {token}"}
 
 

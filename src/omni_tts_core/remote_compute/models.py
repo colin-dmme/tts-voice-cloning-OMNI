@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -154,6 +155,8 @@ class RemoteTtsJob(BaseModel):
     cancel_requested: bool = False
     result: RemoteTtsResultMetadata | None = None
     error: str = ""
+    retryable: bool = False
+    failure_kind: str = ""
     created_at: str = Field(default_factory=utc_now)
     updated_at: str = Field(default_factory=utc_now)
 
@@ -167,6 +170,7 @@ class JobLease(BaseModel):
 class BrokerConnectionOptions(BaseModel):
     base_url: str
     auth_env: str = "COLIN_COMPUTE_BROKER_TOKEN"
+    auth_token_file: Path | None = None
     connect_timeout_seconds: float = Field(default=10.0, ge=1.0, le=120.0)
     request_timeout_seconds: float = Field(default=120.0, ge=10.0, le=7200.0)
     max_retries: int = Field(default=1, ge=0, le=5)
@@ -186,6 +190,7 @@ class WorkerProfile(BaseModel):
     broker_url: str
     worker_id: str
     auth_env: str = "COLIN_COMPUTE_BROKER_TOKEN"
+    auth_token_file: Path | None = None
     enabled: bool = True
 
     @field_validator("profile_id", "label", "worker_id")
@@ -207,7 +212,9 @@ class WorkerProfile(BaseModel):
 
 class WorkerSelectionSettings(BaseModel):
     selected_profile_id: str = ""
-    switch_policy: Literal["selected_only", "ask_before_switch"] = "selected_only"
+    switch_policy: Literal[
+        "selected_only", "ask_before_switch", "automatic_failover"
+    ] = "selected_only"
 
     @field_validator("selected_profile_id")
     @classmethod

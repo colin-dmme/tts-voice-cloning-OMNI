@@ -54,6 +54,7 @@ config/authoring_ai.json
 config/authoring_ai_keys.json
 config/authoring_state.json
 config/authoring_sessions.json
+config/remote_compute_workers.json
 
 # Git-backed portable user state lives in user_state/ and is intentionally tracked.
 !user_state/

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Event
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -140,6 +141,8 @@ class _DropTableView(QTableView):
 
 
 class StudioPage(QWidget):
+    remote_switch_requested = Signal(object, object, str, object)
+
     def __init__(
         self,
         context: AppContext,
@@ -160,6 +163,8 @@ class StudioPage(QWidget):
         self._queue_active = False
         self._text_active = False
         self._queue_pronunciation_preset_names: dict[str, str] = {}
+        self.remote_switch_requested.connect(self._show_remote_switch_prompt)
+        self.ctrl.set_remote_switch_confirm(self._confirm_remote_switch)
 
         self.history_store = history_store or GenerationHistoryStore()
         self.queue = QueueController(
@@ -188,6 +193,38 @@ class StudioPage(QWidget):
         self._sync_higgs_script_toolbar()
         self._refresh_queue_pronunciation_choices()
         self._refresh_queue()
+
+    def _confirm_remote_switch(self, current, replacement, reason: str) -> bool:
+        if QApplication.instance() is not None and (
+            QThread.currentThread() == QApplication.instance().thread()
+        ):
+            return self._ask_remote_switch(current, replacement, reason)
+        response = {"accepted": False, "done": Event()}
+        self.remote_switch_requested.emit(current, replacement, reason, response)
+        response["done"].wait(timeout=600.0)
+        return bool(response["accepted"])
+
+    def _show_remote_switch_prompt(
+        self, current, replacement, reason: str, response: dict
+    ) -> None:
+        try:
+            response["accepted"] = self._ask_remote_switch(
+                current, replacement, reason
+            )
+        finally:
+            response["done"].set()
+
+    def _ask_remote_switch(self, current, replacement, reason: str) -> bool:
+        answer = QMessageBox.question(
+            self,
+            "Worker Colab gặp lỗi",
+            f"{current.label} không thể tiếp tục.\n\n"
+            f"Lý do: {reason}\n\n"
+            f"Chuyển sang {replacement.label}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     # --- Sidebar ------------------------------------------------------------
 

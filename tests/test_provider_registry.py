@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from omni_tts_core.model_storage import _move_to_trash
+from omni_tts_core.model_registry import ModelRegistry
 from omni_tts_core.provider_registry import provider_descriptor
 
 
@@ -36,6 +37,18 @@ class ProviderRegistryTest(unittest.TestCase):
         self.assertIn(
             "normalize_vi_text", {setting.key for setting in descriptor.settings}
         )
+
+    def test_zerotts_provider_builds_local_remote_routing_engine(self) -> None:
+        from omni_tts_core.engines.zerotts_routing_engine import ZeroTtsRoutingEngine
+
+        descriptor = provider_descriptor("zerotts")
+        engine = descriptor.engine_factory(
+            ModelRegistry().get("zerotts_202m_official"), None
+        )
+        try:
+            self.assertIsInstance(engine, ZeroTtsRoutingEngine)
+        finally:
+            engine.close()
 
     def test_removal_moves_payload_to_recoverable_trash(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -63,6 +63,15 @@ class WorkerProfileStore:
         self.save(document)
         return self.load()
 
+    def reorder(self, profile_ids: list[str]) -> WorkerProfileDocument:
+        document = self.load()
+        by_id = {profile.profile_id: profile for profile in document.profiles}
+        if len(profile_ids) != len(set(profile_ids)) or set(profile_ids) != set(by_id):
+            raise ValueError("Thứ tự ưu tiên phải chứa mỗi profile đúng một lần")
+        document.profiles = [by_id[profile_id] for profile_id in profile_ids]
+        self.save(document)
+        return self.load()
+
     @staticmethod
     def _normalize(document: WorkerProfileDocument) -> WorkerProfileDocument:
         seen: set[str] = set()

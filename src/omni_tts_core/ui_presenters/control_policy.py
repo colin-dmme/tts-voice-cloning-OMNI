@@ -169,6 +169,16 @@ def build_policy(
     if is_remote:
         device_targets = (("GPU từ xa (server quyết định)", "auto"),)
         device_note = "Máy hiện tại chỉ gửi request; GPU và runtime nằm ở endpoint."
+    elif spec.provider == "zerotts" and spec.model_id == "zerotts_202m_official":
+        device_targets = (
+            ("Tự động · CPU ONNX trên máy", "auto"),
+            ("CPU ONNX trên máy", "cpu"),
+            ("Colab từ xa", "remote"),
+        )
+        device_note = (
+            "Chọn Colab từ xa để Studio gửi ZeroTTS qua broker; "
+            "project và file đầu ra vẫn nằm trên máy này."
+        )
     elif bool((getattr(spec, "runtime", {}) or {}).get("cpu_only")):
         cpu_backend = str(
             (getattr(spec, "runtime", {}) or {}).get("cpu_backend_label") or "CPU ONNX"

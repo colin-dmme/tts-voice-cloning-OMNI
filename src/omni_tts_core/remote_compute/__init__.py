@@ -1,6 +1,12 @@
 """Generic remote compute contracts used by Studio clients."""
 
 from .client import BrokerClient
+from .failover import (
+    FailoverDecision,
+    RemoteComputeCoordinator,
+    RemoteExecutionOutcome,
+    choose_failover,
+)
 from .models import (
     BrokerConnectionOptions,
     JobLease,
@@ -20,8 +26,11 @@ from .profiles import WorkerProfileDocument, WorkerProfileStore
 __all__ = [
     "BrokerClient",
     "BrokerConnectionOptions",
+    "FailoverDecision",
     "JobLease",
     "RemoteJobStatus",
+    "RemoteComputeCoordinator",
+    "RemoteExecutionOutcome",
     "RemoteTtsJob",
     "RemoteTtsRequest",
     "RemoteTtsResultMetadata",
@@ -33,4 +42,5 @@ __all__ = [
     "WorkerProfileStore",
     "WorkerRuntimeInfo",
     "WorkerSelectionSettings",
+    "choose_failover",
 ]

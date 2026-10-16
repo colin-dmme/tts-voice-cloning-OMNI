@@ -60,6 +60,17 @@ class BrokerClientTest(unittest.TestCase):
             self.assertEqual(self.client.health(), {"status": "ok"})
         self.assertNotIn("Authorization", dict(mocked.call_args.args[0].header_items()))
 
+    def test_requests_identify_studio_to_cloudflare(self) -> None:
+        with patch(
+            "omni_tts_core.remote_compute.client.urlopen",
+            return_value=_Response(b'{"status":"ok"}'),
+        ) as mocked:
+            self.client.health()
+        self.assertTrue(
+            mocked.call_args.args[0].get_header("User-agent", "").startswith("Colin-TTS-Studio/"),
+            "Generic Python user agents are blocked by the deployed Cloudflare zone",
+        )
+
     def test_submit_includes_selected_worker_and_bearer_token(self) -> None:
         job = RemoteTtsJob(job_id="job-1", request=_request())
         with patch.dict(os.environ, {"TEST_COLIN_BROKER_TOKEN": "secret"}, clear=False):

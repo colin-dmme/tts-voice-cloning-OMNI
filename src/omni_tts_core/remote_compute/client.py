@@ -133,7 +133,10 @@ class BrokerClient:
         extra_headers: dict[str, str] | None = None,
         authenticated: bool = True,
     ) -> bytes:
-        headers = {"Accept": "application/json, audio/wav"}
+        headers = {
+            "Accept": "application/json, audio/wav",
+            "User-Agent": "Colin-TTS-Studio/0.5",
+        }
         if authenticated:
             headers.update(self._auth_headers())
         headers.update(extra_headers or {})

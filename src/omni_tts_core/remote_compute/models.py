@@ -231,3 +231,13 @@ class WorkerSelectionSettings(BaseModel):
     @classmethod
     def normalize_selection(cls, value: str) -> str:
         return value.strip()
+
+
+class PairingPreview(BaseModel):
+    """No credentials: only the information Studio must show before approval."""
+    pairing_id: str
+    worker_id: str
+    provider: Literal["zerotts", "vieneu_v3"]
+    device: Literal["cpu", "cuda"]
+    expires_at: str
+    session_hours: int = Field(ge=1, le=24)

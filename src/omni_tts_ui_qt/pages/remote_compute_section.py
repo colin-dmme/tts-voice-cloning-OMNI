@@ -23,6 +23,7 @@ from omni_tts_core.remote_compute.client import BrokerClient
 from omni_tts_core.remote_compute.models import BrokerConnectionOptions
 from omni_tts_core.remote_compute.profiles import WorkerProfileStore
 from omni_tts_ui_qt.background import FunctionTask
+from .colab_pairing_dialog import ColabPairingDialog, pairing_client
 
 
 _POLICIES = (
@@ -66,10 +67,21 @@ class RemoteComputeGroup(QWidget):
         actions.addWidget(self.manage_button)
         layout.addLayout(actions)
 
+        pairing_actions = QHBoxLayout()
+        self.pair_button = QPushButton("Kết nối Colab bằng mã")
+        self.revoke_button = QPushButton("Ngắt quyền Colab")
+        self.pair_button.setToolTip("Mở notebook và ghép nối bằng mã ngắn; không cần nhập Secrets.")
+        self.revoke_button.setToolTip("Thu hồi phiên ghép nối của worker đang chọn; không xóa tài khoản hay Secrets cũ.")
+        pairing_actions.addWidget(self.pair_button)
+        pairing_actions.addWidget(self.revoke_button)
+        layout.addLayout(pairing_actions)
+
         self.profile.currentIndexChanged.connect(self._save_selection)
         self.policy.currentIndexChanged.connect(self._save_selection)
         self.check_button.clicked.connect(self.check_connections)
         self.manage_button.clicked.connect(self.manage_profiles)
+        self.pair_button.clicked.connect(self.pair_colab)
+        self.revoke_button.clicked.connect(self.revoke_colab)
         self.reload()
 
     def set_model_id(self, model_id: str) -> None:
@@ -95,6 +107,8 @@ class RemoteComputeGroup(QWidget):
             self.profile.setEnabled(enabled)
             self.policy.setEnabled(enabled)
             self.check_button.setEnabled(enabled)
+            self.pair_button.setEnabled(enabled)
+            self.revoke_button.setEnabled(enabled)
         finally:
             self._loading = False
 
@@ -112,6 +126,8 @@ class RemoteComputeGroup(QWidget):
         self.changed.emit()
 
     def check_connections(self) -> None:
+        if self._task is not None:
+            return
         self.check_button.setEnabled(False)
         self.status.setText("Đang hỏi broker về worker và model đang chạy...")
         task = FunctionTask(self._probe)
@@ -184,6 +200,50 @@ class RemoteComputeGroup(QWidget):
         self._task = None
         self.check_button.setEnabled(True)
         self.status.setText(f"Không kiểm tra được broker: {error}")
+
+    def _selected_profile(self):
+        return next((item for item in self.store.load().profiles
+                     if item.profile_id == self.profile.currentData() and item.enabled), None)
+
+    def pair_colab(self) -> None:
+        profile = self._selected_profile()
+        if profile is None:
+            self.status.setText("Chọn một worker đang bật trước khi ghép nối.")
+            return
+        dialog = ColabPairingDialog(profile, self._model_id, self)
+        dialog.exec()
+
+    def revoke_colab(self) -> None:
+        profile = self._selected_profile()
+        if profile is None or self._task is not None:
+            return
+        answer = QMessageBox.question(
+            self, "Ngắt quyền worker Colab?",
+            f"Ngắt các phiên ghép nối của {profile.label} [{profile.worker_id}]?\n"
+            "Job đang chạy có thể bị gián đoạn. Notebook dùng Secrets cũ không bị thu hồi bởi nút này.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.revoke_button.setEnabled(False)
+        self.check_button.setEnabled(False)
+        client = pairing_client(profile)
+        task = FunctionTask(lambda: client.revoke_pairing(profile.worker_id))
+        self._task = task
+        task.signals.completed.connect(self._revoked)
+        task.signals.failed.connect(self._revoke_failed)
+        QThreadPool.globalInstance().start(task)
+
+    def _revoked(self, result) -> None:
+        self._task = None
+        self.revoke_button.setEnabled(True)
+        self.check_button.setEnabled(True)
+        self.status.setText(f"Đã ngắt {result.get('sessions', 0)} phiên ghép nối của {result.get('worker_id', '')}. Muốn dùng lại, chạy notebook lấy mã mới.")
+
+    def _revoke_failed(self, error: str) -> None:
+        self.revoke_button.setEnabled(True)
+        self._probe_failed(error)
 
     def manage_profiles(self) -> None:
         document = self.store.load()

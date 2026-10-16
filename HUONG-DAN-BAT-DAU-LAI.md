@@ -2,7 +2,7 @@
 
 Ngày kiểm tra: 16/10/2026, giờ Bangkok/Việt Nam.
 
-Bạn có thể dùng ZeroTTS ngay trên máy. Phần Colab cần bạn đăng nhập Google và cập nhật token mới một lần.
+Bạn có thể dùng ZeroTTS ngay trên máy. Phần Colab đã có cách [ghép nối bằng mã, không cần thiết lập Secrets](C:/Coder/tts-voice-cloning-OMNI/HUONG-DAN-KET-NOI-COLAB-BANG-MA.md): mở notebook, chạy cell, nhập mã vào Studio và xác nhận. Các bước token bên dưới là cách cũ để dự phòng.
 
 Đã có thêm luồng **VieNeu v3 qua Colab**, gồm 23 preset (có Ngọc Huyền v3) và clone từ Profile. Xem [Hướng dẫn VieNeu v3 Colab](C:/Coder/tts-voice-cloning-OMNI/HUONG-DAN-VIENEU-V3-COLAB.md). Không cần dùng model Ngọc Huyền 0.3B cũ.
 

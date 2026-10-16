@@ -20,6 +20,7 @@ from .models import (
     RemoteTtsJob,
     RemoteTtsRequest,
     WorkerRecord,
+    PairingPreview,
 )
 
 
@@ -53,6 +54,28 @@ class BrokerClient:
         if not isinstance(payload, list):
             raise GenerationError("Broker trả về danh sách worker không hợp lệ.")
         return [WorkerRecord.model_validate(item) for item in payload]
+
+    def inspect_pairing(self, user_code: str) -> PairingPreview:
+        return PairingPreview.model_validate(self._json_request(
+            "POST", "/v1/pairing/inspect", payload={"user_code": user_code.strip().upper()},
+        ))
+
+    def approve_pairing(self, user_code: str, preview: PairingPreview) -> dict[str, Any]:
+        payload = {key: getattr(preview, key) for key in ("pairing_id", "worker_id", "provider", "device")}
+        payload["user_code"] = user_code.strip().upper()
+        # An uncertain approval must never be submitted again automatically.
+        client = BrokerClient(self.options.model_copy(update={"max_retries": 0}))
+        result = client._json_request("POST", "/v1/pairing/approve", payload=payload)
+        if not isinstance(result, dict) or result.get("status") != "approved":
+            raise GenerationError("Broker chưa xác nhận ghép nối. Không tự gửi lại yêu cầu.")
+        return result
+
+    def revoke_pairing(self, worker_id: str) -> dict[str, Any]:
+        client = BrokerClient(self.options.model_copy(update={"max_retries": 0}))
+        result = client._json_request("POST", f"/v1/workers/{quote(worker_id, safe='')}/revoke-pairing")
+        if not isinstance(result, dict) or result.get("status") != "revoked":
+            raise GenerationError("Broker chưa xác nhận đã ngắt phiên Colab.")
+        return result
 
     def submit(self, request: RemoteTtsRequest, *, worker_id: str = "") -> RemoteTtsJob:
         payload = request.model_dump(mode="json")

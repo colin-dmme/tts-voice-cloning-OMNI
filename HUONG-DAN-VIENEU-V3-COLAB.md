@@ -3,6 +3,8 @@
 Áp dụng cho Colin TTS Studio Qt, VieNeu v3 Turbo SDK **3.6.4**, audio mono 48 kHz.
 Không dùng model Ngọc Huyền 0.3B cũ. **Ngọc Huyền trong danh sách 23 preset v3 vẫn có đầy đủ.**
 
+**Cách dễ hơn, nên dùng:** [Kết nối Colab bằng mã — không cần Secrets](C:/Coder/tts-voice-cloning-OMNI/HUONG-DAN-KET-NOI-COLAB-BANG-MA.md). Studio có nút **Kết nối Colab bằng mã**, dùng notebook `Colin-TTS-Pairing-...`; bạn không cần vào GitHub hay thiết lập Secrets cho tài khoản 2/3. Các phần Secrets dưới đây chỉ áp dụng cho notebook cũ để dự phòng. Phần chọn preset/clone của Studio vẫn dùng chung.
+
 Notebook VieNeu v3 tài khoản 1 đã tải lên Drive ngày 16/10/2026, tên **Colin-TTS-VieNeu-v3-google-pro-1.ipynb**. Mở bằng đúng tài khoản Google đã dùng khi thiết lập; có thể tìm tên này trong Google Drive hoặc đánh dấu trang notebook riêng trong Chrome. Không đưa liên kết Drive cá nhân hay địa chỉ tài khoản vào tài liệu được push lên GitHub.
 
 Phạm vi thiết lập lần này: hai Secret cho tài khoản trên và quyền đọc của notebook VieNeu v3 tài khoản 1. Chưa thiết lập giúp tài khoản 2/3, chưa khởi động runtime GPU và chưa có kết quả suy luận trên Google Colab. Mở notebook đã lưu không tự chạy model.

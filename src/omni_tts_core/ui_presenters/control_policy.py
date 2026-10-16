@@ -206,6 +206,10 @@ def build_policy(
                 if gpu_available
                 else ()
             ),
+            *(
+                (("Colab từ xa · preset + clone giọng", "remote"),)
+                if spec.model_id == "vieneu_v3_turbo" else ()
+            ),
         )
         device_note = (
             "VieNeu v3 chạy CPU ONNX khi chọn Tự động. GPU PyTorch chỉ có lợi rõ với "
@@ -213,6 +217,8 @@ def build_policy(
             if gpu_available
             else "VieNeu v3 đang dùng CPU ONNX; muốn chạy batch GPU hãy cài CUDA cho worker VieNeu v3."
         )
+        if spec.model_id == "vieneu_v3_turbo":
+            device_note += " Chọn Colab từ xa để dùng CPU/GPU của notebook, không cần cài model trên máy này; hỗ trợ cả preset và Profile clone."
     else:
         device_targets = tuple(
             (label, value)

@@ -702,9 +702,10 @@ class SettingsPanel(QScrollArea):
         self.device_note.setText(policy.device_note)
         self.device_note.setVisible(bool(policy.device_note))
         self.remote_compute_section.setVisible(
-            policy.model_id == "zerotts_202m_official"
+            policy.model_id in {"zerotts_202m_official", "vieneu_v3_turbo"}
         )
-        if policy.model_id == "zerotts_202m_official":
+        if policy.model_id in {"zerotts_202m_official", "vieneu_v3_turbo"}:
+            self.remote_compute_group.set_model_id(policy.model_id)
             self.remote_compute_group.reload()
 
         self._apply_control(self.speed, policy.speed, NEUTRAL_SPEED)

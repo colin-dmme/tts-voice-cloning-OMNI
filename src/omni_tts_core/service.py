@@ -1005,12 +1005,11 @@ class TtsService:
 
     def _ensure_request_can_generate(self, request: GenerateSpeechRequest, spec: ModelSpec) -> None:
         _validate_request_for_model(request, spec)
-        uses_remote_zerotts = (
+        uses_remote_compute = (
             request.runtime_target == "remote"
-            and spec.provider == "zerotts"
-            and spec.model_id == "zerotts_202m_official"
+            and spec.model_id in {"zerotts_202m_official", "vieneu_v3_turbo"}
         )
-        if not uses_remote_zerotts and not self.storage.is_installed(spec):
+        if not uses_remote_compute and not self.storage.is_installed(spec):
             if spec.provider in ("vieneu", "valtec"):
                 raise ModelMissingError(
                     f"{spec.display_name} chưa được cài. "
@@ -1021,7 +1020,7 @@ class TtsService:
             )
         missing_required = []
         descriptor = provider_descriptor(spec.provider)
-        if not uses_remote_zerotts and (not descriptor or descriptor.storage_mode != "remote"):
+        if not uses_remote_compute and (not descriptor or descriptor.storage_mode != "remote"):
             missing_required = [
                 item
                 for item in self.missing_required_models()
@@ -1759,9 +1758,9 @@ def _resolve_output_stem(request: GenerateSpeechRequest) -> str:
 
 def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec) -> None:
     if request.runtime_target == "remote" and not (
-        spec.provider == "zerotts" and spec.model_id == "zerotts_202m_official"
+        spec.model_id in {"zerotts_202m_official", "vieneu_v3_turbo"}
     ):
-        raise ConfigError("Colab từ xa hiện chỉ hỗ trợ ZeroTTS 202M Official.")
+        raise ConfigError("Colab từ xa chỉ hỗ trợ ZeroTTS 202M Official và VieNeu v3 Turbo.")
     caps = _effective_capabilities(spec)
     voice_mode = request.voice_source_mode or "fixed"
     voice_input = effective_voice_input(spec)

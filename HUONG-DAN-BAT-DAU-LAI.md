@@ -4,6 +4,8 @@ Ngày kiểm tra: 16/10/2026, giờ Bangkok/Việt Nam.
 
 Bạn có thể dùng ZeroTTS ngay trên máy. Phần Colab cần bạn đăng nhập Google và cập nhật token mới một lần.
 
+Đã có thêm luồng **VieNeu v3 qua Colab**, gồm 23 preset (có Ngọc Huyền v3) và clone từ Profile. Xem [Hướng dẫn VieNeu v3 Colab](C:/Coder/tts-voice-cloning-OMNI/HUONG-DAN-VIENEU-V3-COLAB.md). Không cần dùng model Ngọc Huyền 0.3B cũ.
+
 ## 1. Mở và thử ngay trên máy
 
 1. Mở thư mục `C:\Coder\tts-voice-cloning-OMNI`.
@@ -94,7 +96,7 @@ Các mục hàng đợi cũ vẫn giữ trạng thái để bạn xem lại. Nê
 
 | Hiện tượng | Việc làm tiếp |
 | --- | --- |
-| Không thấy phần Điện toán Colab | Mở `run_qt.bat`, chọn đúng ZeroTTS 202M Official |
+| Không thấy phần Điện toán Colab | Mở `run_qt.bat`, chọn đúng ZeroTTS 202M Official hoặc VieNeu v3 Turbo |
 | `Broker: ok`, cả ba worker offline | Broker đã chạy; mở notebook của tài khoản bạn muốn dùng |
 | Broker không kết nối được | Bấm `Start-Compute-Broker.bat`, xem log tại `C:\Coder\colin-tts-compute-runtime\logs` nếu vẫn lỗi |
 | Colab trả HTTP 401 | Cập nhật secret broker bằng token mới trên C và chạy lại cell worker |

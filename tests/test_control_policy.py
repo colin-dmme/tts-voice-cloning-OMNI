@@ -57,6 +57,13 @@ def _policy(spec=None, caps=None, runtime=None, **flags):
 
 
 class DeviceTargetsTest(unittest.TestCase):
+    def test_v3_offers_remote_without_requiring_local_cuda_and_v2_does_not(self) -> None:
+        v3 = _Spec(model_id="vieneu_v3_turbo")
+        v3.runtime = {"vieneu_mode": "v3turbo"}
+        policy = _policy(spec=v3, runtime=_runtime(gpu=False))
+        self.assertIn("remote", [value for _label, value in policy.device_targets])
+        self.assertNotIn("cuda", [value for _label, value in policy.device_targets])
+        self.assertNotIn("remote", [value for _label, value in _policy(spec=_Spec(model_id="vieneu_v2_standard")).device_targets])
     def test_cuda_offered_when_gpu_available(self) -> None:
         policy = _policy(runtime=_runtime(gpu=True))
         self.assertIn("cuda", [value for _label, value in policy.device_targets])

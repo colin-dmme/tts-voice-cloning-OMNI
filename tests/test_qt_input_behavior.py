@@ -123,6 +123,32 @@ class ZeroTtsDeclarativeSettingsTest(unittest.TestCase):
         self.assertGreaterEqual(len(changed_events), 5)
         group.close()
 
+    def test_v3_ui_offers_remote_preset_and_clone_but_v2_has_no_remote_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = AppContext(
+                controller=AppController(), probe=Mock(), safety_gate=Mock(),
+                preferences=QtPreferences(path=Path(temp_dir) / "ui_qt.json"),
+                log=Mock(), set_worker_status=Mock(), show_page=Mock(), register_settings_provider=Mock(),
+            )
+            panel = SettingsPanel(context)
+            panel._select_model("vieneu_v3_turbo")
+            self.assertFalse(panel.remote_compute_section.isHidden())
+            self.assertGreaterEqual(panel.device_combo.findData("remote"), 0)
+            self.assertGreaterEqual(panel.fixed_voice_combo.findData("Ngọc Huyền"), 0)
+            self.assertEqual(panel.fixed_voice_combo.count(), 23)
+            self.assertFalse(panel.mode_profile.isHidden())
+            panel.device_combo.setCurrentIndex(panel.device_combo.findData("remote"))
+            panel.mode_fixed.setChecked(True)
+            panel.fixed_voice_combo.setCurrentIndex(panel.fixed_voice_combo.findData("Ngọc Huyền"))
+            settings = panel.current_settings()
+            self.assertEqual(settings.runtime_target, "remote")
+            self.assertEqual(settings.speaker_id, "Ngọc Huyền")
+            self.assertEqual(settings.voice_source_mode, "fixed")
+            panel._select_model("vieneu_v2_standard")
+            self.assertTrue(panel.remote_compute_section.isHidden())
+            self.assertEqual(panel.device_combo.findData("remote"), -1)
+            panel.close()
+
     def test_settings_panel_keeps_provider_options_per_zerotts_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             preferences = QtPreferences(path=Path(temp_dir) / "ui_qt.json")

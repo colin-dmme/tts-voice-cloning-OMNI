@@ -46,6 +46,7 @@ class WorkerModelCapability(BaseModel):
     output_formats: tuple[str, ...] = ("wav",)
     supports_streaming: bool = False
     supports_profile_clone: bool = False
+    supports_batch: bool = False
 
     @field_validator("model_id", "provider_id")
     @classmethod
@@ -99,9 +100,11 @@ class RemoteTtsRequest(BaseModel):
     inference_unit_id: str
     idempotency_key: str
     model_id: str
-    text: str
+    text: str = Field(max_length=100_000)
     language: str = "vi"
     speaker_id: str | None = None
+    reference_audio_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    batch_texts: tuple[str, ...] = Field(default=(), max_length=16)
     provider_options: dict[str, Any] = Field(default_factory=dict)
     output_format: Literal["wav"] = "wav"
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -122,11 +125,19 @@ class RemoteTtsRequest(BaseModel):
             raise ValueError(
                 f"Protocol job {self.protocol_version} không tương thích với {PROTOCOL_VERSION}"
             )
+        if self.reference_audio_id and self.model_id != "vieneu_v3_turbo":
+            raise ValueError("Clone remote hiện chỉ hỗ trợ VieNeu v3 Turbo")
+        if self.batch_texts and (
+            self.model_id != "vieneu_v3_turbo"
+            or any(not text.strip() for text in self.batch_texts)
+            or sum(map(len, self.batch_texts)) > 100_000
+        ):
+            raise ValueError("Batch remote chỉ hỗ trợ VieNeu v3 và tối đa 100.000 ký tự có nội dung")
         return self
 
 
 class RemoteTtsResultMetadata(BaseModel):
-    audio_format: Literal["wav"] = "wav"
+    audio_format: Literal["wav", "zip"] = "wav"
     sample_rate: int = Field(ge=8000, le=384000)
     channels: int = Field(default=1, ge=1, le=8)
     duration_seconds: float = Field(default=0.0, ge=0.0)

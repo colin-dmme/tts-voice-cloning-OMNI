@@ -60,6 +60,21 @@ class BrokerClientTest(unittest.TestCase):
             self.assertEqual(self.client.health(), {"status": "ok"})
         self.assertNotIn("Authorization", dict(mocked.call_args.args[0].header_items()))
 
+    def test_reference_upload_is_content_addressed_and_cached_per_client(self) -> None:
+        audio = b"reference-wav"
+        with patch.object(self.client, "_json_request", return_value={"exists": False}) as status, patch.object(self.client, "_request", return_value=b'{}') as upload:
+            asset_id = self.client.ensure_reference_audio(audio)
+            self.assertEqual(self.client.ensure_reference_audio(audio), asset_id)
+        self.assertEqual(asset_id, hashlib.sha256(audio).hexdigest())
+        self.assertEqual(status.call_count, 1)
+        self.assertEqual(upload.call_count, 1)
+        self.assertEqual(upload.call_args.kwargs["body"], audio)
+
+    def test_existing_reference_is_not_uploaded_again(self) -> None:
+        with patch.object(self.client, "_json_request", return_value={"exists": True}), patch.object(self.client, "_request") as upload:
+            self.client.ensure_reference_audio(b"already-stored")
+        upload.assert_not_called()
+
     def test_requests_identify_studio_to_cloudflare(self) -> None:
         with patch(
             "omni_tts_core.remote_compute.client.urlopen",

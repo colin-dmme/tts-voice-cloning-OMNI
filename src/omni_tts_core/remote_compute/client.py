@@ -28,6 +28,19 @@ class BrokerClient:
 
     def __init__(self, options: BrokerConnectionOptions) -> None:
         self.options = options
+        self._reference_assets: set[str] = set()
+
+    def ensure_reference_audio(self, audio: bytes) -> str:
+        if len(audio) > 10 * 1024 * 1024:
+            raise GenerationError("Audio mẫu vượt giới hạn 10 MiB.")
+        asset_id = hashlib.sha256(audio).hexdigest()
+        if asset_id not in self._reference_assets:
+            path = f"/v1/assets/{asset_id}"
+            status = self._json_request("GET", path + "/status")
+            if not isinstance(status, dict) or not status.get("exists"):
+                self._request("PUT", path, body=audio, extra_headers={"Content-Type": "audio/wav"})
+            self._reference_assets.add(asset_id)
+        return asset_id
 
     def health(self) -> dict[str, Any]:
         payload = self._json_request("GET", "/health", authenticated=False)
@@ -76,7 +89,10 @@ class BrokerClient:
         started = time.monotonic()
         while True:
             if cancel_event is not None and cancel_event.is_set():
-                return self.cancel(job_id)
+                self.cancel(job_id)
+                from omni_tts_shared.errors import GenerationCancelled
+
+                raise GenerationCancelled("Đã hủy tác vụ remote compute.")
             job = self.get_job(job_id)
             if job.status in TERMINAL_REMOTE_JOB_STATUSES:
                 return job

@@ -49,6 +49,8 @@ class GenerationCoordinator:
         configured_limit = max(
             1, int(getattr(descriptor, "max_parallel_jobs", 1) or 1)
         )
+        if settings.runtime_target == "remote":
+            return GenerationResource("remote:colab", 1, "worker Colab")
         if provider_id == "higgs_remote":
             endpoint_id = str(
                 getattr(settings, "remote_endpoint_id", "")
@@ -113,7 +115,7 @@ class GenerationCoordinator:
 
     def _uses_local_gpu(self, settings: GenerationSettings) -> bool:
         target = str(getattr(settings, "runtime_target", "") or "").lower()
-        if target in _CPU_TARGETS:
+        if target in _CPU_TARGETS or target == "remote":
             return False
         if target in _GPU_TARGETS:
             return True

@@ -42,6 +42,7 @@ class RemoteComputeGroup(QWidget):
         )
         self._loading = False
         self._task: FunctionTask | None = None
+        self._model_id = "zerotts_202m_official"
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -70,6 +71,11 @@ class RemoteComputeGroup(QWidget):
         self.check_button.clicked.connect(self.check_connections)
         self.manage_button.clicked.connect(self.manage_profiles)
         self.reload()
+
+    def set_model_id(self, model_id: str) -> None:
+        if model_id != self._model_id:
+            self._model_id = model_id
+            self.status.setText("Chưa kiểm tra worker cho model đang chọn. Notebook cần chạy đúng model này.")
 
     def reload(self) -> None:
         document = self.store.load()
@@ -107,7 +113,7 @@ class RemoteComputeGroup(QWidget):
 
     def check_connections(self) -> None:
         self.check_button.setEnabled(False)
-        self.status.setText("Đang hỏi broker về 3 worker...")
+        self.status.setText("Đang hỏi broker về worker và model đang chạy...")
         task = FunctionTask(self._probe)
         self._task = task
         task.signals.completed.connect(self._probe_finished)
@@ -116,6 +122,7 @@ class RemoteComputeGroup(QWidget):
 
     def _probe(self) -> list[tuple[str, bool, str]]:
         document = self.store.load()
+        model_id = self._model_id
         results: list[tuple[str, bool, str]] = []
         for profile in document.profiles:
             client = BrokerClient(
@@ -148,6 +155,18 @@ class RemoteComputeGroup(QWidget):
                 age = 999999.0
             online = age <= 120.0
             detail = "online" if online else f"mất heartbeat {int(age)} giây"
+            capability = next((item for item in worker.capabilities.models if item.model_id == model_id), None)
+            if online and capability is None:
+                online = False
+                detail = "online nhưng notebook đang chạy model khác"
+            elif online and capability is not None:
+                if model_id == "vieneu_v3_turbo" and not (capability.supports_profile_clone and capability.supports_batch):
+                    online = False
+                    detail = "notebook cũ, cần mở bản VieNeu v3 mới có clone/batch"
+                else:
+                    detail += f" · {capability.execution_backend.upper()}"
+                    if capability.supports_profile_clone:
+                        detail += " · preset + clone"
             results.append((profile.label, online, detail))
         return results
 

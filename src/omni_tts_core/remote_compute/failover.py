@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event
@@ -34,6 +35,7 @@ class RemoteExecutionOutcome:
 
 
 class BrokerClientProtocol(Protocol):
+    def ensure_reference_audio(self, audio: bytes) -> str: ...
     def list_workers(self) -> list[WorkerRecord]: ...
     def submit(
         self, request: RemoteTtsRequest, *, worker_id: str = ""
@@ -65,6 +67,8 @@ class RemoteComputeCoordinator:
         self.client_factory = client_factory
         self.confirm_switch = confirm_switch
         self.status_callback = status_callback
+        self._active_profile_id = document.selection.selected_profile_id
+        self._clients: dict[str, BrokerClientProtocol] = {}
 
     def execute(
         self,
@@ -72,7 +76,12 @@ class RemoteComputeCoordinator:
         destination: Path,
         *,
         cancel_event: Event | None = None,
+        reference_audio: bytes | None = None,
     ) -> RemoteExecutionOutcome:
+        if request.reference_audio_id and (
+            reference_audio is None or hashlib.sha256(reference_audio).hexdigest() != request.reference_audio_id
+        ):
+            raise GenerationError("Audio mẫu không khớp SHA-256 của yêu cầu clone.")
         current = self._selected_profile()
         initial_profile_id = current.profile_id
         attempted: list[str] = []
@@ -82,7 +91,9 @@ class RemoteComputeCoordinator:
             if cancel_event is not None and cancel_event.is_set():
                 raise GenerationCancelled("Đã hủy tác vụ remote compute.")
             attempted.append(current.profile_id)
-            client = self.client_factory(current)
+            if current.profile_id not in self._clients:
+                self._clients[current.profile_id] = self.client_factory(current)
+            client = self._clients[current.profile_id]
             workers = client.list_workers()
             record = next(
                 (
@@ -96,10 +107,15 @@ class RemoteComputeCoordinator:
                 reason = f"Worker {current.label} đang offline"
             elif not any(
                 model.model_id == request.model_id
+                and (not request.reference_audio_id or model.supports_profile_clone)
+                and (not request.batch_texts or model.supports_batch)
                 for model in record.capabilities.models
             ):
-                reason = f"Worker {current.label} không hỗ trợ {request.model_id}"
+                reason = f"Worker {current.label} không hỗ trợ {request.model_id} / clone / batch cần thiết; hãy cập nhật notebook"
             else:
+                if reference_audio is not None:
+                    self._status(f"Chuẩn bị audio mẫu cho {current.label}")
+                    client.ensure_reference_audio(reference_audio)
                 attempt_request = request.model_copy(
                     update={
                         "idempotency_key": (
@@ -114,6 +130,7 @@ class RemoteComputeCoordinator:
                 )
                 if terminal.status == RemoteJobStatus.SUCCEEDED:
                     path = client.download_result(terminal, destination)
+                    self._active_profile_id = current.profile_id
                     return RemoteExecutionOutcome(
                         destination=path,
                         initial_profile_id=initial_profile_id,
@@ -134,6 +151,8 @@ class RemoteComputeCoordinator:
                 workers,
                 model_id=request.model_id,
                 failed_profile_ids=failed,
+                require_clone=bool(request.reference_audio_id),
+                require_batch=bool(request.batch_texts),
             )
             if decision is None:
                 raise GenerationError(
@@ -152,7 +171,7 @@ class RemoteComputeCoordinator:
             current = decision.profile
 
     def _selected_profile(self) -> WorkerProfile:
-        selected_id = self.document.selection.selected_profile_id
+        selected_id = self._active_profile_id
         profile = next(
             (
                 item
@@ -195,6 +214,8 @@ def choose_failover(
     failed_profile_ids: set[str],
     now: datetime | None = None,
     stale_after_seconds: float = 120.0,
+    require_clone: bool = False,
+    require_batch: bool = False,
 ) -> FailoverDecision | None:
     policy = document.selection.switch_policy
     if policy == "selected_only":
@@ -207,7 +228,12 @@ def choose_failover(
         worker = records.get(profile.worker_id)
         if worker is None or not _is_online(worker, current_time, stale_after_seconds):
             continue
-        if not any(item.model_id == model_id for item in worker.capabilities.models):
+        if not any(
+            item.model_id == model_id
+            and (not require_clone or item.supports_profile_clone)
+            and (not require_batch or item.supports_batch)
+            for item in worker.capabilities.models
+        ):
             continue
         return FailoverDecision(
             profile=profile,

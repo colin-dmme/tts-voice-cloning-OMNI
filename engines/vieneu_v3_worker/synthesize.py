@@ -5,6 +5,7 @@ import gc
 import inspect
 import json
 import sys
+from collections import OrderedDict
 from importlib.metadata import PackageNotFoundError, version
 from importlib.resources import files
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 
 _TTS: Any | None = None
 _TTS_KEY = ""
+_REFERENCE_CACHE: OrderedDict[tuple[str, bool], dict] = OrderedDict()
 
 
 def main() -> None:
@@ -36,7 +38,9 @@ def main() -> None:
 def _run(vieneu_factory: type, payload: dict) -> None:
     if str(payload.get("mode") or "v3turbo").lower() != "v3turbo":
         raise ValueError("Worker VieNeu v3 chỉ hỗ trợ mode v3turbo; model VieNeu v2 phải dùng worker VieNeu v2.")
-    if payload.get("batch"):
+    if payload.get("command") == "warmup":
+        _cached_tts(vieneu_factory, payload)
+    elif payload.get("batch"):
         _run_batch(vieneu_factory, payload)
     else:
         _run_single(vieneu_factory, payload)
@@ -46,7 +50,7 @@ def _run_single(vieneu_factory: type, payload: dict) -> None:
     tts = _cached_tts(vieneu_factory, payload)
     output_path = Path(payload["output_path"])
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    audio = tts.infer(text=str(payload["text"]), **_infer_kwargs(payload))
+    audio = tts.infer(text=str(payload["text"]), **_infer_kwargs(payload, tts))
     tts.save(audio, str(output_path))
 
 
@@ -57,7 +61,7 @@ def _run_batch(vieneu_factory: type, payload: dict) -> None:
     tts = _cached_tts(vieneu_factory, payload)
     audio_items = tts.infer_batch(
         [str(chunk["text"]) for chunk in chunks],
-        **_infer_kwargs(payload),
+        **_infer_kwargs(payload, tts),
     )
     if len(audio_items) != len(chunks):
         raise RuntimeError("VieNeu v3 trả về số audio không khớp số đoạn trong batch.")
@@ -91,6 +95,7 @@ def _cached_tts(vieneu_factory: type, payload: dict) -> Any:
     }
     key = json.dumps(constructor, ensure_ascii=False, sort_keys=True)
     if _TTS is None or key != _TTS_KEY:
+        _REFERENCE_CACHE.clear()
         _TTS = None
         gc.collect()
         _TTS = vieneu_factory(mode="v3turbo", **constructor)
@@ -98,11 +103,23 @@ def _cached_tts(vieneu_factory: type, payload: dict) -> Any:
     return _TTS
 
 
-def _infer_kwargs(payload: dict) -> dict[str, Any]:
+def _infer_kwargs(payload: dict, tts: Any | None = None) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     if payload.get("ref_audio"):
-        kwargs["ref_audio"] = str(payload["ref_audio"])
-        kwargs["denoise"] = bool(payload.get("denoise_reference", True))
+        denoise = bool(payload.get("denoise_reference", True))
+        cache_key = payload.get("reference_cache_key")
+        if cache_key and tts is not None:
+            key = (str(cache_key), denoise)
+            if key not in _REFERENCE_CACHE:
+                speaker_emb, codes = tts.encode_reference(str(payload["ref_audio"]), denoise=denoise)
+                _REFERENCE_CACHE[key] = {"speaker_emb": speaker_emb, "codes": codes}
+                if len(_REFERENCE_CACHE) > 16:
+                    _REFERENCE_CACHE.popitem(last=False)
+            _REFERENCE_CACHE.move_to_end(key)
+            kwargs["voice"] = _REFERENCE_CACHE[key]
+        else:
+            kwargs["ref_audio"] = str(payload["ref_audio"])
+            kwargs["denoise"] = denoise
     elif payload.get("voice_name"):
         kwargs["voice"] = str(payload["voice_name"])
     if payload.get("temperature") is not None:
@@ -124,7 +141,7 @@ def _serve(vieneu_factory: type) -> None:
                 _run(vieneu_factory, payload)
                 response = {"ok": True}
         except Exception as exc:
-            response = {"ok": False, "error": _friendly_error(exc)}
+            response = {"ok": False, "error": _friendly_error(exc), "error_type": type(exc).__name__}
         sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
         sys.stdout.flush()
 

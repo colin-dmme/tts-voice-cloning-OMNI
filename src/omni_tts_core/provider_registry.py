@@ -14,6 +14,7 @@ from omni_tts_core.engines.preset_onnx_engine import PresetOnnxSubprocessEngine
 from omni_tts_core.engines.qwen_engine import QwenSubprocessEngine
 from omni_tts_core.engines.valtec_engine import ValtecSubprocessEngine
 from omni_tts_core.engines.vieneu_engine import VieneuSubprocessEngine
+from omni_tts_core.engines.vieneu_routing_engine import VieneuRoutingEngine
 from omni_tts_core.engines.zerotts_routing_engine import ZeroTtsRoutingEngine
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.provider_options import ProviderSettingSpec
@@ -54,6 +55,8 @@ def _omnivoice(spec: ModelSpec, cache: object | None) -> BaseTtsEngine:
 
 
 def _vieneu(spec: ModelSpec, cache: object | None) -> BaseTtsEngine:
+    if spec.model_id == "vieneu_v3_turbo":
+        return VieneuRoutingEngine(spec, cache)
     return VieneuSubprocessEngine(spec, cache)
 
 

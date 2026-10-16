@@ -58,7 +58,7 @@ Thời hạn 12 giờ là giới hạn quyền của ứng dụng, **không ph�
 
 Các số 1/2/3 là nhãn worker do bạn quản lý, không tự xác minh danh tính tài khoản Google. Bạn phải kiểm tra Google đang đăng nhập đúng tài khoản muốn dùng. Không cần tạo Secrets trên tài khoản 2/3 khi dùng notebook `Colin-TTS-Pairing-...` này.
 
-Nếu Colab không mở trực tiếp được GitHub, tải notebook từ `https://tts-compute.tainguyenso.online/colab/notebooks/google-pro-1.ipynb` (đổi số 1 thành 2/3 nếu cần), rồi **File > Upload notebook**. Các notebook ghép nối công khai này không chứa khóa hay mã nguồn compute service private.
+Nếu Colab không mở trực tiếp được GitHub, [tải notebook tài khoản 1 từ broker](https://tts-compute.tainguyenso.online/colab/notebooks/google-pro-1.ipynb) (đổi số 1 thành 2/3 trong địa chỉ nếu cần), rồi **File > Upload notebook**. Các notebook ghép nối công khai này không chứa khóa hay mã nguồn compute service private.
 
 ## Khi gặp lỗi
 
@@ -85,3 +85,5 @@ Nút **Ngắt quyền Colab** chỉ thu hồi khóa phiên mới, không thu h�
 ## Phạm vi kiểm chứng
 
 Kiểm thử tự động bao gồm mã hết hạn/dùng một lần, duyệt đồng thời, khóa giới hạn worker/model, thu hồi từng worker, chặn đường dẫn ZIP và quyền audio theo lease. Kiểm tra runtime trên PC qua broker không thay thế kiểm chứng GPU thật trên Colab; chỉ khi notebook thực sự báo READY và tạo audio mới xác nhận Colab chạy thành công.
+
+Ngày **16/10/2026**: bộ kiểm thử Studio 453 bài và service 50 bài đều qua. Đã tạo audio thật trên PC bằng worker có khóa phiên giới hạn: preset Ngọc Huyền v3 (3,60 giây) và clone (2,56 giây), WAV mono 48 kHz; thu hồi xong thì khóa cũ bị từ chối. Đã thử riêng vòng ghép nối → duyệt → tải/kiểm SHA-256 gói source → thu hồi qua tên miền HTTPS thật, không đăng ký worker công khai hay chạy Colab. Báo cáo ở [verification.json](C:/Coder/tts-voice-cloning-OMNI/outputs/pairing-20261016-pc-check/verification.json) và [public-handshake.json](C:/Coder/tts-voice-cloning-OMNI/outputs/pairing-20261016-pc-check/public-handshake.json).

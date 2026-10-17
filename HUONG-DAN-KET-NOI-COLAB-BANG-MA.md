@@ -2,6 +2,8 @@
 
 Áp dụng cho Colin TTS Studio Qt, VieNeu v3 Turbo 3.6.4 (preset + clone Profile) và ZeroTTS.
 
+Broker trên PC có thể chạy nền hoàn toàn, không cần giữ cửa sổ đen. Trong **Điện toán Colab**, bấm **Trạng thái / Bật tắt broker nền**, hoặc mở [Manage-Compute-Broker.vbs](C:/Coder/tts-voice-cloning-OMNI/Manage-Compute-Broker.vbs) khi chưa mở Studio. Xem [cách bật/tắt và kiểm tra broker nền](C:/Coder/tts-voice-cloning-OMNI/HUONG-DAN-QUAN-LY-BROKER-NEN.md).
+
 ## Dùng mỗi ngày
 
 1. Giữ PC bật và có mạng. Bấm [Check-Colab.bat](C:/Coder/tts-voice-cloning-OMNI/Check-Colab.bat). Broker cần báo `ok`; chưa chạy notebook thì worker báo `OFFLINE` là bình thường.

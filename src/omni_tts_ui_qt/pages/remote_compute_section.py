@@ -24,6 +24,7 @@ from omni_tts_core.remote_compute.models import BrokerConnectionOptions
 from omni_tts_core.remote_compute.profiles import WorkerProfileStore
 from omni_tts_ui_qt.background import FunctionTask
 from .colab_pairing_dialog import ColabPairingDialog, pairing_client
+from omni_tts_ui_qt.widgets.broker_control import BrokerControlWidget
 
 
 _POLICIES = (
@@ -75,6 +76,10 @@ class RemoteComputeGroup(QWidget):
         pairing_actions.addWidget(self.pair_button)
         pairing_actions.addWidget(self.revoke_button)
         layout.addLayout(pairing_actions)
+
+        self.broker_button = QPushButton("Trạng thái / Bật tắt broker nền")
+        self.broker_button.clicked.connect(self.manage_broker)
+        layout.addWidget(self.broker_button)
 
         self.profile.currentIndexChanged.connect(self._save_selection)
         self.policy.currentIndexChanged.connect(self._save_selection)
@@ -204,6 +209,19 @@ class RemoteComputeGroup(QWidget):
     def _selected_profile(self):
         return next((item for item in self.store.load().profiles
                      if item.profile_id == self.profile.currentData() and item.enabled), None)
+
+    def manage_broker(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Broker trên PC — Trạng thái và chạy nền")
+        dialog.resize(650, 350)
+        layout = QVBoxLayout(dialog)
+        control = BrokerControlWidget(dialog)
+        layout.addWidget(control)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
+        control.timer.stop()
 
     def pair_colab(self) -> None:
         profile = self._selected_profile()

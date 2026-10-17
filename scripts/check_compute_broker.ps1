@@ -6,11 +6,10 @@ $profilePath = Join-Path $studioRoot "config\remote_compute_workers.json"
 
 try {
     if ($StartBroker) {
-        $task = Get-ScheduledTask -TaskName "Colin TTS Compute Broker"
-        if ($task.State -ne "Running") {
-            Start-ScheduledTask -TaskName $task.TaskName
-            Start-Sleep -Seconds 5
-        }
+        $controlPython = Join-Path $studioRoot '.venv\Scripts\python.exe'
+        if (-not (Test-Path -LiteralPath $controlPython)) { throw 'Open run_qt.bat once to install the Studio runtime.' }
+        & $controlPython -m omni_tts_core.remote_compute.local_broker start
+        if ($LASTEXITCODE -ne 0) { throw 'Could not start the background broker. Open Manage-Compute-Broker.vbs for status.' }
     }
     $config = [System.IO.File]::ReadAllText($profilePath) | ConvertFrom-Json
     $selected = @($config.profiles | Where-Object enabled | Select-Object -First 1)[0]

@@ -16,8 +16,18 @@ try {
     if (-not $selected) { throw "No enabled worker profile is configured." }
     $token = [System.IO.File]::ReadAllText($selected.auth_token_file).Trim()
     $headers = @{Authorization = "Bearer $token"; "User-Agent" = "Colin-TTS-Studio/0.5"}
-    $health = Invoke-RestMethod -Uri "$($selected.broker_url)/health" -Headers $headers -TimeoutSec 20
-    $workers = @(Invoke-RestMethod -Uri "$($selected.broker_url)/v1/workers" -Headers $headers -TimeoutSec 20)
+    $probeAttempts = if ($StartBroker) { 6 } else { 1 }
+    for ($probeAttempt = 1; $probeAttempt -le $probeAttempts; $probeAttempt++) {
+        try {
+            $health = Invoke-RestMethod -Uri "$($selected.broker_url)/health" -Headers $headers -TimeoutSec 8
+            $workers = @(Invoke-RestMethod -Uri "$($selected.broker_url)/v1/workers" -Headers $headers -TimeoutSec 8)
+            break
+        } catch {
+            if ($probeAttempt -ge $probeAttempts) { throw }
+            Write-Host 'Broker on PC is ready; waiting for the HTTPS tunnel...'
+            Start-Sleep -Seconds 2
+        }
+    }
     Write-Host "Broker: $($health.status) - $($selected.broker_url)"
     Write-Host "Selected worker: $($config.selection.selected_profile_id)"
     Write-Host "Switch policy: $($config.selection.switch_policy)"

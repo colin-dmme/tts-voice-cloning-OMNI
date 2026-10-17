@@ -42,3 +42,12 @@ Nếu còn một tab terminal cũ trống sau khi đổi launcher, sau khi bản
 Script `D:\_coder\colin-tts-compute-service\scripts\install_background_task.ps1` chuyển **task hiện có** sang launcher pythonw, giữ principal, trigger đăng nhập và cấu hình tự phục hồi. Trước khi thay, script lưu XML task trong `C:\Coder\colin-tts-compute-runtime\task-backups`. Script không tự dừng phiên đang chạy.
 
 Nếu task bị xóa hoặc source D bị mất, phục hồi source/môi trường trước theo [hướng dẫn bắt đầu lại](C:/Coder/tts-voice-cloning-OMNI/HUONG-DAN-BAT-DAU-LAI.md). Không tạo lại token chỉ vì cửa sổ quản lý báo chưa có task. Nếu lỗi quyền Windows, kiểm tra quyền của task/tài khoản đăng nhập; không tự chạy broker bằng một terminal thứ hai để tránh trùng phiên.
+
+## Đã kiểm tra ngày 17/10/2026
+
+- Studio: 459 bài kiểm thử qua; service: 58 bài qua.
+- Đã thử bật/tắt thật và dừng trực tiếp từ Task Scheduler: không còn Python/tunnel chạy sót sau khi tắt.
+- Đã bật lại bằng pythonw; broker trên PC và tên miền HTTPS đều hoạt động, không có cửa sổ console của broker.
+- Sao lưu trước chuyển đổi tại `C:\Coder\_backups\colin-broker-background-20261017` (Git bundles và database SQLite đã kiểm tra). XML task gốc nằm trong `C:\Coder\colin-tts-compute-runtime\task-backups`.
+
+Trạng thái sau mỗi lần chạy có thể thay đổi; xem bảng quản lý để biết trạng thái hiện tại. Chưa chạy GPU Google Colab trong bài kiểm tra này.

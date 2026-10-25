@@ -3,6 +3,40 @@
 Tất cả thay đổi đáng chú ý của Colin TTS Studio được ghi theo từng phiên bản
 trong file này. Dự án sử dụng phiên bản theo Semantic Versioning.
 
+## [0.6.1] - 2026-10-25
+
+### Added
+
+- Thư viện nhạc chuyển chương cục bộ, nhập/chuẩn hóa audio và nghe thử; tùy chọn
+  nhạc giữa chương hoặc sau tên chương, âm lượng riêng và tự trim/fade vừa nhịp.
+- Nhạc thay đúng mẫu PCM trong khoảng nghỉ; giọng và timeline SRT giữ nguyên.
+  Sửa cộng thời gian nghỉ theo số mẫu thực ở các sample rate như 22.050 Hz.
+- Qt, Tkinter, Web có bộ chọn nhạc; MCP thêm `list_chapter_music`,
+  `preview_chapter_music`, `import_chapter_music`, dùng `generation.epub.music`.
+- Cache EPUB tính cả hash audio nhạc để không dùng lại chương có nhạc đã thay.
+  Key tạo nhạc và file nhạc riêng được loại khỏi Git.
+
+### Documentation
+
+- README bổ sung luồng nhập EPUB, đặt nhịp nghỉ, bật SRT và chọn/nhập nhạc riêng.
+- Làm rõ việc chép MP3 trực tiếp vào `music_library/` chưa tự đăng ký bản nhạc;
+  cần dùng **Thêm nhạc…** hoặc MCP `import_chapter_music` để cập nhật catalog.
+- Hướng dẫn chuyển máy bằng cả thư mục nhạc và `library.json`; audio riêng/API
+  key được giữ ngoài Git, không đưa vào bản mã nguồn phân phối.
+
+## [0.6.0] - 2026-10-25
+
+### Added
+
+- Đọc EPUB theo spine, bỏ điều hướng/bìa và nội dung phụ, giữ tiêu đề, đoạn văn,
+  dòng thơ và chuyển cảnh; xem trước/chọn khoảng chương từ desktop, Web và MCP.
+- Chỉnh riêng nghỉ sau tên chương, giữa chương, chuyển cảnh và đầu quyển bằng
+  khoảng lặng PCM, dùng chung mọi engine hiện có mà không cần thẻ pause của model.
+- Xuất WAV/MP3 kèm SRT theo chương hoặc ghép sách; SRT cộng đúng khoảng nghỉ.
+  Ghép PCM theo luồng, hỗ trợ RF64 cho sách dài, lưu chương hoàn tất để tiếp tục.
+- MCP thêm `inspect_epub`, nhận EPUB qua `start_file_generation`, công bố schema
+  `generation.epub` trong contract; báo lỗi job khi có file thất bại.
+
 ## [Unreleased]
 
 ### Added

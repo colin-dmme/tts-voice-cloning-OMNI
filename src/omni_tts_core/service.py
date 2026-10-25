@@ -47,7 +47,7 @@ from omni_tts_core.text.punctuation_pauses import (
     RandomSource,
     pause_after_text,
 )
-from omni_tts_core.text.source_reader import read_source_text, read_source_units, text_units_from_blank_lines
+from omni_tts_core.text.source_reader import SourceUnit, read_source_text, read_source_units, text_units_from_blank_lines
 from omni_tts_core.text.vi_normalizer import normalize_vietnamese_text
 from omni_tts_core.designed_voices import DesignedVoiceStore
 from omni_tts_core.voice_library import VoiceItem, build_voice_items, filter_voice_items
@@ -555,6 +555,7 @@ class TtsService:
         request: GenerateSpeechRequest,
         progress_callback: ProgressCallback | None = None,
         cancel_event: Event | None = None,
+        *, source_units: list[SourceUnit] | None = None,
     ) -> GenerateSpeechResult:
         request = self.freeze_pronunciation(request)
 
@@ -565,13 +566,14 @@ class TtsService:
             check_cancel(cancel_event)
             if request.output_mode == "split":
                 return self._generate_split_text(request, request.text, progress_callback, cancel_event)
-            return self._generate_merged_text(request, progress_callback, cancel_event)
+            return self._generate_merged_text(request, progress_callback, cancel_event, source_units=source_units)
 
     def _generate_merged_text(
         self,
         request: GenerateSpeechRequest,
         progress_callback: ProgressCallback | None = None,
         cancel_event: Event | None = None,
+        *, source_units: list[SourceUnit] | None = None,
     ) -> GenerateSpeechResult:
         check_cancel(cancel_event)
         request = self._apply_voice_profile(request)
@@ -585,8 +587,13 @@ class TtsService:
             chunk_join_mode=request.chunk_join_mode,
             higgs=request.higgs,
             pronunciation_snapshot=request.pronunciation_snapshot,
+            source_units=source_units,
         )
         chunks = [chunk for unit in units for chunk in unit["chunks"]]
+        music_renderer = None
+        if source_units is not None and request.epub_options.music.enabled:
+            from omni_tts_core.chapter_music import ChapterMusicRenderer
+            music_renderer = ChapterMusicRenderer(request.epub_options.music)
         if not chunks:
             raise ConfigError("Không có nội dung để đọc.")
         emit_progress(
@@ -756,6 +763,10 @@ class TtsService:
         sample_rate = 24000
         chunk_cursor = 0
         paragraph_pauses_ms = _paragraph_pause_values(request, len(units))
+        for i in range(len(paragraph_pauses_ms)):
+            override = units[i]["unit"].pause_after_ms
+            if override is not None:
+                paragraph_pauses_ms[i] = override
 
         for unit_index, unit in enumerate(units):
             unit_chunks = unit["chunks"]
@@ -777,14 +788,14 @@ class TtsService:
                 if chunk_index < len(unit_chunks) - 1:
                     pause_ms = unit_pauses_ms[chunk_index]
                     if pause_ms > 0:
-                        current_seconds += pause_ms / 1000
+                        current_seconds += int(unit_sample_rate * pause_ms / 1000) / unit_sample_rate
                     elif unit_crossfade_ms > 0:
                         next_duration = duration_seconds(
                             unit_results[chunk_index + 1].audio,
                             unit_sample_rate,
                         )
                         current_seconds -= min(
-                            unit_crossfade_ms / 1000,
+                            int(unit_sample_rate * unit_crossfade_ms / 1000) / unit_sample_rate,
                             segment_duration,
                             next_duration,
                         )
@@ -820,7 +831,7 @@ class TtsService:
                 )
             )
             if unit_index < len(units) - 1:
-                current_seconds += paragraph_pauses_ms[unit_index] / 1000
+                current_seconds += int(sample_rate * paragraph_pauses_ms[unit_index] / 1000) / sample_rate
 
         check_cancel(cancel_event)
         audio_label = _audio_format_label(request.output_audio_format)
@@ -831,7 +842,17 @@ class TtsService:
             sample_rate,
             paragraph_pauses_ms,
             0,
+            pause_audio_segments=(
+                [music_renderer.for_boundary(units[i]["unit"].pause_kind, pause, sample_rate)
+                 for i, pause in enumerate(paragraph_pauses_ms)] if music_renderer else None
+            ),
         )
+        trailing_pause_ms = units[-1]["unit"].pause_after_ms
+        if trailing_pause_ms:
+            import numpy as np
+            tail_music = music_renderer.for_boundary(units[-1]["unit"].pause_kind, trailing_pause_ms, sample_rate) if music_renderer else None
+            tail = tail_music if tail_music is not None else np.zeros(int(sample_rate * trailing_pause_ms / 1000), dtype=np.float32)
+            combined = np.concatenate([combined, tail])
         # Finalise the filename now that the real duration is known, so the
         # optional "_{voice}_{duration}" suffix can be appended.
         final_duration = duration_seconds(combined, sample_rate)
@@ -886,6 +907,9 @@ class TtsService:
         cancel_event: Event | None = None,
     ) -> GenerateSpeechResult:
         check_cancel(cancel_event)
+        if source_path.suffix.lower() == ".epub":
+            from omni_tts_core.epub_generation import generate_epub
+            return generate_epub(self, source_path, request_template, output_dir, progress_callback, cancel_event)
         if request_template.output_mode == "split":
             return self.generate_split_from_source_file(
                 source_path,
@@ -1526,9 +1550,10 @@ def _prepared_text_units(
     chunk_join_mode: str = "auto",
     higgs=None,
     pronunciation_snapshot: PronunciationSnapshot | None = None,
+    source_units: list[SourceUnit] | None = None,
 ) -> list[dict]:
     prepared_units = []
-    for unit in text_units_from_blank_lines(text):
+    for unit in source_units if source_units is not None else text_units_from_blank_lines(text):
         pronunciation_active = bool(
             pronunciation_snapshot
             and pronunciation_snapshot.enabled

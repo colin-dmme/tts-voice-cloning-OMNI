@@ -61,6 +61,7 @@ def concatenate_segments_with_pauses(
     sample_rate: int,
     pauses_ms: list[int],
     crossfade_ms: int = 0,
+    *, pause_audio_segments: list[np.ndarray | None] | None = None,
 ) -> np.ndarray:
     """Join segments with one explicit pause for each adjacent pair."""
     if not segments:
@@ -69,6 +70,8 @@ def concatenate_segments_with_pauses(
         return _to_mono_float32(segments[0])
     if len(pauses_ms) != len(segments) - 1:
         raise ValueError("Số khoảng nghỉ phải bằng số đoạn audio trừ một.")
+    if pause_audio_segments is not None and len(pause_audio_segments) != len(pauses_ms):
+        raise ValueError("Số đoạn nhạc nghỉ không khớp với số khoảng nghỉ.")
     normalized = [max(0, int(value)) for value in pauses_ms]
     if not any(normalized):
         return concatenate_segments(segments, sample_rate, 0, crossfade_ms)
@@ -81,9 +84,15 @@ def concatenate_segments_with_pauses(
             continue
         pause_ms = normalized[index]
         if pause_ms:
-            pieces.append(
-                np.zeros(int(sample_rate * pause_ms / 1000), dtype=np.float32)
-            )
+            pause = pause_audio_segments[index] if pause_audio_segments is not None else None
+            expected_samples = int(sample_rate * pause_ms / 1000)
+            if pause is None:
+                pause = np.zeros(expected_samples, dtype=np.float32)
+            else:
+                pause = _to_mono_float32(pause)
+                if len(pause) != expected_samples or not np.isfinite(pause).all():
+                    raise ValueError("Nhạc phải có đúng thời lượng của khoảng nghỉ để giữ SRT khớp audio.")
+            pieces.append(pause)
     return np.concatenate(pieces)
 
 

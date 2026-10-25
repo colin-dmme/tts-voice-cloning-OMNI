@@ -18,6 +18,7 @@ from omni_tts_ui_tkinter.panels.contact_panel import ContactPanel
 from omni_tts_ui_tkinter.panels.license_panel import LicensePanel
 from omni_tts_ui_tkinter.voice_panel import VoiceProfilePanel
 from omni_tts_ui_tkinter.widgets import attach_tooltip
+from omni_tts_ui_tkinter.panels.epub_dialog import import_epub
 
 
 class GenerationTabsMixin:
@@ -116,12 +117,13 @@ class GenerationTabsMixin:
         run_menu_button.grid(row=0, column=6, sticky="w", padx=(8, 0))
         self.action_buttons.append(run_menu_button)
 
-        ttk.Label(management_row, text="Hỗ trợ: .txt, .md, .srt").grid(
+        ttk.Label(management_row, text="Hỗ trợ: .txt, .md, .srt, .epub").grid(
             row=0, column=7, sticky="e", padx=(14, 0)
         )
 
         path_tools_row = ttk.Frame(top)
         path_tools_row.grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(path_tools_row, text="Nhập EPUB / chỉnh nhịp…", command=lambda: import_epub(self)).grid(row=0, column=2, padx=(8, 0))
         copy_menu = self._build_result_path_menu(path_tools_row, self.copy_result_paths)
         copy_button = ttk.Menubutton(path_tools_row, text="Copy path", menu=copy_menu)
         copy_button.grid(row=0, column=0, sticky="w")

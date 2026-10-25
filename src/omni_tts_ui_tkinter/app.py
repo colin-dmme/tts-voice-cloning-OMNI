@@ -669,7 +669,7 @@ class TkinterApp(GenerationTabsMixin):
             return
         paths = filedialog.askopenfilenames(
             title="Chọn file nguồn",
-            filetypes=[("Text/SRT", "*.txt *.md *.srt"), ("Tất cả", "*.*")],
+            filetypes=[("Văn bản/EPUB", "*.txt *.md *.srt *.epub"), ("Tất cả", "*.*")],
         )
         self._start_source_file_import([Path(path) for path in paths])
 
@@ -979,6 +979,7 @@ class TkinterApp(GenerationTabsMixin):
         supports_f5 = self.controller.model_supports_f5_settings(model_id)
         supports_chatterbox = self.controller.model_supports_chatterbox_settings(model_id)
         return UiSettings(
+            epub_options=getattr(self, "_epub_options", self.preference_data.get("epub_options", {})),
             language=LANGUAGE_CODES.get(self.language_var.get(), "vi"),
             model_id=model_id,
             voice_source_mode=self.voice_source_mode_var.get(),
@@ -1073,6 +1074,7 @@ class TkinterApp(GenerationTabsMixin):
         supports_f5 = self.controller.model_supports_f5_settings(model_id)
         supports_chatterbox = self.controller.model_supports_chatterbox_settings(model_id)
         self.preference_data.update({
+            "epub_options": getattr(self, "_epub_options", self.preference_data.get("epub_options", {})),
             "language": LANGUAGE_CODES.get(self.language_var.get(), "vi"),
             "model_id": model_id,
             "voice_source_mode": self.voice_source_mode_var.get(),

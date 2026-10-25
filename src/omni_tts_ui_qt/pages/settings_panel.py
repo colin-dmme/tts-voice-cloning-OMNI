@@ -76,6 +76,7 @@ from omni_tts_ui_qt.widgets.common import (
 from omni_tts_ui_qt.widgets.higgs_custom_voice_creator import (
     HiggsCustomVoiceCreator,
 )
+from omni_tts_ui_qt.widgets.epub_options import EpubOptionsWidget
 
 _AUDIO_FORMATS = [("WAV", "wav"), ("MP3", "mp3")]
 _BITRATES = [("128 kbps", 128), ("160 kbps", 160), ("192 kbps", 192), ("256 kbps", 256), ("320 kbps", 320)]
@@ -113,6 +114,11 @@ class SettingsPanel(QScrollArea):
         self._build_voice_source()
         self._build_tuning()
         self._build_output()
+        epub_section = CollapsibleSection("Đọc sách EPUB", expanded=False)
+        self.epub_options = EpubOptionsWidget()
+        self.epub_options.changed.connect(self._emit_changed)
+        epub_section.body_layout.addWidget(self.epub_options)
+        self._layout.addWidget(epub_section)
         self._build_gpu_safety()
         self._layout.addStretch()
 
@@ -1316,6 +1322,7 @@ class SettingsPanel(QScrollArea):
         cb_seed = cb.seed.value()
         pause_values = self._pause_values()
         return GenerationSettings(
+            epub_options=self.epub_options.options(),
             language=str(self.language_combo.currentData() or "vi"),
             model_id=self.current_model_id(),
             pronunciation_enabled=bool(
@@ -1469,6 +1476,7 @@ class SettingsPanel(QScrollArea):
     # --- Preferences round-trip --------------------------------------------
 
     def load_preferences(self, data: dict) -> None:
+        self.epub_options.set_options(data.get("epub_options", {}))
         self._loading = True
         try:
             self._select_model(data.get("model_id"))

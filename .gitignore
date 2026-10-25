@@ -33,6 +33,7 @@ releases/
 
 # App runtime data
 outputs/
+music_library/
 logs/
 voices/
 config/ui_tkinter.json
@@ -62,6 +63,7 @@ config/remote_compute_workers.json
 
 # Local license secrets and generated customer licenses
 secrets/
+api-elevenlab-*.txt
 config/license_private_key.pem
 *.license-private.pem
 license.json

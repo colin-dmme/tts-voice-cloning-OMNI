@@ -22,6 +22,7 @@ from omni_tts_shared.pronunciation import PronunciationSelection
 # Default preference values for every generation field. Window/layout keys are
 # GUI-specific and live in each GUI's own preferences store, not here.
 DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
+    "epub_options": {},
     "language": "vi",
     "model_id": "omnivoice_vietnamese",
     "voice_source_mode": "fixed",
@@ -199,6 +200,7 @@ class GenerationSettings:
     chunk_pause_ms: int = 120
     chunk_crossfade_ms: int = 80
     paragraph_pause_ms: int = 600
+    epub_options: dict[str, Any] = field(default_factory=dict)
     paragraph_pause_random_enabled: bool = False
     paragraph_pause_min_ms: int = 500
     paragraph_pause_max_ms: int = 700
@@ -312,6 +314,7 @@ class GenerationSettings:
             chunk_pause_ms=self.chunk_pause_ms,
             chunk_crossfade_ms=self.chunk_crossfade_ms,
             paragraph_pause_ms=self.paragraph_pause_ms,
+            epub_options=self.epub_options,
             paragraph_pause_random_enabled=self.paragraph_pause_random_enabled,
             paragraph_pause_min_ms=self.paragraph_pause_min_ms,
             paragraph_pause_max_ms=self.paragraph_pause_max_ms,

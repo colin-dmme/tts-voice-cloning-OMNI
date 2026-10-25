@@ -79,10 +79,40 @@ def build_app() -> gr.Blocks:
                         placeholder="Nhập nội dung tiếng Việt hoặc tiếng Anh...",
                     )
                     source_files = gr.File(
-                        label="File nguồn .srt, .txt, .md",
+                        label="File nguồn .srt, .txt, .md, .epub",
                         file_count="multiple",
                         type="filepath",
                     )
+                    with gr.Accordion("Đọc sách EPUB — chương và khoảng nghỉ", open=False):
+                        gr.Markdown("Chọn chương theo vị trí. Đến chương = 0 là hết sách. Bật Xuất kèm SRT ở Đầu ra; phụ đề dùng cùng timeline với audio.")
+                        epub_saved = preferences.get("epub_options", {})
+                        epub_start = gr.Number(label="Từ chương", value=epub_saved.get("chapter_start", 1), precision=0, minimum=1)
+                        epub_end = gr.Number(label="Đến chương (0 = hết sách)", value=epub_saved.get("chapter_end", 0), precision=0, minimum=0)
+                        epub_titles = gr.Checkbox(label="Đọc tên chương", value=epub_saved.get("read_titles", True))
+                        epub_volumes = gr.Checkbox(label="Đọc tên quyển", value=epub_saved.get("include_volumes", True))
+                        epub_mode = gr.Dropdown(label="Cách xuất EPUB", choices=[("Mỗi chương một file", "chapters"), ("Ghép một file", "merged")], value=epub_saved.get("output_mode", "chapters"))
+                        epub_title_pause = gr.Slider(0, 10, value=epub_saved.get("title_pause_ms", 1200) / 1000, step=0.1, label="Nghỉ sau tên chương (giây)")
+                        epub_chapter_pause = gr.Slider(0, 10, value=epub_saved.get("chapter_pause_ms", 2500) / 1000, step=0.1, label="Nghỉ giữa hai chương (giây)")
+                        epub_scene_pause = gr.Slider(0, 10, value=epub_saved.get("scene_pause_ms", 1200) / 1000, step=0.1, label="Nghỉ chuyển cảnh (giây)")
+                        epub_volume_pause = gr.Slider(0, 10, value=epub_saved.get("volume_pause_ms", 1800) / 1000, step=0.1, label="Nghỉ sau tên quyển (giây)")
+                        music_saved = epub_saved.get("music", {})
+                        music_choices = handlers.chapter_music_choices()
+                        music_selected = music_saved.get("track_id") or (music_choices[0][1] if music_choices else None)
+                        music_enabled = gr.Checkbox(label="Bật nhạc đệm trong khoảng nghỉ EPUB", value=music_saved.get("enabled", False))
+                        music_track = gr.Dropdown(label="Thư viện nhạc chuyển chương", choices=music_choices, value=music_selected)
+                        music_volume = gr.Slider(0, 100, value=music_saved.get("volume_percent", 30), step=1, label="Âm lượng nhạc (%)")
+                        music_between = gr.Checkbox(label="Phát nhạc giữa hai chương", value=music_saved.get("between_chapters", True))
+                        music_after_title = gr.Checkbox(label="Phát nhạc sau tên chương, trước nội dung", value=music_saved.get("after_title", False))
+                        music_note = gr.Markdown(handlers.chapter_music_note(music_selected))
+                        music_track.change(handlers.chapter_music_note, inputs=[music_track], outputs=[music_note])
+                        music_preview_button = gr.Button("Nghe thử nhạc theo nhịp chuyển chương")
+                        music_preview = gr.Audio(label="Nhạc đã cắt và fade", type="filepath")
+                        music_preview_button.click(handlers.preview_epub_music, inputs=[music_track, epub_chapter_pause, music_volume], outputs=[music_preview])
+                        music_upload = gr.File(label="Thêm nhạc cá nhân (tự lấy tối đa 30 giây)", type="filepath", file_types=[".wav", ".mp3", ".flac", ".ogg", ".m4a"])
+                        music_upload.change(handlers.import_epub_music, inputs=[music_upload], outputs=[music_track])
+                        epub_preview_button = gr.Button("Xem trước EPUB — không tạo giọng")
+                        epub_preview = gr.Textbox(label="Tên chương và nội dung trích", lines=8, interactive=False)
+                        epub_preview_button.click(handlers.preview_epub, inputs=[source_files], outputs=[epub_preview])
                     reference_audio = gr.Audio(
                         label="Giọng mẫu WAV, nên 3-10 giây",
                         type="filepath",
@@ -395,6 +425,9 @@ def build_app() -> gr.Blocks:
                     split_output,
                     output_srt,
                     join_split_output_audio,
+                    epub_start, epub_end, epub_titles, epub_volumes, epub_mode,
+                    epub_title_pause, epub_chapter_pause, epub_scene_pause, epub_volume_pause,
+                    music_enabled, music_track, music_volume, music_between, music_after_title,
                 ],
                 outputs=[status, audio_preview, audio_file, srt_file, zip_file],
             )

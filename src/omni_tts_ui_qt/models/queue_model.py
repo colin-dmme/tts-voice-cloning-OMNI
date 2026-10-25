@@ -17,7 +17,7 @@ from omni_tts_core.ui_presenters.labels import format_duration
 _COLUMNS = [
     "Tên file",
     "Ký tự",
-    "Số đoạn",
+    "Chương/đoạn",
     "Cách đọc",
     "Trạng thái",
     "Tiến độ",
@@ -97,6 +97,8 @@ class QueueTableModel(QAbstractTableModel):
             return QColor(_STATUS_COLORS.get(item.status, "#e4e4ef"))
         elif role == Qt.ItemDataRole.ToolTipRole:
             if column == 2:
+                if item.source_path.suffix.lower() == ".epub":
+                    return "Tổng số chương trong EPUB. Chọn khoảng chương và cách xuất ở mục Đọc sách EPUB."
                 return (
                     "Số file audio dự kiến khi bật “Tách mỗi đoạn/dòng SRT "
                     "thành file riêng”."

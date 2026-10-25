@@ -81,7 +81,11 @@ Desktop Coworker sẽ công bố tool dưới dạng `tts__health`,
 | `get_generation_contract` | Đọc capability, form động, giọng cố định, provider settings và advanced fields |
 | `list_voices` | Liệt kê preset cố định, profile clone và voice design |
 | `start_text_generation` | Tạo job nền từ văn bản |
-| `start_file_generation` | Tạo job nền từ 1–100 file TXT/MD/SRT |
+| `start_file_generation` | Tạo job nền từ 1–100 file TXT/MD/SRT/EPUB; cấu hình sách qua `generation.epub` |
+| `inspect_epub` | Xem trước EPUB và khoảng chương, không nạp model/sinh giọng |
+| `list_chapter_music` | Danh sách nhạc cục bộ để chọn ID trong `generation.epub.music` |
+| `preview_chapter_music` | WAV nghe thử đã trim/fade vừa nhịp nghỉ, không gọi API |
+| `import_chapter_music` | Thêm file nhạc riêng, trim/normalize và lấy tối đa 30 giây |
 | `get_job` | Đọc trạng thái, tiến độ, lỗi và kết quả |
 | `list_jobs` | Đọc lịch sử job gần nhất |
 | `cancel_job` | Hủy an toàn job queued/running |
@@ -95,6 +99,11 @@ Luồng khuyến nghị:
 4. Poll `get_job` đến `succeeded`, `failed` hoặc `cancelled`.
 
 ## Ví dụ request text
+
+Với sách, dùng `inspect_epub` trước rồi `start_file_generation` với
+`generation.epub`. Chọn nhạc qua `list_chapter_music`; thêm file mới bằng
+`import_chapter_music` thay vì chỉ chép MP3 vào thư mục thư viện. Xem
+[hướng dẫn EPUB, nhạc và SRT](epub-audiobooks.md) để có ví dụ request đầy đủ.
 
 ```json
 {
@@ -164,7 +173,7 @@ Contract ONNX có 22 setting. Mỗi contract GGUF có 20 setting và không nh�
 
 ## Chính sách an toàn và dữ liệu
 
-- File nguồn phải là đường dẫn tuyệt đối, tồn tại, có đuôi TXT/MD/SRT, tối đa
+- File nguồn phải là đường dẫn tuyệt đối, tồn tại, có đuôi TXT/MD/SRT/EPUB, tối đa
   20 MB/file và 100 file/job.
 - Output directory phải tuyệt đối và không được là root của ổ đĩa.
 - MCP luôn đặt `overwrite=false`; Core tự chọn tên trống nếu file đã tồn tại.

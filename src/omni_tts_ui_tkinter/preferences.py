@@ -7,6 +7,7 @@ from omni_tts_core.paths import ensure_dir
 
 
 DEFAULT_PREFERENCES = {
+    "epub_options": {},
     "language": "vi",
     "model_id": "omnivoice_vietnamese",
     "voice_source_mode": "fixed",

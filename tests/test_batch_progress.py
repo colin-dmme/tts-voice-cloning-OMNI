@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest.mock import patch
 
 from omni_tts_core.engines.batch_progress import audio_file_ready, report_ready_chunks
 
@@ -24,8 +25,10 @@ class AudioFileReadyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "a.wav"
             _write_wav(path)
-            self.assertFalse(audio_file_ready(path, minimum_age_seconds=999))  # too fresh
-            self.assertTrue(audio_file_ready(path, minimum_age_seconds=0.0))
+            # NTFS may round a just-written mtime slightly ahead of time.time().
+            with patch("omni_tts_core.engines.batch_progress.time.time", return_value=path.stat().st_mtime + 0.5):
+                self.assertFalse(audio_file_ready(path, minimum_age_seconds=999))
+                self.assertTrue(audio_file_ready(path, minimum_age_seconds=0.0))
 
     def test_empty_file_is_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

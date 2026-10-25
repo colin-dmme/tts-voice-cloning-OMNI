@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from omni_tts_shared.epub import EpubOptions
 
 from omni_tts_core.gpu_safety_preferences import GPU_SAFETY_FIELDS
 from omni_tts_core.ui_presenters.settings_state import GenerationSettings
@@ -81,6 +82,7 @@ class GenerationOptions(BaseModel):
     max_chunk_chars: int = Field(default=220, ge=60, le=800)
     provider_options: dict[str, Any] = Field(default_factory=dict)
     advanced: dict[str, Any] = Field(default_factory=dict)
+    epub: EpubOptions = Field(default_factory=EpubOptions)
 
 
 class TextGenerationInput(BaseModel):
@@ -136,8 +138,8 @@ class FileGenerationInput(BaseModel):
                 raise ValueError(f"Không tìm thấy file nguồn: {raw}") from exc
             if not path.is_file():
                 raise ValueError(f"Không phải file: {path}")
-            if path.suffix.lower() not in {".txt", ".md", ".srt"}:
-                raise ValueError(f"Chỉ hỗ trợ TXT, Markdown hoặc SRT: {path}")
+            if path.suffix.lower() not in {".txt", ".md", ".srt", ".epub"}:
+                raise ValueError(f"Chỉ hỗ trợ TXT, Markdown, SRT hoặc EPUB: {path}")
             if path.stat().st_size > 20 * 1024 * 1024:
                 raise ValueError(f"File vượt giới hạn 20 MB: {path}")
             key = str(path).casefold()
@@ -160,6 +162,7 @@ class FileGenerationInput(BaseModel):
 
 
 _PROTECTED_SETTINGS = {
+    "epub_options",
     "model_id", "language", "voice_source_mode", "voice_profile_id",
     "reference_audio_path", "reference_text", "speaker_id", "designed_voice_id",
     "output_dir", "output_stem", "append_stem_suffix", "overwrite", "split_output",
@@ -207,6 +210,7 @@ def _to_settings(
         emotion=generation.emotion,
         max_chunk_chars=generation.max_chunk_chars,
         provider_options=dict(generation.provider_options),
+        epub_options=generation.epub.model_dump(),
         output_dir=Path(output.directory) if output.directory else None,
         output_stem=output.stem,
         append_stem_suffix=output.append_voice_duration_suffix,

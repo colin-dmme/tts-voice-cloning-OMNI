@@ -7,6 +7,7 @@ import sys
 from dataclasses import asdict
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
+from pathlib import Path
 
 from mcp.server import MCPServer
 
@@ -16,6 +17,10 @@ from .contracts import (
     advanced_setting_fields,
 )
 from .runtime import McpRuntime
+from . import __version__
+from omni_tts_shared.epub import EpubOptions
+from omni_tts_core.text.epub_reader import read_epub
+from omni_tts_core.chapter_music import ChapterMusicLibrary, preview_chapter_music as render_chapter_music_preview
 
 # stdout belongs exclusively to the stdio protocol.
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
@@ -42,7 +47,8 @@ def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "server": "colin_studio_tts_mcp",
-        "version": package_version,
+        "version": __version__,
+        "installed_distribution_version": package_version,
         "project_root": str(controller.service.settings.project_root),
         "job_database": str(runtime.database_path),
         "active_jobs": runtime.jobs.active_count(),
@@ -92,6 +98,10 @@ def get_generation_contract(model_id: str) -> dict[str, Any]:
         ],
         "provider_settings": [asdict(setting) for setting in policy.provider_settings],
         "advanced_fields": advanced_setting_fields(),
+        "source_formats": ["txt", "md", "srt", "epub"],
+        "epub_options_schema": EpubOptions.model_json_schema(),
+        "epub_defaults": EpubOptions().model_dump(),
+        "epub_note": "Gửi generation.epub trong start_file_generation. Khoảng nghỉ chèn ở audio, SRT dùng cùng timeline; output.mode tách đoạn không áp dụng cho EPUB.",
     }
 
 
@@ -127,6 +137,29 @@ def list_voices(
 
 
 @mcp.tool()
+def list_chapter_music() -> dict[str, Any]:
+    """Liệt kê thư viện nhạc cục bộ để chọn generation.epub.music.track_id; không gọi provider."""
+    tracks = ChapterMusicLibrary().list_tracks()
+    return {"count": len(tracks), "tracks": [asdict(t) for t in tracks]}
+
+
+@mcp.tool()
+def preview_chapter_music(track_id: str, duration_ms: int = 2500, volume_percent: int = 30,
+                          fade_in_ms: int = 120, fade_out_ms: int = 350) -> dict[str, Any]:
+    """Tạo WAV nghe thử nhạc đã trim/fade vừa nhịp nghỉ. Không tạo nhạc mới, không nạp TTS."""
+    path = render_chapter_music_preview(track_id, duration_ms=duration_ms, volume_percent=volume_percent,
+                                       fade_in_ms=fade_in_ms, fade_out_ms=fade_out_ms)
+    return {"track_id": track_id, "duration_ms": duration_ms, "audio_path": str(path)}
+
+
+@mcp.tool()
+def import_chapter_music(source_file: str, name: str) -> dict[str, Any]:
+    """Thêm audio người dùng có sẵn vào thư viện riêng; tự trim/normalize, tối đa 30 giây, không tải mạng."""
+    track = ChapterMusicLibrary().import_track(Path(source_file), name, provenance={"provider": "user_import"})
+    return asdict(track)
+
+
+@mcp.tool()
 def start_text_generation(request: TextGenerationInput) -> dict[str, Any]:
     """Xếp tác vụ tạo giọng từ văn bản và trả job_id ngay."""
     runtime.controller.service.registry.get(request.model_id)
@@ -134,8 +167,19 @@ def start_text_generation(request: TextGenerationInput) -> dict[str, Any]:
 
 
 @mcp.tool()
+def inspect_epub(source_file: str, chapter_start: int = 1, chapter_end: int = 0, limit: int = 50) -> dict[str, Any]:
+    """Xem cấu trúc, tên và chữ đầu các chương EPUB; không sinh giọng hoặc nạp model. Chương là vị trí 1-based, end=0 đọc hết."""
+    path = Path(source_file)
+    if not path.is_absolute() or path.suffix.lower() != ".epub" or not path.is_file():
+        raise ValueError("source_file phải là đường dẫn tuyệt đối tới EPUB có sẵn.")
+    if path.stat().st_size > 20 * 1024 * 1024:
+        raise ValueError("EPUB vượt giới hạn 20 MB của MCP.")
+    return read_epub(path).preview(EpubOptions(chapter_start=chapter_start, chapter_end=chapter_end), limit=limit)
+
+
+@mcp.tool()
 def start_file_generation(request: FileGenerationInput) -> dict[str, Any]:
-    """Xếp tác vụ tạo giọng từ tối đa 100 file TXT, Markdown hoặc SRT."""
+    """Xếp tác vụ từ tối đa 100 file TXT/MD/SRT/EPUB. EPUB dùng generation.epub, có audio và SRT theo chương hoặc bản ghép."""
     runtime.controller.service.registry.get(request.model_id)
     return runtime.jobs.start_files(request)
 

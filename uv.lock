@@ -1433,7 +1433,7 @@ wheels = [
 
 [[package]]
 name = "omni-tts-local"
-version = "0.5.1"
+version = "0.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

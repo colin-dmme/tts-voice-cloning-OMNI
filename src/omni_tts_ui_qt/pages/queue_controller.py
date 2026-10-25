@@ -107,7 +107,7 @@ class QueueController(QObject):
         self, sources: list[tuple[Path, int, int]], skipped: int
     ) -> None:
         if not sources:
-            self.log.emit("Không tìm thấy file .txt/.md/.srt hợp lệ để thêm.")
+            self.log.emit("Không tìm thấy file .txt/.md/.srt/.epub hợp lệ để thêm.")
             return
         added, duplicates = self.store.add_many(sources)
         parts = [f"Đã thêm {len(added)} file"]

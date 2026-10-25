@@ -18,6 +18,9 @@ from omni_tts_shared.voice_presets import (
 )
 from omni_tts_shared.vieneu_codecs import NO_CODEC_ID, NO_CODEC_LABEL
 from omni_tts_ui_gradio import chatterbox_settings, f5_settings
+from omni_tts_shared.epub import EpubOptions
+from omni_tts_core.text.epub_reader import read_epub
+from omni_tts_core.chapter_music import ChapterMusicLibrary, preview_chapter_music
 
 
 restore_user_state()
@@ -390,6 +393,9 @@ def generate_speech(
     split_output: bool,
     output_srt: bool,
     join_split_output_audio: bool,
+    epub_start=1, epub_end=0, epub_titles=True, epub_volumes=True, epub_mode="chapters",
+    epub_title_pause=1.2, epub_chapter_pause=2.5, epub_scene_pause=1.2, epub_volume_pause=1.8,
+    music_enabled=False, music_track_id=None, music_volume=30, music_between=True, music_after_title=False,
 ):
     try:
         sources = _source_paths(source_files)
@@ -429,6 +435,11 @@ def generate_speech(
             **chatterbox_kwargs,
             sentence_pause_ms=int(sentence_pause_ms),
             paragraph_pause_ms=int(paragraph_pause_ms),
+            epub_options=EpubOptions(chapter_start=int(epub_start), chapter_end=int(epub_end),
+                read_titles=bool(epub_titles), include_volumes=bool(epub_volumes), output_mode=epub_mode,
+                title_pause_ms=round(epub_title_pause * 1000), chapter_pause_ms=round(epub_chapter_pause * 1000),
+                scene_pause_ms=round(epub_scene_pause * 1000), volume_pause_ms=round(epub_volume_pause * 1000)),
+            # Filled below so the same shared EPUB schema validates every UI.
             srt_file_padding_ms=int(paragraph_pause_ms),
             max_chunk_chars=int(max_chunk_chars),
             output_dir=_optional_path(output_dir),
@@ -440,6 +451,11 @@ def generate_speech(
             output_srt=bool(output_srt),
             join_split_output_audio=bool(join_split_output_audio),
         )
+        request.epub_options.music = request.epub_options.music.model_validate({
+            "enabled": bool(music_enabled), "track_id": music_track_id,
+            "volume_percent": int(music_volume), "between_chapters": bool(music_between),
+            "after_title": bool(music_after_title),
+        })
         _save_generation_preferences(
             {
                 "language": language,
@@ -459,6 +475,7 @@ def generate_speech(
                 **chatterbox_kwargs,
                 "sentence_pause_ms": int(sentence_pause_ms),
                 "paragraph_pause_ms": int(paragraph_pause_ms),
+                "epub_options": request.epub_options.model_dump(),
                 "srt_file_padding_ms": int(paragraph_pause_ms),
                 "max_chunk_chars": int(max_chunk_chars),
                 "overwrite": bool(overwrite),
@@ -611,6 +628,45 @@ def _source_paths(value) -> list[Path]:
         if path is not None:
             paths.append(path)
     return paths
+
+
+def chapter_music_choices():
+    return [(t.name, t.track_id) for t in ChapterMusicLibrary().list_tracks()]
+
+
+def chapter_music_note(track_id):
+    tracks = ChapterMusicLibrary().list_tracks()
+    item = next((t for t in tracks if t.track_id == track_id), None)
+    note = "Tự cắt và fade vừa nhịp nghỉ; thời lượng audio và SRT giữ nguyên."
+    if item and item.provenance.get("generated_plan") == "free":
+        note += " Mẫu ElevenLabs Free: dùng cá nhân; chưa có quyền thương mại."
+    return note
+
+
+def preview_epub_music(track_id, duration_seconds, volume_percent):
+    return str(preview_chapter_music(track_id, duration_ms=round(duration_seconds * 1000), volume_percent=int(volume_percent)))
+
+
+def import_epub_music(uploaded):
+    path = _first_uploaded_path(uploaded)
+    if path is None:
+        return gr.update()
+    item = ChapterMusicLibrary().import_track(path.resolve(), path.stem, provenance={"provider": "user_import"})
+    return gr.update(choices=chapter_music_choices(), value=item.track_id)
+
+
+def preview_epub(source_files):
+    try:
+        source = next((p for p in _source_paths(source_files) if p.suffix.lower() == ".epub"), None)
+        if source is None:
+            return "Hãy tải lên một EPUB trước."
+        book = read_epub(source)
+        info = book.preview(limit=100)
+        return (f"{book.title} — {len(book.chapters)} chương\nBỏ qua: {len(book.skipped_documents)} phần. Chưa tạo giọng.\n\n"
+            + "\n".join(f"{c['index']}. {c['title']}\n   {c['preview']}" for c in info["chapters"])
+            + ("\n\nLưu ý: " + "\n".join(book.warnings) if book.warnings else ""))
+    except Exception as exc:
+        return f"Không đọc được EPUB: {exc}"
 
 
 def _first_uploaded_path(value) -> Path | None:

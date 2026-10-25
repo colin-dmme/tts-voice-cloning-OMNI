@@ -13,6 +13,7 @@ SETTINGS_FILE = "settings.json"
 HIGGS_CUSTOM_VOICES_FILE = "higgs_custom_voices.json"
 
 PORTABLE_TKINTER_KEYS = {
+    "epub_options",
     "language",
     "model_id",
     "voice_source_mode",

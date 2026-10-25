@@ -30,7 +30,7 @@ class QueueTableModelTest(unittest.TestCase):
 
         self.assertEqual(model.columnCount(), 9)
         self.assertEqual(
-            model.headerData(2, Qt.Orientation.Horizontal), "Số đoạn"
+            model.headerData(2, Qt.Orientation.Horizontal), "Chương/đoạn"
         )
         self.assertEqual(model.data(model.index(0, 1)), "529,023")
         self.assertEqual(model.data(model.index(0, 2)), "1,087")

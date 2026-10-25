@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
+from omni_tts_shared.epub import EpubOptions
 
 from omni_tts_shared.pronunciation import PronunciationSelection, PronunciationSnapshot
 
@@ -307,6 +308,7 @@ class GenerateSpeechRequest(BaseModel):
     chunk_pause_ms: int = Field(default=120, ge=0, le=3000)
     chunk_crossfade_ms: int = Field(default=80, ge=0, le=1000)
     paragraph_pause_ms: int = Field(default=600, ge=0, le=10000)
+    epub_options: EpubOptions = Field(default_factory=EpubOptions)
     paragraph_pause_random_enabled: bool = False
     paragraph_pause_min_ms: int = Field(default=500, ge=0, le=10000)
     paragraph_pause_max_ms: int = Field(default=700, ge=0, le=10000)

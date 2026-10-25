@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from omni_tts_shared.errors import ConfigError
 
 
-SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md", ".srt"}
+SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md", ".srt", ".epub"}
 _HIGGS_TOKEN_PATTERN = re.compile(r"<\|[a-z][a-z0-9_]*:[a-z][a-z0-9_]*\|>", re.IGNORECASE)
 
 
@@ -15,6 +15,8 @@ _HIGGS_TOKEN_PATTERN = re.compile(r"<\|[a-z][a-z0-9_]*:[a-z][a-z0-9_]*\|>", re.I
 class SourceUnit:
     index: int
     text: str
+    pause_after_ms: int | None = None
+    pause_kind: str = ""
 
 
 def read_source_text(path: Path, *, preserve_higgs_tags: bool = False) -> str:
@@ -23,6 +25,13 @@ def read_source_text(path: Path, *, preserve_higgs_tags: bool = False) -> str:
     if path.suffix.lower() not in SUPPORTED_TEXT_EXTENSIONS:
         allowed = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS))
         raise ConfigError(f"File nguồn chưa được hỗ trợ. Định dạng hiện có: {allowed}")
+    if path.suffix.lower() == ".epub":
+        from .epub_reader import read_epub
+        book = read_epub(path)
+        return "\n\n".join(
+            "\n\n".join([c.title, *(b.text for b in c.blocks if b.text)])
+            for c in book.chapters
+        )
     content = path.read_text(encoding="utf-8-sig")
     if path.suffix.lower() == ".srt":
         return strip_srt_markup(content, preserve_higgs_tags=preserve_higgs_tags)
@@ -50,6 +59,10 @@ def source_text_stats(path: Path) -> tuple[int, int]:
     if path.suffix.lower() not in SUPPORTED_TEXT_EXTENSIONS:
         allowed = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS))
         raise ConfigError(f"File nguồn chưa được hỗ trợ. Định dạng hiện có: {allowed}")
+    if path.suffix.lower() == ".epub":
+        from .epub_reader import read_epub
+        book = read_epub(path)
+        return sum(len(c.title) + sum(len(b.text) for b in c.blocks) for c in book.chapters), len(book.chapters)
     content = path.read_text(encoding="utf-8-sig")
     if path.suffix.lower() == ".srt":
         text = strip_srt_markup(content)
@@ -66,6 +79,9 @@ def read_source_units(path: Path, *, preserve_higgs_tags: bool = False) -> list[
     if path.suffix.lower() not in SUPPORTED_TEXT_EXTENSIONS:
         allowed = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS))
         raise ConfigError(f"File nguồn chưa được hỗ trợ. Định dạng hiện có: {allowed}")
+    if path.suffix.lower() == ".epub":
+        from .epub_reader import read_epub
+        return [SourceUnit(c.index, "\n\n".join([c.title, *(b.text for b in c.blocks if b.text)])) for c in read_epub(path).chapters]
     content = path.read_text(encoding="utf-8-sig")
     if path.suffix.lower() == ".srt":
         return parse_srt_units(content, preserve_higgs_tags=preserve_higgs_tags)

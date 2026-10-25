@@ -79,6 +79,8 @@ from omni_tts_ui_qt.models.queue_model import ProgressBarDelegate, QueueTableMod
 from omni_tts_ui_qt.models.history_model import HistoryTableModel
 from omni_tts_ui_qt.pages.queue_controller import QueueController
 from omni_tts_ui_qt.pages.settings_panel import SettingsPanel
+from omni_tts_ui_qt.widgets.epub_options import EpubImportDialog
+from omni_tts_core.text.epub_reader import read_epub
 from omni_tts_ui_qt.widgets.higgs_script_toolbar import HiggsScriptToolbar
 from omni_tts_ui_qt.widgets.authoring_assist_bar import AuthoringAssistBar
 from omni_tts_ui_qt.widgets.common import open_path
@@ -349,6 +351,9 @@ class StudioPage(QWidget):
 
         toolbar = QHBoxLayout()
         add_file = QPushButton("+ Thêm file")
+        import_epub = QPushButton("Nhập EPUB…")
+        import_epub.clicked.connect(self._import_epub)
+        toolbar.addWidget(import_epub)
         add_folder = QPushButton("+ Thêm thư mục")
         paste_path = QPushButton("Dán đường dẫn")
         paste_text = QPushButton("Dán văn bản")
@@ -968,6 +973,23 @@ class StudioPage(QWidget):
         if files:
             self.queue.add_paths_async([Path(f) for f in files])
             self.tabs.setCurrentIndex(1)
+
+    def _import_epub(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(self, "Chọn sách EPUB", "", "EPUB (*.epub)")
+        if not filename:
+            return
+        try:
+            book = read_epub(Path(filename))
+            dialog = EpubImportDialog(book, self.settings_panel.epub_options.options(), self,
+                                      create_srt=self.settings_panel.output_srt.isChecked())
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.settings_panel.epub_options.set_options(dialog.editor.options())
+                self.settings_panel.output_srt.setChecked(dialog.create_srt.isChecked())
+                self.settings_panel._emit_changed()
+                self.queue.add_paths_async([Path(filename)])
+                self.tabs.setCurrentIndex(1)
+        except Exception as exc:
+            QMessageBox.warning(self, "Không nhập được EPUB", str(exc))
 
     def _add_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục nguồn")

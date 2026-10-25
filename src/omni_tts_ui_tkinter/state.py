@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from omni_tts_shared.schemas import GenerateSpeechRequest
@@ -8,6 +8,7 @@ from omni_tts_shared.schemas import GenerateSpeechRequest
 
 @dataclass
 class UiSettings:
+    epub_options: dict = field(default_factory=dict)
     language: str = "vi"
     model_id: str = "omnivoice_vietnamese"
     voice_source_mode: str = "fixed"
@@ -71,6 +72,7 @@ class UiSettings:
 
     def to_request(self, text: str) -> GenerateSpeechRequest:
         return GenerateSpeechRequest(
+            epub_options=self.epub_options,
             text=text,
             language=self.language,
             model_id=self.model_id,

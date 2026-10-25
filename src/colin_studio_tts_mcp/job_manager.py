@@ -107,6 +107,14 @@ class McpJobManager:
                     cancel_event=cancel_event,
                 )
                 result_data = {"files": [_jsonable(item) for item in outcomes]}
+                failed = [item for item in outcomes if item.error]
+                if failed:
+                    self.store.update(
+                        job_id, status="failed", message=f"Có {len(failed)} file tạo giọng thất bại",
+                        error="; ".join(item.error for item in failed)[:2000],
+                        result_json=json.dumps(result_data, ensure_ascii=False), finished_at=now_utc(),
+                    )
+                    return
             self.store.update(
                 job_id,
                 status="succeeded",

@@ -25,6 +25,7 @@ from omni_tts_ui_qt.pages.ai_api_page import AiApiPage
 from omni_tts_ui_qt.pages.contact_page import ContactPage
 from omni_tts_ui_qt.pages.license_page import LicensePage
 from omni_tts_ui_qt.pages.models_page import ModelsPage
+from omni_tts_ui_qt.pages.music_page import MusicPage
 from omni_tts_ui_qt.pages.pronunciation_page import PronunciationPage
 from omni_tts_ui_qt.pages.studio_page import StudioPage
 from omni_tts_ui_qt.pages.voices_page import VoicesPage
@@ -39,6 +40,7 @@ def _page_factories():
         ("models", "Model", "📦", ModelsPage),
         ("pronunciation", "Cách đọc", "🔤", PronunciationPage),
         ("voices", "Giọng", "🗣", VoicesPage),
+        ("music", "Nhạc", "🎵", MusicPage),
         ("ai_api", "AI / API", "✨", AiApiPage),
         ("license", "Bản quyền", "🔑", LicensePage),
         ("contact", "Liên hệ", "✉", ContactPage),

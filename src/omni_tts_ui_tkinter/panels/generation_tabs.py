@@ -102,7 +102,7 @@ class GenerationTabsMixin:
 
         run_menu = tk.Menu(management_row, tearoff=False)
         run_menu.add_command(
-            label="Chạy các file đang chờ",
+            label="Chạy file đang chờ / cần chạy lại",
             command=lambda: self.generate_from_files("pending"),
         )
         run_menu.add_command(

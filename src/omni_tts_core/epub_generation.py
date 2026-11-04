@@ -35,17 +35,21 @@ def chapter_units(
     if read_volume and chapter.volume:
         add(chapter.volume, options.volume_pause_ms, "volume")
     if options.read_titles:
-        add(chapter.title, options.title_pause_ms, "title")
+        add(chapter.title, options.break_for("title").trigger_ms, "title")
     for block in chapter.blocks:
         if block.role == "scene":
             if units:
                 # This replaces the paragraph boundary; it is never added twice.
-                units[-1] = replace(units[-1], pause_after_ms=options.scene_pause_ms, pause_kind="scene")
+                units[-1] = replace(
+                    units[-1], pause_after_ms=options.scene_pause_ms, pause_kind="scene"
+                )
         elif block.text.strip():
             add(block.text)
     if units:
         units[-1] = replace(
-            units[-1], pause_after_ms=options.chapter_pause_ms if has_next else 0, pause_kind="chapter"
+            units[-1],
+            pause_after_ms=options.break_for("chapter").trigger_ms if has_next else 0,
+            pause_kind="chapter",
         )
     return units
 
@@ -54,6 +58,92 @@ def _atomic_json(path, data):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, path)
+
+
+def build_epub_music_plan(book, options, source_sha256: str, *, library=None):
+    """Plan every audible boundary before TTS, shared with the MCP preview tool."""
+    from dataclasses import asdict
+
+    from omni_tts_core.chapter_music import ChapterMusicLibrary, ChapterMusicSelector
+    from omni_tts_core.text.epub_content import prepare_epub
+
+    plan = {
+        "version": 1,
+        "source_sha256": source_sha256,
+        "selection_mode": options.music.selection_mode,
+        "duration_mode": options.music.duration_mode,
+        "breaks": {
+            kind: options.break_for(kind).model_dump() for kind in ("title", "chapter")
+        },
+        "theme": options.music.theme,
+        "random_seed": options.music.random_seed,
+        "boundaries": [],
+        "tracks": [],
+    }
+    if not options.uses_music():
+        return plan
+    library = library or ChapterMusicLibrary()
+    selector = ChapterMusicSelector(options.music, library, context=source_sha256)
+    plan["preset_id"] = selector.preset.preset_id if selector.preset else None
+    plan["preset_name"] = selector.preset.name if selector.preset else None
+    plan["candidate_track_ids"] = [t.track_id for t in selector.pool]
+    rules = selector.preset or options.music
+    plan["selection_rules"] = {
+        key: getattr(rules, key)
+        for key in ("theme_ids", "track_ids", "excluded_track_ids")
+    }
+    for key in options.music.track_overrides:
+        if int(key.split(":")[1]) > len(book.chapters):
+            raise ConfigError(f"Vị trí chỉ định nhạc không có trong sách: {key}")
+    chapters = prepare_epub(book, options).chapters
+    last_volume = None
+    selected = {}
+    for index, chapter in enumerate(chapters):
+        units = chapter_units(
+            chapter,
+            options,
+            read_volume=options.include_volumes and chapter.volume != last_volume,
+            has_next=index < len(chapters) - 1,
+        )
+        for unit in units:
+            use = (
+                unit.pause_kind in ("title", "chapter")
+                and options.music_for(unit.pause_kind).enabled
+            )
+            if not use or not unit.pause_after_ms:
+                continue
+            key = f"{unit.pause_kind}:{chapter.index}"
+            track = selector.choose(key)
+            selected[track.track_id] = track
+            boundary = options.break_for(unit.pause_kind)
+            duration_ms = unit.pause_after_ms
+            if boundary.duration_mode == "full_track":
+                info = sf.info(library.resolve(track.track_id)[1])
+                duration_ms = round(info.frames / info.samplerate * 1000, 6)
+            plan["boundaries"].append(
+                {
+                    "key": key,
+                    "chapter_index": chapter.index,
+                    "chapter_title": chapter.title,
+                    "kind": unit.pause_kind,
+                    "duration_ms": duration_ms,
+                    "configured_pause_ms": boundary.duration_ms,
+                    "duration_mode": boundary.duration_mode,
+                    "fade_in_ms": boundary.fade_in_ms,
+                    "fade_out_ms": boundary.fade_out_ms,
+                    "track_id": track.track_id,
+                    "selection": "override"
+                    if key in options.music.track_overrides
+                    else options.music.selection_mode,
+                }
+            )
+        last_volume = chapter.volume
+    for track_id in sorted(selected):
+        track, path = library.resolve(track_id)
+        plan["tracks"].append(
+            {**asdict(track), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        )
+    return plan
 
 
 def _publish(wav: Path, target: Path, bitrate: int, cancel_event=None):
@@ -208,7 +298,15 @@ def generate_epub(
 
     book = read_epub(source)
     options = template.epub_options
-    chapters = book.select(options)
+    from omni_tts_core.text.epub_content import FILTER_VERSION, export_reading_plan, prepare_epub, reading_summary
+
+    reading_plan = prepare_epub(book, options)
+    chapters = reading_plan.chapters
+    if not chapters:
+        raise ConfigError("Không còn nội dung để đọc sau khi lọc. Hãy đổi phạm vi hoặc tùy chọn nội dung EPUB.")
+    emit_progress(progress_callback, reading_summary(reading_plan.summary), 0, 1)
+    for warning in reading_plan.warnings:
+        emit_progress(progress_callback, warning, 0, 1)
     # Freeze the real profile/reference and pronunciation before making a cache key.
     request = service.freeze_pronunciation(service._apply_voice_profile(template))
     base = _safe_stem(request.output_stem or source.stem)
@@ -217,9 +315,17 @@ def generate_epub(
     job_id, job_dir = service.job_store.create_job_dir()
     payload = request.model_dump(mode="json")
     payload["source_hash"] = hashlib.sha256(source.read_bytes()).hexdigest()
-    if options.music.enabled:
-        from omni_tts_core.chapter_music import ChapterMusicRenderer
-        payload["music_asset_sha256"] = ChapterMusicRenderer(options.music).fingerprint()
+    payload["content_filter_version"] = FILTER_VERSION
+    payload["reading_sha256"] = reading_plan.fingerprint()
+    music_plan = build_epub_music_plan(book, options, payload["source_hash"])
+    music_choices = {
+        entry["key"]: entry["track_id"] for entry in music_plan["boundaries"]
+    }
+    if options.uses_music():
+        payload["music_selection"] = music_plan["boundaries"]
+        payload["music_assets"] = {
+            t["track_id"]: t["sha256"] for t in music_plan["tracks"]
+        }
     if request.reference_audio_path and request.reference_audio_path.is_file():
         payload["reference_hash"] = hashlib.sha256(
             request.reference_audio_path.read_bytes()
@@ -241,6 +347,12 @@ def generate_epub(
                 progress_callback, "Đang chờ tác vụ EPUB dùng cùng thư mục…", 0, 1
             )
     try:
+        reading_paths = export_reading_plan(reading_plan, destination, base, payload["source_hash"])
+        music_plan_path = None
+        if options.uses_music():
+            music_plan_path = destination / f"{base}-music-plan-{signature[:12]}.json"
+            _atomic_json(music_plan_path, music_plan)
+            _atomic_json(job_dir / "chapter-music-plan.json", music_plan)
         try:
             completed = json.loads(checkpoint.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -271,6 +383,15 @@ def generate_epub(
                     and chapter.volume != last_volume,
                     has_next=index < len(chapters) - 1,
                 )
+                units = [
+                    replace(
+                        u,
+                        music_track_id=music_choices.get(
+                            f"{u.pause_kind}:{chapter.index}"
+                        ),
+                    )
+                    for u in units
+                ]
                 chapter_request = request.model_copy(
                     update={
                         "text": "\n\n".join(u.text for u in units),
@@ -345,6 +466,8 @@ def generate_epub(
                 _merge(parts, destination, base, request, merge_progress, cancel_event)
             ]
         result = GenerateSpeechResult(
+            music_plan_path=music_plan_path,
+            **reading_paths,
             job_id=job_id,
             job_dir=job_dir,
             audio_path=published[0][0],

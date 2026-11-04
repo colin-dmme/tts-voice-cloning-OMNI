@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 from omni_tts_core.hardware_monitor import HardwareSnapshot
 from omni_tts_core.ui_presenters.settings_state import GenerationSettings
 from omni_tts_ui_qt.background import TelemetryThread
-from omni_tts_ui_qt.context import AppContext, SettingsProvider
+from omni_tts_ui_qt.context import AppContext, MusicEvents, SettingsProvider
 from omni_tts_ui_qt.preferences import QtPreferences
 from omni_tts_ui_qt.widgets.hardware import HardwareBar, SafetyChip, TemperatureChart
 
@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
             set_worker_status=self._set_worker_status,
             show_page=self.show_page,
             register_settings_provider=self.register_settings_provider,
+            music_events=MusicEvents(self),
         )
 
         self._build_rail(page_factories)
@@ -158,6 +159,7 @@ class MainWindow(QMainWindow):
         widget = self.stack.currentWidget()
         self.page_title.setText(str(widget.property("pageTitle") or ""))
         self._prefs_data["active_page"] = index
+        self._prefs_data['active_page_key'] = self._page_keys[index]
 
     def show_page(self, key: str) -> None:
         if key in self._page_keys:
@@ -229,6 +231,10 @@ class MainWindow(QMainWindow):
         if state:
             self.restoreState(QByteArray.fromBase64(state.encode("ascii")))
         index = int(self._prefs_data.get("active_page", 0) or 0)
+        page_key=self._prefs_data.get('active_page_key')
+        legacy_keys=['studio','models','pronunciation','voices','ai_api','license','contact']
+        if not page_key and 'music' in self._page_keys and 0<=index<len(legacy_keys):page_key=legacy_keys[index]
+        if page_key in self._page_keys:index=self._page_keys.index(page_key)
         actions = self._rail_group.actions()
         if actions:
             index = min(index, len(actions) - 1)

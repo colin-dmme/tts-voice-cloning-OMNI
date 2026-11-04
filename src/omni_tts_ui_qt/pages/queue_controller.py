@@ -173,7 +173,7 @@ class QueueController(QObject):
 
     def mark_settings_outdated(self, settings: GenerationSettings) -> None:
         request = settings.to_request("x")
-        payload = request.model_dump(mode="json")
+        payload = self._settings_payload(settings)
         studio_selection = request.pronunciation
         snapshot_hashes: dict[tuple[bool, tuple[str, ...]], str] = {}
         fingerprints: dict[str, str] = {}
@@ -259,7 +259,7 @@ class QueueController(QObject):
             self.log.emit("Không có file phù hợp để chạy.")
             return
         self._active_settings = settings
-        self._active_settings_payload = settings.to_request("x").model_dump(mode="json")
+        self._active_settings_payload = self._settings_payload(settings)
         self._worker = GenerationWorker(self.context.controller, "files", settings, tasks=tasks)
         self._worker.file_event.connect(self._on_file_event)
         self._worker.progress_event.connect(self._on_progress)
@@ -274,6 +274,17 @@ class QueueController(QObject):
         if self._worker is not None and self._worker.isRunning():
             self._worker.request_cancel()
             self.log.emit("Đã yêu cầu hủy hàng đợi…")
+
+    @staticmethod
+    def _settings_payload(settings):
+        request=settings.to_request('x');payload=request.model_dump(mode='json')
+        if request.epub_options.uses_music():
+            from omni_tts_core.chapter_music import ChapterMusicSelector
+            try:
+                payload['music_pool_fingerprint']=ChapterMusicSelector(request.epub_options.music).fingerprint()
+            except OmniTtsError as exc:
+                payload['music_pool_fingerprint']='invalid:'+str(exc)
+        return payload
 
     def _tasks_for(
         self,
@@ -292,7 +303,9 @@ class QueueController(QObject):
                 continue
             if scope == "selected" and item.item_id not in selected:
                 continue
-            if scope == "pending" and item.status != FileQueueStatus.PENDING:
+            if scope == "pending" and item.status not in {
+                FileQueueStatus.PENDING, FileQueueStatus.OUTDATED,
+            }:
                 continue
             if scope == "failed" and item.status not in retry_states:
                 continue

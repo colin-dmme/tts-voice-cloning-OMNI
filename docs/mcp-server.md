@@ -83,9 +83,17 @@ Desktop Coworker sẽ công bố tool dưới dạng `tts__health`,
 | `start_text_generation` | Tạo job nền từ văn bản |
 | `start_file_generation` | Tạo job nền từ 1–100 file TXT/MD/SRT/EPUB; cấu hình sách qua `generation.epub` |
 | `inspect_epub` | Xem trước EPUB và khoảng chương, không nạp model/sinh giọng |
-| `list_chapter_music` | Danh sách nhạc cục bộ để chọn ID trong `generation.epub.music` |
-| `preview_chapter_music` | WAV nghe thử đã trim/fade vừa nhịp nghỉ, không gọi API |
+| `preview_epub_reading` | So sánh bản gốc/bản đọc/thay đổi, đếm nguồn/URL và chỉ vị trí chữ Hán |
+| `export_epub_reading` | Xuất TXT bản đọc, JSON báo cáo và nguồn MD theo bộ lọc, không tạo audio |
+| `list_chapter_music` | Mô tả/tag nhạc, lọc theme/tag và danh sách chủ đề |
+| `preview_chapter_music` | WAV nghe thử vừa nhịp hoặc `duration_mode=full_track` phát trọn bản, không gọi API |
 | `import_chapter_music` | Thêm file nhạc riêng, trim/normalize và lấy tối đa 30 giây |
+| `update_chapter_music_metadata` | Cập nhật tên/mô tả/chủ đề/tag, giữ nguyên audio và provenance |
+| `list_chapter_music_presets` | Đọc các preset phối nhiều nhóm/bài, mô tả và danh sách loại trừ |
+| `save_chapter_music_preset` | Tạo/cập nhật toàn bộ lựa chọn của preset cục bộ |
+| `delete_chapter_music_preset` | Xóa preset, giữ nguyên file nhạc |
+| `resolve_chapter_music_selection` | Xem tập bài thực sau hợp nhóm/bài, bỏ trùng và loại trừ |
+| `plan_epub_music` | Xem trước từng nhịp, random theo nhóm/tập chọn/preset hoặc agent chỉ định |
 | `get_job` | Đọc trạng thái, tiến độ, lỗi và kết quả |
 | `list_jobs` | Đọc lịch sử job gần nhất |
 | `cancel_job` | Hủy an toàn job queued/running |
@@ -104,6 +112,26 @@ Với sách, dùng `inspect_epub` trước rồi `start_file_generation` với
 `generation.epub`. Chọn nhạc qua `list_chapter_music`; thêm file mới bằng
 `import_chapter_music` thay vì chỉ chép MP3 vào thư mục thư viện. Xem
 [hướng dẫn EPUB, nhạc và SRT](epub-audiobooks.md) để có ví dụ request đầy đủ.
+Xem [tập chọn, preset, catalog và lựa chọn theo nội dung](music-library.md)
+cho `selection_mode`, `theme_ids`, `track_ids`, `excluded_track_ids`, `preset_id`,
+`random_seed`, `track_overrides` và `music_plan_path`.
+
+Từ 0.6.5, `generation.epub.content` quản lý lọc nguồn, URL, ghi chú và chữ Hán.
+Gọi `preview_epub_reading` trước khi sinh giọng; tool trả bản gốc/bản đọc của
+`chapter_index`, các thay đổi và `han_issues` theo vị trí. `inspect_epub` nhận
+`epub` đầy đủ; `chapter_start/chapter_end` gửi riêng sẽ ghi đè khoảng chương
+trong `epub`. Chỉ số chương giữ vị trí trong sách gốc sau khi loại một số phần.
+
+`export_epub_reading(source_file, output_directory, epub)` xuất tài liệu trước
+khi tạo audio. `output_directory` phải tuyệt đối và không phải root ổ đĩa.
+Job EPUB tự xuất cùng tài liệu, trả `reading_text_path`, `reading_report_path`,
+`references_path`. Xem [schema, mặc định và ví dụ](epub-content-filter.md).
+
+`save_chapter_music_preset` nhận tên và toàn bộ tập chọn; khi cập nhật phải gửi
+`preset_id` cùng các danh sách muốn lưu. Danh sách bỏ qua được coi là rỗng,
+không phải cập nhật một phần. Preset chỉ quản lý nguồn bài: thời lượng, fade,
+âm lượng và các vị trí phát vẫn thuộc request tạo sách. Kế hoạch đang chạy
+giữ các ID nhạc đã chọn kể cả khi preset được sửa/xóa.
 
 ```json
 {

@@ -253,7 +253,8 @@ def normalize_urls(text):
             else: res.append(char)
         return " ".join(res)
 
-    return RE_URL.sub(_repl_url, text)
+    text = RE_URL.sub(_repl_url, text)
+    return re.sub(r"(?<!\w)(?:doi:\s*)?10\.\d{4,9}/[-._;()/:A-Za-z0-9%]+", _repl_url, text, flags=re.IGNORECASE)
 
 
 def normalize_slashes(text):

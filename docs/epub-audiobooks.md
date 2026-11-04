@@ -1,4 +1,4 @@
-# Đọc EPUB thành audiobook trong Colin TTS 0.6.1
+# Đọc EPUB thành audiobook trong Colin TTS 0.6.5
 
 EPUB dùng cùng core, model, profile giọng và preset cách đọc với TXT/SRT. Các
 khoảng nghỉ sách được chèn vào PCM sau tổng hợp; không gửi thẻ pause vào model.
@@ -16,7 +16,28 @@ Khoảng chương dùng vị trí trong danh sách (bắt đầu từ 1), không
 ghi trong tên. Đến chương = 0 nghĩa là hết sách. Thiết lập áp dụng cho các EPUB
 trong lượt chạy; không thay đổi cách tách đoạn TXT/MD/SRT.
 
+**Chạy hàng đợi** nhận mục **Chờ chạy** và **Cần chạy lại**. Khi đổi khoảng chương,
+model, nhạc hoặc thiết lập sau một lần hoàn tất, mục cũ chuyển sang **Cần chạy lại**.
+Có thể chọn riêng dòng rồi bấm **Chạy mục chọn**; không cần thêm lại EPUB.
+
 ### Các khoảng nghỉ
+
+Trước khi chạy, kiểm tra mục **Nội dung đưa vào giọng đọc**. Mặc định bỏ khối
+nguồn tham khảo và URL/DOI, giữ ghi chú giải thích/phụ lục nội dung; ghi chú kỹ
+thuật cuối sách được bỏ. Chữ Hán có giải nghĩa Việt trong ngoặc được đọc bằng
+nghĩa Việt; phần còn lại được cảnh báo, có thể nhập `chữ gốc = cách đọc`.
+Không tự dịch hoặc xóa các thuật ngữ chưa hiểu.
+
+Qt/Tkinter có tab so sánh bản gốc/bản đọc/đã bỏ và danh sách chữ Hán còn lại.
+Dùng **Xuất bản đọc và nguồn…** để kiểm tra trước khi tạo giọng. Mỗi lượt tạo
+sách tự xuất TXT bản đọc, JSON báo cáo và nguồn MD cạnh audio; SRT chỉ theo
+phần thực sự đọc. Xem [hướng dẫn lọc EPUB](epub-content-filter.md) và payload
+`generation.epub.content`; các lựa chọn thay đổi làm cache kiểm tra lại.
+
+Sau tên chương và giữa chương có khối riêng **Loại nghỉ**: không nghỉ, khoảng
+lặng hoặc nhạc. Khoảng lặng mở số giây; nhạc mở độ dài cố định/phát trọn cùng
+fade-in/fade-out. Phát trọn khóa ô số giây; không dùng nhạc khóa fade. Nguồn bài
+hoặc nhóm random chọn ở phần dùng chung, không có công tắc nhạc chồng lên nhịp.
 
 | Thiết lập | Mặc định |
 |---|---:|
@@ -57,13 +78,25 @@ PATH và được mã hóa từ PCM một lần, không ghép lại MP3 đã né
 
 ## Nhạc chuyển chương
 
-Trong phần EPUB, mở **Nhạc đệm trong khoảng nghỉ**, bật nhạc và chọn bản nhạc.
-Chọn phát **giữa hai chương**, **sau tên chương trước nội dung**, hoặc cả hai.
-Âm lượng mặc định 30%; có nút nghe thử đúng độ dài nhịp chuyển chương hiện tại.
-Nếu nhịp đang bằng 0, không chèn nhạc. Nhạc không phát dưới phần lời kể.
+Từ 0.6.4, tab **Nhạc** trên Qt cho tích nhiều chủ đề, thêm/bỏ từng bài và lưu
+preset phối nhạc. Bấm **Dùng preset đã lưu trong Studio** hoặc **Dùng tập đang
+tích trong Studio**, rồi đặt loại nghỉ Nhạc tại vị trí cần phát. Studio,
+Tkinter, Web và MCP hỗ trợ nguồn preset/tập chọn này; chế độ random một nhóm
+cũ vẫn dùng được. Xem [thư viện, tập chọn và preset](music-library.md).
+
+Trong phần EPUB, chọn **Loại nghỉ → Nhạc** tại vị trí muốn phát. Chọn bài hoặc
+nhóm random và âm lượng ở **Nguồn nhạc cho các nhịp nghỉ**. Mỗi vị trí có nút
+**Nghe thử nhịp này** và fade riêng. Mặc định âm lượng 30%. Chọn không nghỉ để
+bỏ nhịp; 0 giây tắt nhịp cố định. Nhạc không phát dưới phần lời kể.
+
+**Độ dài nhạc** tại mỗi vị trí có **Số giây cố định** và **Phát trọn bản nhạc**.
+Chọn phát trọn để lấy độ dài thực của mỗi bài làm nhịp nghỉ
+tại chỗ có nhạc, kể cả bài được random; SRT tự cập nhật theo thời lượng thực.
+Các nhịp không bật nhạc giữ số giây đã đặt. Bộ nhập vẫn lấy tối đa 30 giây từ
+file nguồn, nên phát trọn là trọn bản đã nhập vào thư viện.
 
 Colin tự cắt đoạn nhạc, thêm fade-in/fade-out và đổi sample rate theo model.
-Nhạc chiếm đúng số mẫu PCM của nhịp nghỉ; không cộng thêm thời lượng, không đổi
+Ở chế độ cắt theo nhịp, nhạc chiếm đúng số mẫu PCM của nhịp nghỉ; không cộng thêm thời lượng, không đổi
 văn bản gửi tới model và không tạo caption giả trong SRT. File ngắn hơn nhịp
 được đệm im lặng, không lặp giai điệu hoặc time-stretch làm méo nhạc. Fade quá
 dài được co theo nhịp ngắn. Mặc định fade-in 120 ms, fade-out 350 ms.
@@ -75,11 +108,13 @@ workspace, tách khỏi Git. Giữ thư mục này khi chuyển máy để giữ
 
 ### Tự thêm MP3 hoặc nhạc riêng
 
-1. Mở **Nhạc đệm trong khoảng nghỉ → Thêm nhạc…**, chọn file audio nguồn.
+1. Mở tab **Nhạc → Thêm nhạc…** trên Qt, hoặc nút **Thêm nhạc…** trong nguồn
+   nhạc EPUB, chọn file audio nguồn.
 2. Colin đọc file, lấy tối đa 30 giây, trim/cân mức âm và lưu một bản WAV riêng
    trong thư viện; file nguồn được giữ nguyên.
-3. Bản vừa nhập được chọn ngay trong danh sách. Bật nhạc, đặt âm lượng/vị trí và
-   dùng **Nghe thử nhạc** trước khi chạy EPUB.
+3. Trong tab Nhạc, chọn bản vừa nhập và **Sửa mô tả / tag…** để thêm chủ đề;
+   tích bài đó nếu muốn đưa vào tập random. Nút nhập trong nguồn EPUB chọn
+   ngay bài vừa nhập. Chọn loại nghỉ Nhạc và nghe thử trước khi chạy sách.
 
 Chỉ chép `.mp3` vào thư mục `music_library/` **không tự làm nhạc xuất hiện**.
 Ứng dụng đọc catalog `music_library/library.json`, không tự quét mọi file trong
@@ -87,8 +122,9 @@ thư mục. Nếu đã chép file vào đó, vẫn dùng **Thêm nhạc…** đ�
 không cần sửa JSON bằng tay. Web dùng ô **Thêm nhạc cá nhân**; MCP dùng
 `import_chapter_music` với đường dẫn tuyệt đối và tên bản nhạc.
 
-Khi chuyển máy, copy cả thư mục `music_library/` gồm WAV và `library.json` vào
-workspace mới, hoặc nhập lại nhạc qua giao diện. Catalog và audio riêng không
+Khi chuyển máy, copy cả thư mục `music_library/` gồm WAV, `library.json`,
+`MUSIC_CATALOG.md` và `presets.json` vào workspace mới, hoặc nhập lại nhạc qua
+giao diện. Catalog, preset và audio riêng không
 đi cùng Git clone; không xóa `library.json` nếu muốn giữ các ID nhạc đã lưu.
 
 Các mẫu được tạo bằng tài khoản ElevenLabs Free trong workspace có nhãn dùng cá
@@ -154,11 +190,21 @@ Không gửi thẳng `epub_options` vào `advanced`; dùng đúng `generation.ep
 Nhạc được quản lý bằng `list_chapter_music`, `import_chapter_music` và
 `preview_chapter_music`. Chọn ID có trong danh sách rồi thêm vào `generation.epub`:
 
+Để phối nhóm/bài, dùng `save_chapter_music_preset`, lấy `preset_id` rồi đặt
+`music.selection_mode="preset"` cùng ID đó. `resolve_chapter_music_selection`
+trả chính xác tập bài sau bỏ trùng/loại trừ; `plan_epub_music` trả lựa chọn
+từng nhịp. Xem [ví dụ preset và tập chọn trực tiếp](music-library.md).
+
+Cấu hình dưới là dạng cũ, vẫn được đọc để tương thích. Với 0.6.3, nên dùng
+`generation.epub.breaks.title/chapter` cho từng loại nghỉ/thời lượng/fade và giữ
+`music` làm nguồn bài/nhóm, xem [payload theo vị trí](music-library.md).
+
 ```json
 {
   "music": {
     "enabled": true,
     "track_id": "co-phong-hao-khi",
+    "duration_mode": "full_track",
     "volume_percent": 30,
     "between_chapters": true,
     "after_title": false,
@@ -170,7 +216,9 @@ Nhạc được quản lý bằng `list_chapter_music`, `import_chapter_music` v
 
 `preview_chapter_music` nhận `track_id`, `duration_ms` từ 1–10.000, âm lượng và
 hai tham số fade, trả đường dẫn WAV. `import_chapter_music` nhận `source_file`
-tuyệt đối và `name`, không tải mạng. Bật nhạc khi thiếu file/ID sẽ báo lỗi để
+tuyệt đối và `name`, không tải mạng. Có thể thêm `duration_mode: "full_track"`
+vào `preview_chapter_music` để nghe trọn bản, bỏ giới hạn thời gian nghe theo nhịp.
+Bật nhạc khi thiếu file/ID sẽ báo lỗi để
 chọn lại, không tự thay một bài khác. Cache kiểm tra thêm hash file nhạc.
 
 MCP nhận tối đa 100 file/request và 20 MB/file. Bộ đọc giới hạn 200 MB giải nén,

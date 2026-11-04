@@ -932,7 +932,7 @@ class TkinterApp(GenerationTabsMixin):
         if mode == "failed":
             statuses = {FileQueueStatus.FAILED}
         else:
-            statuses = {FileQueueStatus.PENDING}
+            statuses = {FileQueueStatus.PENDING, FileQueueStatus.OUTDATED}
         return [
             item
             for item in sorted(self.source_file_items.values(), key=lambda value: value.position)

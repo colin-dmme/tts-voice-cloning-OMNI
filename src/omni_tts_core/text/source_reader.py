@@ -17,6 +17,7 @@ class SourceUnit:
     text: str
     pause_after_ms: int | None = None
     pause_kind: str = ""
+    music_track_id: str | None = None
 
 
 def read_source_text(path: Path, *, preserve_higgs_tags: bool = False) -> str:
@@ -27,10 +28,11 @@ def read_source_text(path: Path, *, preserve_higgs_tags: bool = False) -> str:
         raise ConfigError(f"File nguồn chưa được hỗ trợ. Định dạng hiện có: {allowed}")
     if path.suffix.lower() == ".epub":
         from .epub_reader import read_epub
+        from .epub_content import prepare_epub
         book = read_epub(path)
         return "\n\n".join(
             "\n\n".join([c.title, *(b.text for b in c.blocks if b.text)])
-            for c in book.chapters
+            for c in prepare_epub(book).chapters
         )
     content = path.read_text(encoding="utf-8-sig")
     if path.suffix.lower() == ".srt":
@@ -61,8 +63,10 @@ def source_text_stats(path: Path) -> tuple[int, int]:
         raise ConfigError(f"File nguồn chưa được hỗ trợ. Định dạng hiện có: {allowed}")
     if path.suffix.lower() == ".epub":
         from .epub_reader import read_epub
+        from .epub_content import prepare_epub
         book = read_epub(path)
-        return sum(len(c.title) + sum(len(b.text) for b in c.blocks) for c in book.chapters), len(book.chapters)
+        chapters = prepare_epub(book).chapters
+        return sum(len(c.title) + sum(len(b.text) for b in c.blocks) for c in chapters), len(chapters)
     content = path.read_text(encoding="utf-8-sig")
     if path.suffix.lower() == ".srt":
         text = strip_srt_markup(content)
@@ -81,7 +85,8 @@ def read_source_units(path: Path, *, preserve_higgs_tags: bool = False) -> list[
         raise ConfigError(f"File nguồn chưa được hỗ trợ. Định dạng hiện có: {allowed}")
     if path.suffix.lower() == ".epub":
         from .epub_reader import read_epub
-        return [SourceUnit(c.index, "\n\n".join([c.title, *(b.text for b in c.blocks if b.text)])) for c in read_epub(path).chapters]
+        from .epub_content import prepare_epub
+        return [SourceUnit(c.index, "\n\n".join([c.title, *(b.text for b in c.blocks if b.text)])) for c in prepare_epub(read_epub(path)).chapters]
     content = path.read_text(encoding="utf-8-sig")
     if path.suffix.lower() == ".srt":
         return parse_srt_units(content, preserve_higgs_tags=preserve_higgs_tags)

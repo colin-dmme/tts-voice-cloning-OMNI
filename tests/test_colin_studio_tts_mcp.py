@@ -124,9 +124,17 @@ class McpProtocolTests(unittest.IsolatedAsyncioTestCase):
                     "start_text_generation",
                     "start_file_generation",
                     "inspect_epub",
+                    "preview_epub_reading",
+                    "export_epub_reading",
                     "list_chapter_music",
                     "preview_chapter_music",
                     "import_chapter_music",
+                    "update_chapter_music_metadata",
+                    "plan_epub_music",
+                    'list_chapter_music_presets',
+                    'save_chapter_music_preset',
+                    'delete_chapter_music_preset',
+                    'resolve_chapter_music_selection',
                     "get_job",
                     "list_jobs",
                     "cancel_job",
@@ -138,7 +146,7 @@ class McpProtocolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 result.structured_content["server"], "colin_studio_tts_mcp"
             )
-            self.assertEqual(result.structured_content["version"], "0.6.1")
+            self.assertEqual(result.structured_content["version"], "0.6.5")
             models = await client.call_tool("list_models", {})
             self.assertGreater(models.structured_content["count"], 0)
             model_id = models.structured_content["models"][0]["model_id"]

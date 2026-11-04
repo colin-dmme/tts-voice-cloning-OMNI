@@ -425,6 +425,10 @@ class GenerateSpeechRequest(BaseModel):
 
 
 class GenerateSpeechResult(BaseModel):
+    music_plan_path: Path | None = None
+    reading_text_path: Path | None = None
+    reading_report_path: Path | None = None
+    references_path: Path | None = None
     job_id: str
     audio_path: Path
     srt_path: Path | None = None

@@ -4,6 +4,8 @@
 
 | File | Nội dung | Cập nhật |
 |---|---|---|
+| [epub-content-filter.md](epub-content-filter.md) | Lọc nguồn/URL, giữ ghi chú, duyệt chữ Hán, bản xem trước và xuất tài liệu riêng | 2026-11-04 |
+| [music-library.md](music-library.md) | Tab Nhạc, tích nhiều nhóm/bài, preset, random, metadata và kế hoạch nhạc qua MCP | 2026-10-26 |
 | [engine-architecture.md](engine-architecture.md) | Sơ đồ kiến trúc toàn bộ engine system, provider mapping, YAML model registry, capabilities system | 2026-05-15 |
 | [vieneu-engine.md](vieneu-engine.md) | Chi tiết VieNeu integration: 4 modes, 16 models, GPU setup, cách thêm model/mode, known issues, roadmap | 2026-05-15 |
 | [zerotts-engine.md](zerotts-engine.md) | Nghiên cứu ZeroTTS 0.1.2, ONNX và GGUF F32/Q8_0/Q4_0, setting, giới hạn voice clone, benchmark và kiểm chứng MCP thật | 2026-09-13 |

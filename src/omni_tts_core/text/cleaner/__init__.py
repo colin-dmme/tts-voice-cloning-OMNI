@@ -29,6 +29,12 @@ def clean_vietnamese_text(text):
         mask_map[mask] = match.group(0)
         return mask
 
+    # DOI paths contain number/date-like strings. Preserve the entire URL until
+    # those normalizers finish, then spell it without changing its identity.
+    from .text_norm import RE_URL, normalize_urls
+
+    text = RE_URL.sub(protect, text)
+    text = re.sub(r"(?<!\w)(?:doi:\s*)?10\.\d{4,9}/[-._;()/:A-Za-z0-9%]+", protect, text, flags=re.IGNORECASE)
     text = re.sub(r'___PROTECTED_EN_TAG_\d+___', protect, text)
 
     text = expand_abbreviations(text)
@@ -66,4 +72,4 @@ def clean_vietnamese_text(text):
         text = text.replace(mask, original)
         text = text.replace(mask.lower(), original)
 
-    return text
+    return normalize_urls(text)

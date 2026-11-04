@@ -625,6 +625,7 @@ class StudioPage(QWidget):
         self.queue_progress_bar = QProgressBar()
         self.queue_progress_bar.setVisible(False)
         self.run_button = QPushButton("Chạy hàng đợi")
+        self.run_button.setToolTip("Chạy các mục Chờ chạy và Cần chạy lại do nguồn hoặc thiết lập đã đổi.")
         self.run_button.setObjectName("primaryButton")
         self.run_selected_button = QPushButton("Chạy mục chọn")
         self.retry_button = QPushButton("Chạy lại lỗi")
@@ -781,6 +782,14 @@ class StudioPage(QWidget):
     # --- Wiring -------------------------------------------------------------
 
     def _wire(self) -> None:
+        music=self.settings_panel.epub_options.music
+        events=getattr(self.context,'music_events',None)
+        if events:
+            events.library_changed.connect(self._refresh_music_sources)
+            events.preset_applied.connect(music.apply_preset)
+            events.selection_applied.connect(music.apply_selection)
+            music.manage_button.show()
+            music.manage_button.clicked.connect(lambda:self.context.show_page('music'))
         self.settings_panel.settings_changed.connect(self._on_settings_changed)
         self.queue.items_changed.connect(self._refresh_queue)
         self.queue.log.connect(self.context.log)
@@ -796,6 +805,10 @@ class StudioPage(QWidget):
         self._pronunciation_timer.setSingleShot(True)
         self._pronunciation_timer.setInterval(250)
         self._pronunciation_timer.timeout.connect(self._refresh_pronunciation_preview)
+
+    def _refresh_music_sources(self):
+        self.settings_panel.epub_options.music.refresh()
+        self._on_settings_changed()
 
     def _on_settings_changed(self) -> None:
         self._settings_timer.start()

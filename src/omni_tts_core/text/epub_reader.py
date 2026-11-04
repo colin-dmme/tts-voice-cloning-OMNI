@@ -81,6 +81,10 @@ def _xml(z: ZipFile, path: str):
 class BookBlock:
     text: str
     role: str = "paragraph"
+    content_kind: str = "body"
+    group_id: str = ""
+    source_id: str = ""
+    links: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -90,6 +94,7 @@ class BookChapter:
     href: str
     blocks: list[BookBlock]
     volume: str = ""
+    kind: str = "body"
 
 
 @dataclass
@@ -110,8 +115,11 @@ class EpubBook:
         return self.chapters[options.chapter_start - 1 : end]
 
     def preview(self, options: EpubOptions | None = None, limit: int = 50) -> dict:
+        from omni_tts_core.text.epub_content import prepare_epub
+
         options = options or EpubOptions()
-        selected = self.select(options)
+        plan = prepare_epub(self, options)
+        selected = plan.chapters
         return {
             "title": self.title,
             "author": self.author,
@@ -119,15 +127,11 @@ class EpubBook:
             "chapter_count": len(self.chapters),
             "selected_count": len(selected),
             "character_count": sum(
-                len(b.text)
-                for c in self.chapters
-                for b in c.blocks
-                if b.role != "scene"
+                len(b.text) for c in selected for b in c.blocks if b.role != "scene"
             ),
-            "scene_count": sum(
-                b.role == "scene" for c in self.chapters for b in c.blocks
-            ),
-            "warnings": self.warnings,
+            "scene_count": sum(b.role == "scene" for c in selected for b in c.blocks),
+            "warnings": [*self.warnings, *plan.warnings],
+            "content_summary": plan.summary,
             "skipped_documents": self.skipped_documents,
             "chapters": [
                 {
@@ -147,10 +151,18 @@ class EpubBook:
         }
 
 
+_REFERENCE_LABEL = re.compile(
+    r"^(?:nguồn(?: tham khảo)?|tài liệu tham khảo|danh mục tài liệu tham khảo|references|bibliography|sources|参考文献|参考资料)\s*[:：]?$",
+    re.IGNORECASE,
+)
+_NOTE_LABEL = re.compile(r"^(?:ghi chú|chú giải|lưu ý|notes)\s*[:：]?$", re.IGNORECASE)
+
+
 def _blocks(body) -> list[BookBlock]:
     result = []
+    positions = {id(el): str(i) for i, el in enumerate(body.iter(), 1)}
 
-    def walk(el):
+    def walk(el, kind="body", group=""):
         tag = _tag(el)
         if (
             tag in _SKIP
@@ -158,8 +170,45 @@ def _blocks(body) -> list[BookBlock]:
             or _SKIP_TYPES.intersection(el.get(EPUB_TYPE, "").split())
         ):
             return
+        classes = set(el.get("class", "").lower().split())
+        semantics = set(el.get(EPUB_TYPE, "").split()) | set(el.get("role", "").split())
+        if kind != "reference":
+            if classes.intersection(
+                {
+                    "sources",
+                    "references",
+                    "bibliography",
+                    "reference-list",
+                    "bibliographic",
+                }
+            ) or semantics.intersection(
+                {"bibliography", "biblioentry", "doc-bibliography", "doc-biblioentry"}
+            ):
+                kind, group = "reference", "ref-" + positions[id(el)]
+            elif classes.intersection(
+                {"note", "notes", "annotation", "sidenote"}
+            ) or semantics.intersection({"note", "annotation"}):
+                kind, group = "note", "note-" + positions[id(el)]
+        links = [
+            {"href": a.get("href"), "label": _clean(_inline(a))}
+            for a in el.iter()
+            if _tag(a) == "a" and a.get("href")
+        ]
+
+        def emit(text, role="paragraph", suffix=""):
+            result.append(
+                BookBlock(
+                    text,
+                    role,
+                    kind,
+                    group,
+                    positions[id(el)] + suffix,
+                    links if role != "scene" else [],
+                )
+            )
+
         if tag == "hr":
-            result.append(BookBlock("", "scene"))
+            emit("", "scene")
             return
         if tag in {
             "p",
@@ -183,23 +232,69 @@ def _blocks(body) -> list[BookBlock]:
                 and not re.search(r"\w", value, re.UNICODE)
                 and re.fullmatch(r"[\s.…*·•—_\-]+", value)
             ):
-                result.append(BookBlock("", "scene"))
+                emit("", "scene")
             else:
-                for line in value.splitlines():
+                for number, line in enumerate(value.splitlines()):
                     if line.strip():
-                        result.append(
-                            BookBlock(
-                                _clean(line),
-                                "heading" if tag.startswith("h") else "paragraph",
-                            )
+                        emit(
+                            _clean(line),
+                            "heading" if tag.startswith("h") else "paragraph",
+                            f":{number}",
                         )
             return
         if el.text and el.text.strip():
-            result.append(BookBlock(_clean(el.text)))
+            emit(_clean(el.text))
+        scope_kind, scope_group, scope_level = kind, group, None
         for child in el:
-            walk(child)
+            child_tag = _tag(child)
+            structured_label = child_tag == "p" and (
+                "label" in child.get("class", "").split()
+                or any(_tag(c) in {"strong", "b"} for c in child)
+            )
+            explicit_note = bool(
+                set(child.get("class", "").lower().split()).intersection(
+                    {"note", "notes", "annotation", "sidenote"}
+                )
+            )
+            note_label = (
+                bool(re.fullmatch(r"h[1-6]", child_tag)) or structured_label
+            ) and _NOTE_LABEL.fullmatch(_clean(_inline(child)))
+            if (
+                kind != "reference"
+                and scope_kind == "reference"
+                and (explicit_note or note_label)
+            ):
+                # A separate explanatory note closes a heuristic heading scope;
+                # notes *inside* an explicit bibliography stay in that bibliography.
+                scope_kind, scope_group, scope_level = kind, group, None
+            if re.fullmatch(r"h[1-6]", child_tag) or structured_label:
+                level = int(child_tag[1]) if child_tag.startswith("h") else 7
+                label = _clean(_inline(child))
+                if scope_level is not None and level <= scope_level:
+                    scope_kind, scope_group, scope_level = kind, group, None
+                if _REFERENCE_LABEL.fullmatch(label):
+                    scope_kind, scope_group, scope_level = (
+                        "reference",
+                        "ref-" + positions[id(child)],
+                        level,
+                    )
+                elif _NOTE_LABEL.fullmatch(label) and scope_kind != "reference":
+                    scope_kind, scope_group, scope_level = (
+                        "note",
+                        "note-" + positions[id(child)],
+                        level,
+                    )
+            walk(child, scope_kind, scope_group)
             if child.tail and child.tail.strip():
-                result.append(BookBlock(_clean(child.tail)))
+                result.append(
+                    BookBlock(
+                        _clean(child.tail),
+                        "paragraph",
+                        scope_kind,
+                        scope_group,
+                        positions[id(child)] + ":tail",
+                    )
+                )
 
     walk(body)
     return result
@@ -243,6 +338,9 @@ def read_epub(path: Path) -> EpubBook:
                     nav = _xml(z, nav_path)
                     for e in nav.iter():
                         if _tag(e) == "a" and e.get("href"):
+                            uri = urlsplit(e.get("href"))
+                            if uri.scheme or uri.netloc:
+                                continue
                             labels.setdefault(
                                 _path(nav_path, e.get("href")), _clean(_inline(e))
                             )
@@ -267,7 +365,23 @@ def read_epub(path: Path) -> EpubBook:
                 body = next((e for e in root.iter() if _tag(e) == "body"), None)
                 if body is None:
                     raise ConfigError(f"EPUB thiếu body: {name}")
-                types = {t for e in body.iter() for t in e.get(EPUB_TYPE, "").split()}
+                # Document semantics belong to the body/outer wrapper. A nested
+                # bibliography or table of contents must never discard its chapter.
+                wrappers = [body]
+                children = [e for e in body if _tag(e) not in _SKIP and not _hidden(e)]
+                while len(children) == 1 and _tag(children[0]) in {
+                    "section",
+                    "main",
+                    "article",
+                    "div",
+                }:
+                    wrappers.append(children[0])
+                    children = [
+                        e
+                        for e in children[0]
+                        if _tag(e) not in _SKIP and not _hidden(e)
+                    ]
+                types = {t for e in wrappers for t in e.get(EPUB_TYPE, "").split()}
                 if types.intersection(
                     {
                         "toc",
@@ -276,7 +390,6 @@ def read_epub(path: Path) -> EpubBook:
                         "titlepage",
                         "copyright-page",
                         "index",
-                        "bibliography",
                         "endnotes",
                     }
                 ) or re.search(
@@ -305,8 +418,30 @@ def read_epub(path: Path) -> EpubBook:
                     book.warnings.append(f"Ghép phần tiếp nối không có tiêu đề: {name}")
                     continue
                 title = title or f"Chương {len(book.chapters) + 1}"
+                kind = (
+                    "reference"
+                    if "bibliography" in types
+                    else "appendix"
+                    if "appendix" in types
+                    else "frontmatter"
+                    if types.intersection(
+                        {"frontmatter", "preface", "glossary", "foreword"}
+                    )
+                    else "body"
+                )
+                if (
+                    re.fullmatch(
+                        r"(?:ghi chú kỹ thuật|technical notes|colophon)\s*[:：]?",
+                        title,
+                        re.IGNORECASE,
+                    )
+                    or "colophon" in types
+                ):
+                    kind = "technical"
                 book.chapters.append(
-                    BookChapter(len(book.chapters) + 1, title, name, blocks, volume)
+                    BookChapter(
+                        len(book.chapters) + 1, title, name, blocks, volume, kind
+                    )
                 )
             if not book.chapters:
                 raise ConfigError(

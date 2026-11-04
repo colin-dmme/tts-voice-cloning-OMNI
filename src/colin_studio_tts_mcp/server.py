@@ -2,25 +2,31 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import sys
 from dataclasses import asdict
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any
 from pathlib import Path
+from typing import Any
 
+import soundfile as sf
 from mcp.server import MCPServer
 
+from omni_tts_core.chapter_music import ChapterMusicLibrary
+from omni_tts_core.chapter_music import (
+    preview_chapter_music as render_chapter_music_preview,
+)
+from omni_tts_core.text.epub_reader import read_epub
+from omni_tts_shared.epub import ChapterMusicOptions, EpubOptions, MusicDurationMode
+
+from . import __version__
 from .contracts import (
     FileGenerationInput,
     TextGenerationInput,
     advanced_setting_fields,
 )
 from .runtime import McpRuntime
-from . import __version__
-from omni_tts_shared.epub import EpubOptions
-from omni_tts_core.text.epub_reader import read_epub
-from omni_tts_core.chapter_music import ChapterMusicLibrary, preview_chapter_music as render_chapter_music_preview
 
 # stdout belongs exclusively to the stdio protocol.
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
@@ -137,26 +143,96 @@ def list_voices(
 
 
 @mcp.tool()
-def list_chapter_music() -> dict[str, Any]:
-    """Liệt kê thư viện nhạc cục bộ để chọn generation.epub.music.track_id; không gọi provider."""
-    tracks = ChapterMusicLibrary().list_tracks()
-    return {"count": len(tracks), "tracks": [asdict(t) for t in tracks]}
+def list_chapter_music(theme: str | None = None, tag: str | None = None) -> dict[str, Any]:
+    """Đọc mô tả/tag và lọc chủ đề nhạc để agent chọn fixed/random_theme; không gọi provider."""
+    library = ChapterMusicLibrary()
+    tracks = library.list_tracks(theme=theme, tag=tag)
+    return {"count": len(tracks), "tracks": [asdict(t) for t in tracks],
+            "themes": library.list_themes(), "catalog_path": str(library.catalog),
+            "description_path": str(library.root / "MUSIC_CATALOG.md")}
 
 
 @mcp.tool()
 def preview_chapter_music(track_id: str, duration_ms: int = 2500, volume_percent: int = 30,
-                          fade_in_ms: int = 120, fade_out_ms: int = 350) -> dict[str, Any]:
-    """Tạo WAV nghe thử nhạc đã trim/fade vừa nhịp nghỉ. Không tạo nhạc mới, không nạp TTS."""
+                          fade_in_ms: int = 120, fade_out_ms: int = 350,
+                          duration_mode: MusicDurationMode = "fit_pause") -> dict[str, Any]:
+    """Nghe nhạc vừa nhịp nghỉ hoặc full_track phát trọn bản trong thư viện. Không tạo nhạc mới/nạp TTS."""
     path = render_chapter_music_preview(track_id, duration_ms=duration_ms, volume_percent=volume_percent,
-                                       fade_in_ms=fade_in_ms, fade_out_ms=fade_out_ms)
-    return {"track_id": track_id, "duration_ms": duration_ms, "audio_path": str(path)}
+                                       fade_in_ms=fade_in_ms, fade_out_ms=fade_out_ms, duration_mode=duration_mode)
+    info = sf.info(path)
+    return {"track_id": track_id, "duration_ms": info.frames / info.samplerate * 1000,
+            "duration_mode": duration_mode, "audio_path": str(path)}
 
 
 @mcp.tool()
-def import_chapter_music(source_file: str, name: str) -> dict[str, Any]:
+def import_chapter_music(source_file: str, name: str, description: str = "",
+                         themes: list[str] | None = None, tags: list[str] | None = None) -> dict[str, Any]:
     """Thêm audio người dùng có sẵn vào thư viện riêng; tự trim/normalize, tối đa 30 giây, không tải mạng."""
-    track = ChapterMusicLibrary().import_track(Path(source_file), name, provenance={"provider": "user_import"})
+    track = ChapterMusicLibrary().import_track(Path(source_file), name, description=description,
+        themes=themes, tags=tags, provenance={"provider": "user_import"})
     return asdict(track)
+
+
+@mcp.tool()
+def update_chapter_music_metadata(track_id: str, description: str | None = None,
+                                  themes: list[str] | None = None, tags: list[str] | None = None,
+                                  name: str | None = None) -> dict[str, Any]:
+    """Cập nhật mô tả, chủ đề và tag của nhạc cục bộ; giữ nguyên file âm thanh và nguồn/quyền đã ghi."""
+    return asdict(ChapterMusicLibrary().update_metadata(track_id, name=name, description=description, themes=themes, tags=tags))
+
+
+@mcp.tool()
+def list_chapter_music_presets() -> dict[str,Any]:
+    """Đọc các preset phối nhiều chủ đề/bài nhạc và các bài bị loại; không nạp TTS."""
+    from omni_tts_core.music_presets import MusicPresetStore
+    store=MusicPresetStore();items=store.list_presets()
+    return {'count':len(items),'presets':[p.model_dump() for p in items],'path':str(store.path)}
+
+
+@mcp.tool()
+def save_chapter_music_preset(name: str,theme_ids: list[str] | None=None,track_ids: list[str] | None=None,
+                              excluded_track_ids: list[str] | None=None,description: str='',preset_id: str | None=None) -> dict[str,Any]:
+    """Tạo/thay toàn bộ preset: hợp nhóm và bài riêng, trừ bài loại, bỏ trùng.
+
+    Cập nhật dùng preset_id đã đọc và gửi toàn bộ các danh sách muốn giữ;
+    danh sách bỏ qua được coi là rỗng. Preset không chứa thời lượng/fade.
+    """
+    from omni_tts_core.music_presets import MusicPresetStore
+    return MusicPresetStore().save(name,preset_id=preset_id,description=description,
+        theme_ids=theme_ids,track_ids=track_ids,excluded_track_ids=excluded_track_ids).model_dump()
+
+
+@mcp.tool()
+def delete_chapter_music_preset(preset_id: str) -> dict[str,Any]:
+    """Chỉ xóa preset cục bộ, giữ nguyên audio; không đổi kế hoạch sách đang tạo."""
+    from omni_tts_core.music_presets import MusicPresetStore
+    return {'preset_id':preset_id,'deleted':MusicPresetStore().delete(preset_id)}
+
+
+@mcp.tool()
+def resolve_chapter_music_selection(music: ChapterMusicOptions) -> dict[str,Any]:
+    """Xem chính xác tập random sau khi phối nhóm/bài, bỏ trùng và áp dụng loại trừ/preset; không tạo audio."""
+    from omni_tts_core.chapter_music import ChapterMusicSelector
+    selector=ChapterMusicSelector(music)
+    return {'selection_mode':music.selection_mode,'count':len(selector.pool),
+        'tracks':[asdict(t) for t in selector.pool],
+        'preset':selector.preset.model_dump() if selector.preset else None}
+
+
+@mcp.tool()
+def plan_epub_music(source_file: str, epub: EpubOptions | None = None) -> dict[str, Any]:
+    """Xem trước từng lựa chọn nhạc title:N/chapter:N; cùng seed và EPUB cho cùng kế hoạch, không tạo giọng.
+
+    Agent có thể đọc mô tả rồi dùng epub.music.track_overrides để gắn track_id theo nội dung.
+    Chỉ chèn nhạc trong khoảng nghỉ, chưa có nhạc nền dưới lời kể.
+    """
+    from omni_tts_core.epub_generation import build_epub_music_plan
+    path = Path(source_file)
+    if not path.is_absolute() or path.suffix.lower() != ".epub" or not path.is_file():
+        raise ValueError("source_file phải là đường dẫn tuyệt đối tới EPUB có sẵn.")
+    if path.stat().st_size > 20 * 1024 * 1024:
+        raise ValueError("EPUB vượt giới hạn 20 MB của MCP.")
+    return build_epub_music_plan(read_epub(path), epub or EpubOptions(), hashlib.sha256(path.read_bytes()).hexdigest())
 
 
 @mcp.tool()
@@ -167,14 +243,56 @@ def start_text_generation(request: TextGenerationInput) -> dict[str, Any]:
 
 
 @mcp.tool()
-def inspect_epub(source_file: str, chapter_start: int = 1, chapter_end: int = 0, limit: int = 50) -> dict[str, Any]:
+def inspect_epub(source_file: str, chapter_start: int | None = None, chapter_end: int | None = None, limit: int = 50, epub: EpubOptions | None = None) -> dict[str, Any]:
     """Xem cấu trúc, tên và chữ đầu các chương EPUB; không sinh giọng hoặc nạp model. Chương là vị trí 1-based, end=0 đọc hết."""
     path = Path(source_file)
     if not path.is_absolute() or path.suffix.lower() != ".epub" or not path.is_file():
         raise ValueError("source_file phải là đường dẫn tuyệt đối tới EPUB có sẵn.")
     if path.stat().st_size > 20 * 1024 * 1024:
         raise ValueError("EPUB vượt giới hạn 20 MB của MCP.")
-    return read_epub(path).preview(EpubOptions(chapter_start=chapter_start, chapter_end=chapter_end), limit=limit)
+    options = epub or EpubOptions()
+    overrides = {k: v for k, v in {"chapter_start": chapter_start, "chapter_end": chapter_end}.items() if v is not None}
+    options = EpubOptions.model_validate({**options.model_dump(), **overrides})
+    return read_epub(path).preview(options, limit=limit)
+
+
+def _reading_plan(source_file, epub):
+    from omni_tts_core.text.epub_content import prepare_epub
+
+    path = Path(source_file)
+    if not path.is_absolute() or path.suffix.lower() != ".epub" or not path.is_file():
+        raise ValueError("source_file phải là đường dẫn tuyệt đối tới EPUB có sẵn.")
+    if path.stat().st_size > 20 * 1024 * 1024:
+        raise ValueError("EPUB vượt giới hạn 20 MB của MCP.")
+    return path, prepare_epub(read_epub(path), epub or EpubOptions())
+
+
+@mcp.tool()
+def preview_epub_reading(source_file: str, epub: EpubOptions | None = None, chapter_index: int = 1, max_characters: int = 16000) -> dict[str, Any]:
+    """So sánh bản gốc/bản đọc/đã bỏ, thống kê nguồn, URL và chữ Hán; không nạp model hoặc mở URL.
+
+    generation.epub.content dùng đúng cấu hình này khi tạo audio/SRT. Số chương giữ vị trí trong EPUB gốc.
+    """
+    if not 1 <= chapter_index <= 100000 or not 100 <= max_characters <= 50000:
+        raise ValueError("chapter_index: 1–100000; max_characters: 100–50000.")
+    _path, plan = _reading_plan(source_file, epub)
+    return {**plan.report(), "chapter": plan.chapter_preview(chapter_index, max_characters)}
+
+
+@mcp.tool()
+def export_epub_reading(source_file: str, output_directory: str, epub: EpubOptions | None = None) -> dict[str, Any]:
+    """Xuất TXT bản đọc, JSON báo cáo lọc và nguồn MD theo content; không tạo audio, giữ EPUB gốc."""
+    from omni_tts_core.text.epub_content import export_reading_plan
+    from omni_tts_core.text.output_naming import slug_component
+
+    directory = Path(output_directory)
+    if not directory.is_absolute() or directory == Path(directory.anchor):
+        raise ValueError("Thư mục đầu ra phải tuyệt đối và không phải root của ổ đĩa.")
+    path, plan = _reading_plan(source_file, epub)
+    if not plan.chapters:
+        raise ValueError("Không còn nội dung sau khi lọc; hãy đổi phạm vi / tùy chọn.")
+    paths = export_reading_plan(plan, directory, slug_component(path.stem)[:100] or "epub", hashlib.sha256(path.read_bytes()).hexdigest())
+    return {**plan.report(), "files": {k: str(v) for k, v in paths.items()}}
 
 
 @mcp.tool()

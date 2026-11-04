@@ -590,10 +590,18 @@ class TtsService:
             source_units=source_units,
         )
         chunks = [chunk for unit in units for chunk in unit["chunks"]]
-        music_renderer = None
-        if source_units is not None and request.epub_options.music.enabled:
+        music_renderers = {}
+        if source_units is not None:
             from omni_tts_core.chapter_music import ChapterMusicRenderer
-            music_renderer = ChapterMusicRenderer(request.epub_options.music)
+            for kind in ("title", "chapter"):
+                music = request.epub_options.music_for(kind)
+                if music.enabled and any(u.pause_kind == kind and u.pause_after_ms != 0 for u in source_units):
+                    # EPUB planning freezes choices before synthesis. Do not re-read a
+                    # mutable/deleted preset while later chapters are being rendered.
+                    planned = [u.music_track_id for u in source_units if u.pause_kind == kind and u.music_track_id]
+                    if planned:
+                        music = music.model_copy(update={'selection_mode':'fixed','track_id':planned[0],'preset_id':None})
+                    music_renderers[kind] = ChapterMusicRenderer(music)
         if not chunks:
             raise ConfigError("Không có nội dung để đọc.")
         emit_progress(
@@ -641,6 +649,7 @@ class TtsService:
                 "units": [
                     {
                         "index": unit["unit"].index,
+                        "music_track_id": unit["unit"].music_track_id,
                         "text": unit["unit"].text,
                         "chunks": unit["chunks"],
                         "segments": unit["segments"],
@@ -767,6 +776,8 @@ class TtsService:
             override = units[i]["unit"].pause_after_ms
             if override is not None:
                 paragraph_pauses_ms[i] = override
+        boundary_music = [None] * len(units)
+        boundary_sample_counts = [0] * len(units)
 
         for unit_index, unit in enumerate(units):
             unit_chunks = unit["chunks"]
@@ -830,8 +841,21 @@ class TtsService:
                     unit_crossfade_ms,
                 )
             )
+            pause_ms = (
+                paragraph_pauses_ms[unit_index] if unit_index < len(paragraph_pauses_ms)
+                else (units[-1]["unit"].pause_after_ms or 0)
+            )
+            renderer = music_renderers.get(unit["unit"].pause_kind)
+            pause_music = renderer.for_boundary(
+                unit["unit"].pause_kind, pause_ms, sample_rate,
+                track_id=unit["unit"].music_track_id,
+            ) if renderer else None
+            boundary_music[unit_index] = pause_music
+            boundary_sample_counts[unit_index] = (
+                len(pause_music) if pause_music is not None else int(sample_rate * pause_ms / 1000)
+            )
             if unit_index < len(units) - 1:
-                current_seconds += int(sample_rate * paragraph_pauses_ms[unit_index] / 1000) / sample_rate
+                current_seconds += boundary_sample_counts[unit_index] / sample_rate
 
         check_cancel(cancel_event)
         audio_label = _audio_format_label(request.output_audio_format)
@@ -842,16 +866,13 @@ class TtsService:
             sample_rate,
             paragraph_pauses_ms,
             0,
-            pause_audio_segments=(
-                [music_renderer.for_boundary(units[i]["unit"].pause_kind, pause, sample_rate)
-                 for i, pause in enumerate(paragraph_pauses_ms)] if music_renderer else None
-            ),
+            pause_audio_segments=boundary_music[:-1] if music_renderers else None,
+            pause_sample_counts=boundary_sample_counts[:-1] if music_renderers else None,
         )
-        trailing_pause_ms = units[-1]["unit"].pause_after_ms
-        if trailing_pause_ms:
+        if boundary_sample_counts[-1]:
             import numpy as np
-            tail_music = music_renderer.for_boundary(units[-1]["unit"].pause_kind, trailing_pause_ms, sample_rate) if music_renderer else None
-            tail = tail_music if tail_music is not None else np.zeros(int(sample_rate * trailing_pause_ms / 1000), dtype=np.float32)
+            tail_music = boundary_music[-1]
+            tail = tail_music if tail_music is not None else np.zeros(boundary_sample_counts[-1], dtype=np.float32)
             combined = np.concatenate([combined, tail])
         # Finalise the filename now that the real duration is known, so the
         # optional "_{voice}_{duration}" suffix can be appended.

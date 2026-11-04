@@ -3,6 +3,102 @@
 Tất cả thay đổi đáng chú ý của Colin TTS Studio được ghi theo từng phiên bản
 trong file này. Dự án sử dụng phiên bản theo Semantic Versioning.
 
+## [0.6.5] - 2026-11-04
+
+### Added
+
+- Bộ lọc nội dung EPUB dùng chung core/GUI/MCP: bỏ nguồn theo semantic markup,
+  class `sources`/`references` hoặc phạm vi heading nguồn; giữ ghi chú diễn giải.
+- URL/DOI có chế độ không đọc, chỉ tên miền hoặc đọc địa chỉ; nhãn liên kết
+  có nghĩa được giữ. Lọc trước chuẩn hóa số/ngày và trước mọi provider TTS.
+- Dùng nghĩa Việt đã có trong cặp `chữ Hán (giải nghĩa)`, cảnh báo các ký tự
+  còn lại theo vị trí và nhận bảng cách đọc riêng; không tự dịch hoặc xóa chữ Hán.
+- Tùy chọn phần giới thiệu, phụ lục nội dung và ghi chú kỹ thuật cuối sách.
+- Qt/Tkinter có bản xem trước gốc/đọc/thay đổi/chữ Hán và nút xuất để kiểm tra;
+  Web có cùng tùy chọn và so sánh. Thiết lập được lưu trong preset/setting EPUB.
+- Tạo sách tự lưu TXT bản đọc, JSON báo cáo và nguồn MD; kết quả có
+  `reading_text_path`, `reading_report_path`, `references_path`. ZIP Web kèm các file này.
+- MCP thêm `preview_epub_reading`, `export_epub_reading`; `inspect_epub` nhận
+  toàn bộ `epub`, trả thống kê lọc/cảnh báo qua cùng schema.
+
+### Fixed
+
+- DOI được bảo vệ khỏi bộ chuẩn hóa ngày/số khi người dùng chọn đọc địa chỉ.
+- Bibliography lồng trong một chương không làm bỏ cả chương. Lọc phần đọc vẫn
+  giữ chỉ số chương gốc; nhịp chuyển chương, SRT và cache theo nội dung sau lọc.
+
+## [0.6.4] - 2026-10-26
+
+### Added
+
+- Tab **Nhạc** trong thanh điều hướng Qt: tìm/tích nhiều chủ đề, thêm/bỏ từng
+  bài, lọc các bản đã tích, nghe thử, nhập nhạc và sửa tên/mô tả/chủ đề/tag.
+- Quản lý preset nhạc: tạo, lưu, sao chép, xóa và dùng trong Studio; có thể
+  chuyển tập đang tích sang Studio mà chưa lưu preset. Tìm kiếm giữ lựa chọn.
+- Hai nguồn random mới: `random_selection` với `theme_ids`, `track_ids`,
+  `excluded_track_ids`; `preset` với `preset_id`. Hợp nhiều nhóm và bài riêng,
+  bỏ trùng rồi loại các bài không dùng. Nhóm đã chọn tự nhận bài nhập sau này.
+- Preset riêng lưu tại `music_library/presets.json`, cùng thư viện Qt/Tkinter,
+  Web và MCP. Giữ chế độ bài cố định/random một chủ đề để đọc cấu hình cũ.
+- MCP thêm `list_chapter_music_presets`, `save_chapter_music_preset`,
+  `delete_chapter_music_preset`, `resolve_chapter_music_selection`; plan ghi
+  preset, quy tắc chọn và danh sách ứng viên để agent kiểm tra.
+
+### Fixed
+
+- Đổi tập bài trong preset làm hàng đợi/cache kiểm tra lại; chỉ đổi tên preset
+  không buộc tạo lại chương. Sách đang chạy giữ lựa chọn nhạc đã chốt kể cả
+  khi preset được sửa hoặc xóa trong lúc tạo audio.
+- Khôi phục trang điều hướng theo khóa, giữ đúng trang cũ khi thêm tab Nhạc.
+
+### Documentation
+
+- Cập nhật README, hướng dẫn EPUB, thư viện nhạc, preset và payload MCP.
+
+## [0.6.3] - 2026-10-25
+
+### Added
+
+- Gộp nhịp sau tên chương/giữa chương thành các khối độc lập: không nghỉ,
+  khoảng lặng hoặc nhạc. Mỗi vị trí có độ dài nhạc cố định/phát trọn và fade riêng.
+- Khóa số giây khi phát trọn; khóa fade khi không dùng nhạc; khóa nhịp tiêu đề
+  hoặc quyển khi không đọc phần đó; khóa nguồn nhạc khi không vị trí nào dùng nhạc.
+- Chọn bài/nhóm random và âm lượng tại nguồn nhạc chung; nghe thử từng nhịp theo
+  đúng độ dài/fade của vị trí đó. Đồng bộ Qt, Tkinter, Web và MCP/core.
+- Schema `generation.epub.breaks.title/chapter`, có ưu tiên rõ ràng so với cấu
+  hình cũ. Lưu/đọc lại cấu hình không đổi các giá trị cũ chỉ vì mở giao diện.
+- SRT, kế hoạch nhạc và checkpoint theo cấu hình thực của từng nhịp; có thể dùng
+  khoảng lặng 1 giây sau tiêu đề và phát trọn nhạc giữa chương trong cùng tác vụ.
+
+## [0.6.2] - 2026-10-25
+
+### Added
+
+- Chọn **Cắt vừa khoảng nghỉ** hoặc **Phát trọn bản nhạc trong thư viện** trên
+  Qt/Tkinter/Web và MCP (`music.duration_mode`). Phát trọn dùng đủ mẫu PCM của
+  bài được chọn, tự cập nhật độ dài nhịp và SRT; nghe thử/plan hỗ trợ cùng chế độ.
+- Metadata nhạc gồm `description`, `themes`, `tags`; tự xuất `MUSIC_CATALOG.md`
+  cạnh `library.json`, tương thích catalog cũ chưa có các trường mới.
+- Random trong nhóm chủ đề trên Qt, Tkinter và Web, dùng shuffle bag hạn chế lặp
+  liên tiếp; cùng EPUB và lượt trộn tạo cùng kế hoạch để tiếp tục checkpoint.
+- Xuất kế hoạch từng nhịp ra JSON, trả `music_plan_path` trong kết quả. Cache tính
+  lựa chọn thực và hash từng file nhạc đã dùng; nhạc vẫn nằm gọn trong nhịp nghỉ.
+- `generation.epub.music.track_overrides` cho agent chọn `title:N` hoặc `chapter:N`
+  theo nội dung. MCP thêm `plan_epub_music`, `update_chapter_music_metadata`; bộ
+  liệt kê hỗ trợ lọc theme/tag và bộ nhập nhận mô tả/chủ đề/tag.
+
+### Documentation
+
+- Hướng dẫn random, mô tả thư viện, kế hoạch nhạc và payload MCP tại
+  `docs/music-library.md`. Nhạc riêng và key tiếp tục nằm ngoài Git.
+
+### Fixed
+
+- Nút **Chạy hàng đợi** nhận cả mục **Cần chạy lại** sau khi đổi nguồn/thiết lập
+  trên Qt và Tkinter; trước đây chỉ lấy mục **Chờ chạy**, gây thông báo không có
+  file phù hợp dù EPUB đã nằm trong hàng đợi. Mục thành công còn hợp lệ vẫn được
+  bỏ qua; chạy riêng một mục tiếp tục dùng **Chạy mục chọn**.
+
 ## [0.6.1] - 2026-10-25
 
 ### Added

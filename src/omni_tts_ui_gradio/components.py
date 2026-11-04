@@ -3,6 +3,7 @@ from __future__ import annotations
 import gradio as gr
 
 from omni_tts_core.config import AppSettings
+from omni_tts_shared.epub import EpubOptions
 from omni_tts_ui_gradio import handlers
 
 
@@ -91,28 +92,94 @@ def build_app() -> gr.Blocks:
                         epub_titles = gr.Checkbox(label="Đọc tên chương", value=epub_saved.get("read_titles", True))
                         epub_volumes = gr.Checkbox(label="Đọc tên quyển", value=epub_saved.get("include_volumes", True))
                         epub_mode = gr.Dropdown(label="Cách xuất EPUB", choices=[("Mỗi chương một file", "chapters"), ("Ghép một file", "merged")], value=epub_saved.get("output_mode", "chapters"))
-                        epub_title_pause = gr.Slider(0, 10, value=epub_saved.get("title_pause_ms", 1200) / 1000, step=0.1, label="Nghỉ sau tên chương (giây)")
-                        epub_chapter_pause = gr.Slider(0, 10, value=epub_saved.get("chapter_pause_ms", 2500) / 1000, step=0.1, label="Nghỉ giữa hai chương (giây)")
+                        saved_epub = EpubOptions.model_validate(epub_saved)
+                        boundary_controls = {}
+                        for kind, caption in [('title', 'Sau tên chương, trước nội dung'), ('chapter', 'Giữa hai chương')]:
+                            boundary = saved_epub.break_for(kind)
+                            available = kind != 'title' or saved_epub.read_titles
+                            updates = handlers.epub_break_updates(available, boundary.mode, boundary.duration_mode, boundary.duration_ms/1000)
+                            with gr.Group():
+                                gr.Markdown('### ' + caption)
+                                type_control = gr.Dropdown(label='Loại nghỉ', choices=[('Không nghỉ','none'),('Khoảng lặng','silence'),('Nhạc','music')],value=boundary.mode,interactive=updates[0]['interactive'])
+                                duration_control = gr.Dropdown(label='Độ dài nhạc',choices=[('Số giây cố định','fit_pause'),('Phát trọn bản nhạc','full_track')],value=boundary.duration_mode,interactive=updates[1]['interactive'])
+                                seconds_control = gr.Slider(0,10,value=boundary.duration_ms/1000,step=.1,label='Số giây cố định',interactive=updates[2]['interactive'])
+                                fade_in_control = gr.Slider(0,2,value=boundary.fade_in_ms/1000,step=.01,label='Fade-in — nhạc vào dần (giây)',interactive=updates[3]['interactive'])
+                                fade_out_control = gr.Slider(0,3,value=boundary.fade_out_ms/1000,step=.01,label='Fade-out — nhạc tắt dần (giây)',interactive=updates[4]['interactive'])
+                                preview_control = gr.Button('Nghe thử nhịp này',interactive=updates[5]['interactive'])
+                                note_control = gr.Markdown(updates[6])
+                                audio_control = gr.Audio(label='Nhịp nghỉ nghe thử',type='filepath')
+                            boundary_controls[kind] = [type_control,duration_control,seconds_control,fade_in_control,fade_out_control,preview_control,note_control,audio_control]
+                        title_kind,title_duration,epub_title_pause,title_fade_in,title_fade_out,_,_,_ = boundary_controls['title']
+                        chapter_kind,chapter_duration,epub_chapter_pause,chapter_fade_in,chapter_fade_out,_,_,_ = boundary_controls['chapter']
                         epub_scene_pause = gr.Slider(0, 10, value=epub_saved.get("scene_pause_ms", 1200) / 1000, step=0.1, label="Nghỉ chuyển cảnh (giây)")
-                        epub_volume_pause = gr.Slider(0, 10, value=epub_saved.get("volume_pause_ms", 1800) / 1000, step=0.1, label="Nghỉ sau tên quyển (giây)")
+                        epub_volume_pause = gr.Slider(0, 10, value=epub_saved.get("volume_pause_ms", 1800) / 1000, step=0.1, label="Nghỉ sau tên quyển (giây)",interactive=saved_epub.include_volumes)
+                        epub_volumes.change(lambda enabled:gr.update(interactive=enabled),inputs=[epub_volumes],outputs=[epub_volume_pause])
+                        gr.Markdown('### Nguồn nhạc cho các nhịp nghỉ')
                         music_saved = epub_saved.get("music", {})
                         music_choices = handlers.chapter_music_choices()
                         music_selected = music_saved.get("track_id") or (music_choices[0][1] if music_choices else None)
-                        music_enabled = gr.Checkbox(label="Bật nhạc đệm trong khoảng nghỉ EPUB", value=music_saved.get("enabled", False))
-                        music_track = gr.Dropdown(label="Thư viện nhạc chuyển chương", choices=music_choices, value=music_selected)
+                        music_enabled = gr.State(music_saved.get('enabled',False))
+                        music_mode = gr.Dropdown(label="Cách chọn nhạc", choices=[("Chọn một bản cố định", "fixed"), ("Random trong nhóm chủ đề", "random_theme"),('Random trong tập đã tích','random_selection'),('Random theo preset đã lưu','preset')], value=music_saved.get("selection_mode", "fixed"))
+                        music_preset = gr.Dropdown(label='Preset nhạc',choices=handlers.chapter_music_preset_choices(),value=music_saved.get('preset_id'))
+                        music_theme_ids = gr.CheckboxGroup(label='Phối nhiều nhóm chủ đề',choices=handlers.chapter_music_themes(),value=music_saved.get('theme_ids',[]))
+                        music_track_ids = gr.CheckboxGroup(label='Các bài thêm riêng',choices=music_choices,value=music_saved.get('track_ids',[]))
+                        music_excluded_ids = gr.CheckboxGroup(label='Bỏ các bài này khỏi tập random',choices=music_choices,value=music_saved.get('excluded_track_ids',[]))
+                        music_theme = gr.Dropdown(label="Nhóm chủ đề cho random", choices=handlers.chapter_music_themes(), value=music_saved.get("theme"))
+                        music_seed = gr.Number(label="Lượt trộn (giữ số để tiếp tục, đổi số để trộn lại)", value=music_saved.get("random_seed", 0), minimum=0, maximum=2147483647, precision=0)
+                        music_track = gr.Dropdown(label="Bản nhạc cho chế độ cố định", choices=music_choices, value=music_selected)
                         music_volume = gr.Slider(0, 100, value=music_saved.get("volume_percent", 30), step=1, label="Âm lượng nhạc (%)")
-                        music_between = gr.Checkbox(label="Phát nhạc giữa hai chương", value=music_saved.get("between_chapters", True))
-                        music_after_title = gr.Checkbox(label="Phát nhạc sau tên chương, trước nội dung", value=music_saved.get("after_title", False))
-                        music_note = gr.Markdown(handlers.chapter_music_note(music_selected))
-                        music_track.change(handlers.chapter_music_note, inputs=[music_track], outputs=[music_note])
-                        music_preview_button = gr.Button("Nghe thử nhạc theo nhịp chuyển chương")
-                        music_preview = gr.Audio(label="Nhạc đã cắt và fade", type="filepath")
-                        music_preview_button.click(handlers.preview_epub_music, inputs=[music_track, epub_chapter_pause, music_volume], outputs=[music_preview])
+                        music_duration_mode = gr.State(music_saved.get('duration_mode','fit_pause'))
+                        music_between = gr.State(music_saved.get('between_chapters',True))
+                        music_after_title = gr.State(music_saved.get('after_title',False))
+                        note_inputs=[music_track,music_mode,music_theme,music_preset,music_theme_ids,music_track_ids,music_excluded_ids]
+                        music_note = gr.Markdown(handlers.music_selection_note(music_selected,music_saved.get('selection_mode','fixed'),music_saved.get('theme'),
+                            music_saved.get('preset_id'),music_saved.get('theme_ids',[]),music_saved.get('track_ids',[]),music_saved.get('excluded_track_ids',[])))
+                        for music_control in note_inputs:
+                            music_control.change(handlers.music_selection_note,inputs=note_inputs,outputs=[music_note])
                         music_upload = gr.File(label="Thêm nhạc cá nhân (tự lấy tối đa 30 giây)", type="filepath", file_types=[".wav", ".mp3", ".flac", ".ogg", ".m4a"])
                         music_upload.change(handlers.import_epub_music, inputs=[music_upload], outputs=[music_track])
-                        epub_preview_button = gr.Button("Xem trước EPUB — không tạo giọng")
-                        epub_preview = gr.Textbox(label="Tên chương và nội dung trích", lines=8, interactive=False)
-                        epub_preview_button.click(handlers.preview_epub, inputs=[source_files], outputs=[epub_preview])
+                        for kind, controls in boundary_controls.items():
+                            available_control = epub_titles if kind == 'title' else gr.State(True)
+                            boundary_inputs = [available_control,controls[0],controls[1],controls[2]]
+                            for control in [available_control,controls[0],controls[1],controls[2]]:
+                                if not isinstance(control,gr.State):
+                                    control.change(handlers.epub_break_updates,inputs=boundary_inputs,outputs=controls[:7])
+                            controls[5].click(handlers.preview_epub_music,
+                                inputs=[music_track,controls[2],music_volume,music_mode,music_theme,music_seed,controls[1],controls[3],controls[4],
+                                        music_preset,music_theme_ids,music_track_ids,music_excluded_ids],outputs=[controls[7]])
+                        source_inputs=[epub_titles,title_kind,title_duration,epub_title_pause,chapter_kind,chapter_duration,epub_chapter_pause,music_mode]
+                        source_outputs=[music_mode,music_track,music_theme,music_seed,music_volume,music_upload,music_preset,music_theme_ids,music_track_ids,music_excluded_ids]
+                        for control in source_inputs:
+                            control.change(handlers.epub_music_source_updates,inputs=source_inputs,outputs=source_outputs)
+                        initial_source_updates=handlers.epub_music_source_updates(saved_epub.read_titles,
+                            saved_epub.break_for('title').mode,saved_epub.break_for('title').duration_mode,saved_epub.break_for('title').duration_ms/1000,
+                            saved_epub.break_for('chapter').mode,saved_epub.break_for('chapter').duration_mode,saved_epub.break_for('chapter').duration_ms/1000,
+                            music_saved.get('selection_mode','fixed'))
+                        for control,update in zip(source_outputs,initial_source_updates):
+                            control.interactive=update['interactive']
+                        with gr.Accordion("Nội dung đưa vào giọng đọc", open=True):
+                            content_saved = saved_epub.content
+                            content_skip_references = gr.Checkbox(label="Bỏ nguồn / tài liệu tham khảo",value=content_saved.skip_references)
+                            content_url_mode = gr.Dropdown(label="Đường link",choices=[("Không đọc URL / DOI","skip"),("Chỉ đọc tên miền","domain"),("Đọc nguyên địa chỉ","read")],value=content_saved.url_mode)
+                            content_read_notes = gr.Checkbox(label="Giữ ghi chú giải thích",value=content_saved.read_notes)
+                            content_han_mode = gr.Dropdown(label="Chữ Hán",choices=[("Dùng nghĩa Việt sẵn có + cảnh báo","prefer_vietnamese"),("Giữ và cảnh báo","warn"),("Giữ, không cảnh báo","keep")],value=content_saved.han_mode)
+                            content_frontmatter = gr.Checkbox(label="Đọc giới thiệu / thuật ngữ",value=content_saved.include_frontmatter)
+                            content_appendices = gr.Checkbox(label="Đọc phụ lục nội dung",value=content_saved.include_appendices)
+                            content_technical = gr.Checkbox(label="Đọc ghi chú kỹ thuật cuối sách",value=content_saved.include_technical_notes)
+                            content_export = gr.Checkbox(label="Xuất nguồn tham khảo riêng cạnh audio",value=content_saved.export_references)
+                            content_han_readings = gr.Textbox(label="Cách đọc chữ Hán — mỗi dòng: chữ gốc = cách đọc",value="\n".join(f"{a} = {b}" for a,b in content_saved.han_readings.items()),placeholder="万 = vạn",lines=3)
+                            content_inputs = [content_skip_references,content_url_mode,content_read_notes,content_han_mode,content_frontmatter,content_appendices,content_technical,content_export,content_han_readings]
+                        content_preview_index = gr.Number(label="Vị trí phần muốn xem",value=1,minimum=1,precision=0)
+                        epub_preview_button = gr.Button("So sánh bản gốc / bản đọc — không tạo giọng")
+                        content_status = gr.Textbox(label="Kết quả lọc và lưu ý",interactive=False,lines=3)
+                        with gr.Tabs():
+                            with gr.Tab("Văn bản sẽ đọc"):
+                                epub_preview = gr.Textbox(label="Bản đọc sau lọc",lines=12,interactive=False)
+                            with gr.Tab("Bản gốc"):
+                                content_original = gr.Textbox(label="Bản gốc",lines=12,interactive=False)
+                            with gr.Tab("Đã bỏ / đã đổi"):
+                                content_changes = gr.Textbox(label="Chi tiết thay đổi",lines=12,interactive=False)
+                        epub_preview_button.click(handlers.preview_epub_content, inputs=[source_files,epub_start,epub_end,content_preview_index,*content_inputs],outputs=[content_status,epub_preview,content_original,content_changes])
                     reference_audio = gr.Audio(
                         label="Giọng mẫu WAV, nên 3-10 giây",
                         type="filepath",
@@ -428,6 +495,12 @@ def build_app() -> gr.Blocks:
                     epub_start, epub_end, epub_titles, epub_volumes, epub_mode,
                     epub_title_pause, epub_chapter_pause, epub_scene_pause, epub_volume_pause,
                     music_enabled, music_track, music_volume, music_between, music_after_title,
+                    music_mode, music_theme, music_seed,
+                    music_duration_mode,
+                    title_kind,title_duration,title_fade_in,title_fade_out,
+                    chapter_kind,chapter_duration,chapter_fade_in,chapter_fade_out,
+                    music_preset,music_theme_ids,music_track_ids,music_excluded_ids,
+                    *content_inputs,
                 ],
                 outputs=[status, audio_preview, audio_file, srt_file, zip_file],
             )

@@ -7,21 +7,25 @@ from typing import Any
 
 import gradio as gr
 
-from omni_tts_core.user_state import restore_user_state
-from omni_tts_core.service import TtsService
+from omni_tts_core.chapter_music import (
+    ChapterMusicLibrary,
+    ChapterMusicSelector,
+    music_duration_note,
+    preview_chapter_music,
+)
 from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES
+from omni_tts_core.service import TtsService
+from omni_tts_core.text.epub_reader import read_epub
+from omni_tts_core.user_state import restore_user_state
+from omni_tts_shared.epub import EpubOptions
 from omni_tts_shared.errors import OmniTtsError
 from omni_tts_shared.languages import LANGUAGE_LABELS
 from omni_tts_shared.schemas import GenerateSpeechRequest, ModelStatus
+from omni_tts_shared.vieneu_codecs import NO_CODEC_ID, NO_CODEC_LABEL
 from omni_tts_shared.voice_presets import (
     NO_VOICE_PRESET_ID,
 )
-from omni_tts_shared.vieneu_codecs import NO_CODEC_ID, NO_CODEC_LABEL
 from omni_tts_ui_gradio import chatterbox_settings, f5_settings
-from omni_tts_shared.epub import EpubOptions
-from omni_tts_core.text.epub_reader import read_epub
-from omni_tts_core.chapter_music import ChapterMusicLibrary, preview_chapter_music
-
 
 restore_user_state()
 service = TtsService()
@@ -396,6 +400,13 @@ def generate_speech(
     epub_start=1, epub_end=0, epub_titles=True, epub_volumes=True, epub_mode="chapters",
     epub_title_pause=1.2, epub_chapter_pause=2.5, epub_scene_pause=1.2, epub_volume_pause=1.8,
     music_enabled=False, music_track_id=None, music_volume=30, music_between=True, music_after_title=False,
+    music_mode="fixed", music_theme=None, music_seed=0,
+    music_duration_mode="fit_pause",
+    title_break_mode=None, title_duration_mode="fit_pause", title_fade_in=.12, title_fade_out=.35,
+    chapter_break_mode=None, chapter_duration_mode="fit_pause", chapter_fade_in=.12, chapter_fade_out=.35,
+    music_preset_id=None,music_theme_ids=None,music_track_ids=None,music_excluded_ids=None,
+    content_skip_references=True,content_url_mode="skip",content_read_notes=True,content_han_mode="prefer_vietnamese",
+    content_frontmatter=True,content_appendices=True,content_technical=False,content_export=True,content_han_readings="",
 ):
     try:
         sources = _source_paths(source_files)
@@ -451,11 +462,27 @@ def generate_speech(
             output_srt=bool(output_srt),
             join_split_output_audio=bool(join_split_output_audio),
         )
+        request.epub_options.content = epub_content_options(content_skip_references,content_url_mode,content_read_notes,content_han_mode,
+            content_frontmatter,content_appendices,content_technical,content_export,content_han_readings)
         request.epub_options.music = request.epub_options.music.model_validate({
             "enabled": bool(music_enabled), "track_id": music_track_id,
             "volume_percent": int(music_volume), "between_chapters": bool(music_between),
             "after_title": bool(music_after_title),
+            "selection_mode": music_mode, "theme": music_theme, "random_seed": int(music_seed),
+            "duration_mode": music_duration_mode,
+            'preset_id':music_preset_id,'theme_ids':music_theme_ids or [],'track_ids':music_track_ids or [],
+            'excluded_track_ids':music_excluded_ids or [],
+            "track_overrides": ui_preferences().get("epub_options", {}).get("music", {}).get("track_overrides", {}),
         })
+        from omni_tts_shared.epub import EpubBreakOptions
+        for kind, mode, seconds, duration_mode, fade_in, fade_out in (
+            ('title', title_break_mode, epub_title_pause, title_duration_mode, title_fade_in, title_fade_out),
+            ('chapter', chapter_break_mode, epub_chapter_pause, chapter_duration_mode, chapter_fade_in, chapter_fade_out),
+        ):
+            if mode is not None:
+                request.epub_options.breaks[kind] = EpubBreakOptions(mode=mode,
+                    duration_ms=round(seconds*1000),duration_mode=duration_mode,
+                    fade_in_ms=round(fade_in*1000),fade_out_ms=round(fade_out*1000))
         _save_generation_preferences(
             {
                 "language": language,
@@ -634,17 +661,84 @@ def chapter_music_choices():
     return [(t.name, t.track_id) for t in ChapterMusicLibrary().list_tracks()]
 
 
-def chapter_music_note(track_id):
+def chapter_music_themes():
+    return [(f"{g['name']} ({g['count']} bản)", g['theme']) for g in ChapterMusicLibrary().list_themes()]
+
+
+def chapter_music_preset_choices():
+    from omni_tts_core.music_presets import MusicPresetStore
+    return [(p.name,p.preset_id) for p in MusicPresetStore().list_presets()]
+
+
+def music_selection_note(track_id,mode,theme,preset_id,themes,tracks,excluded):
+    if mode in ('fixed','random_theme'):return chapter_music_note(track_id,mode,theme,source_only=True)
+    from omni_tts_shared.epub import ChapterMusicOptions
+    try:
+        selector=ChapterMusicSelector(ChapterMusicOptions(selection_mode=mode,preset_id=preset_id,
+            theme_ids=themes or [],track_ids=tracks or [],excluded_track_ids=excluded or []))
+        return f'Random trong {len(selector.pool)} bản đã chọn, không tính trùng giữa các nhóm. Loại nghỉ/thời lượng/fade chỉnh theo từng vị trí.'
+    except OmniTtsError as exc:return str(exc)
+
+
+def chapter_music_note(track_id, selection_mode="fixed", theme=None, duration_mode="fit_pause", source_only=False):
     tracks = ChapterMusicLibrary().list_tracks()
     item = next((t for t in tracks if t.track_id == track_id), None)
-    note = "Tự cắt và fade vừa nhịp nghỉ; thời lượng audio và SRT giữ nguyên."
+    note = "Nguồn nhạc dùng chung; thời lượng và fade chỉnh riêng tại từng vị trí nghỉ." if source_only else music_duration_note(duration_mode)
+    if selection_mode == "random_theme":
+        pool = ChapterMusicLibrary().list_tracks(theme=theme) if theme else []
+        note += f"\n\nNhóm {theme or 'chưa chọn'}: {len(pool)} bản. Trộn hết nhóm trước khi lặp, giữ lượt trộn để tiếp tục tác vụ."
+        if pool:
+            note += "\n\n" + "; ".join(t.name for t in pool)
+        if any(t.provenance.get('generated_plan') == 'free' for t in pool):
+            note += "\n\nCó mẫu ElevenLabs Free: dùng cá nhân; chưa có quyền thương mại."
+        return note
+    if item:
+        note += f"\n\n{item.description or 'Chưa có mô tả.'}\n\nChủ đề: {', '.join(item.themes)}. Tag: {', '.join(item.tags)}."
     if item and item.provenance.get("generated_plan") == "free":
         note += " Mẫu ElevenLabs Free: dùng cá nhân; chưa có quyền thương mại."
     return note
 
 
-def preview_epub_music(track_id, duration_seconds, volume_percent):
-    return str(preview_chapter_music(track_id, duration_ms=round(duration_seconds * 1000), volume_percent=int(volume_percent)))
+def preview_epub_music(track_id, duration_seconds, volume_percent, selection_mode="fixed", theme=None, random_seed=0, duration_mode="fit_pause", fade_in_seconds=.12, fade_out_seconds=.35,
+                       preset_id=None,theme_ids=None,track_ids=None,excluded_track_ids=None):
+    import secrets
+
+    from omni_tts_shared.epub import ChapterMusicOptions
+    options = ChapterMusicOptions(track_id=track_id, selection_mode=selection_mode, theme=theme, random_seed=int(random_seed), duration_mode=duration_mode,
+        preset_id=preset_id,theme_ids=theme_ids or [],track_ids=track_ids or [],excluded_track_ids=excluded_track_ids or [])
+    track_id = ChapterMusicSelector(options, context=secrets.token_hex(8)).choose("preview").track_id
+    return str(preview_chapter_music(track_id, duration_ms=round(duration_seconds * 1000), volume_percent=int(volume_percent), duration_mode=duration_mode,
+        fade_in_ms=round(fade_in_seconds*1000),fade_out_ms=round(fade_out_seconds*1000)))
+
+
+def epub_break_updates(available, mode, duration_mode, seconds):
+    musical = mode == 'music'
+    full = musical and duration_mode == 'full_track'
+    audible = musical and (full or seconds > 0)
+    note = ('Theo độ dài bản nhạc; số giây không áp dụng, không cộng thêm khoảng lặng. SRT tự cập nhật.' if full
+            else 'Không chèn khoảng nghỉ.' if mode == 'none'
+            else 'Khoảng lặng theo số giây; không phát nhạc.' if not musical
+            else 'Nhạc cắt/fade vừa số giây; fade dài tự co theo nhịp ngắn.')
+    if not available:
+        note = 'Vị trí này bị tắt vì không đọc tên chương.'
+    return [gr.update(interactive=bool(available)), gr.update(interactive=bool(available and musical)),
+            gr.update(interactive=bool(available and mode != 'none' and not full)),
+            gr.update(interactive=bool(available and audible)), gr.update(interactive=bool(available and audible)),
+            gr.update(interactive=bool(available and audible)), note]
+
+
+def epub_music_source_updates(titles, title_kind, title_duration, title_seconds,
+                              chapter_kind, chapter_duration, chapter_seconds, selection):
+    active = ((titles and title_kind == 'music' and (title_duration == 'full_track' or title_seconds > 0))
+              or (chapter_kind == 'music' and (chapter_duration == 'full_track' or chapter_seconds > 0)))
+    return [gr.update(interactive=bool(active)), gr.update(interactive=bool(active and selection == 'fixed')),
+            gr.update(interactive=bool(active and selection == 'random_theme')),
+            gr.update(interactive=bool(active and selection == 'random_theme')),
+            gr.update(interactive=bool(active)), gr.update(interactive=bool(active)),
+            gr.update(interactive=bool(active and selection=='preset')),
+            gr.update(interactive=bool(active and selection=='random_selection')),
+            gr.update(interactive=bool(active and selection=='random_selection')),
+            gr.update(interactive=bool(active and selection=='random_selection'))]
 
 
 def import_epub_music(uploaded):
@@ -669,6 +763,39 @@ def preview_epub(source_files):
         return f"Không đọc được EPUB: {exc}"
 
 
+def epub_content_options(skip_references=True,url_mode="skip",read_notes=True,han_mode="prefer_vietnamese",
+                         frontmatter=True,appendices=True,technical=False,export=True,readings=""):
+    from omni_tts_shared.epub import EpubContentOptions
+    from omni_tts_core.text.epub_content import parse_han_readings
+
+    return EpubContentOptions(skip_references=bool(skip_references),url_mode=url_mode,read_notes=bool(read_notes),han_mode=han_mode,
+        include_frontmatter=bool(frontmatter),include_appendices=bool(appendices),include_technical_notes=bool(technical),
+        export_references=bool(export),han_readings=parse_han_readings(readings or ""))
+
+
+def preview_epub_content(source_files,chapter_start,chapter_end,chapter_index,*content_values):
+    from omni_tts_core.text.epub_content import prepare_epub, reading_summary, format_reading_changes, format_han_issues
+
+    try:
+        source = next((p for p in _source_paths(source_files) if p.suffix.lower() == ".epub"), None)
+        if source is None:
+            return "Hãy tải lên một EPUB trước.", "", "", ""
+        options = EpubOptions(chapter_start=int(chapter_start),chapter_end=int(chapter_end),content=epub_content_options(*content_values))
+        plan = prepare_epub(read_epub(source),options)
+        data = plan.chapter_preview(int(chapter_index),max_chars=30000)
+        if "error" in data:
+            return data["error"], "", "", ""
+        status = reading_summary(plan.summary) + "\n" + "\n".join(plan.warnings)
+        if plan.han_issues:
+            status += "\n" + format_han_issues(plan)
+        if data["truncated"]:
+            status += "\nBản xem trước giới hạn 30.000 ký tự mỗi cột; khi tạo sách dùng đầy đủ nội dung."
+        changes = format_reading_changes(data)
+        return status, data["reading_text"] or "Phần này không nằm trong bản đọc theo phạm vi / bộ lọc.", data["original_text"], changes or "Không có thay đổi."
+    except (ValueError,OmniTtsError,OSError) as exc:
+        return str(exc), "", "", ""
+
+
 def _first_uploaded_path(value) -> Path | None:
     if not value:
         return None
@@ -688,6 +815,7 @@ def _optional_path(value: str | None) -> Path | None:
 
 def _result_paths(result) -> list[Path]:
     paths: list[Path] = []
+    paths.extend(path for field in ("reading_text_path", "reading_report_path", "references_path") if (path := getattr(result,field,None)))
     if result.audio_path:
         paths.append(result.audio_path)
     paths.extend(result.item_audio_paths)

@@ -6,8 +6,10 @@ GUI callbacks so pages never reach back into MainWindow internals.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
+
+from PySide6.QtCore import QObject, Signal
 
 from omni_tts_core.app_controller import AppController
 from omni_tts_core.hardware_monitor import HardwareProbe
@@ -16,6 +18,12 @@ from omni_tts_core.ui_presenters.settings_state import GenerationSettings
 from omni_tts_ui_qt.preferences import QtPreferences
 
 SettingsProvider = Callable[[], GenerationSettings]
+
+
+class MusicEvents(QObject):
+    library_changed = Signal()
+    preset_applied = Signal(str)
+    selection_applied = Signal(object)
 
 
 @dataclass
@@ -30,3 +38,4 @@ class AppContext:
     # A page (the studio) registers a getter for the live generation settings so
     # the hardware chip/chart can reflect the active GPU-safety thresholds.
     register_settings_provider: Callable[[SettingsProvider], None]
+    music_events: MusicEvents | None = None

@@ -1,6 +1,35 @@
-# Colin TTS Local v0.6.1
+# Colin TTS Local v0.6.5
 
 App TTS local ưu tiên tiếng Việt, có lõi tách khỏi giao diện để sau này đổi Gradio sang CustomTkinter, PyQt6 hoặc giao diện khác mà không phải viết lại logic model.
+
+Phiên bản 0.6.5 thêm **lọc nội dung EPUB trước khi tạo giọng**: mặc định bỏ
+nguồn tham khảo và URL/DOI, giữ ghi chú giải thích, dùng nghĩa Việt đã có cạnh
+chữ Hán và cảnh báo chữ Hán còn lại. Có bản gốc/bản đọc/phần đã bỏ để so sánh,
+cách đọc chữ Hán riêng, TXT bản đọc, báo cáo JSON và nguồn MD cạnh audio.
+Qt, Tkinter, Web và MCP dùng chung `generation.epub.content`; SRT và cache
+theo đúng bản đọc sau lọc. Xem [lọc nội dung EPUB](docs/epub-content-filter.md).
+
+Phiên bản 0.6.4 thêm tab **Nhạc** trên thanh điều hướng Qt: tích nhiều nhóm chủ
+đề, thêm/bỏ từng bản, tìm kiếm, nghe thử, sửa mô tả/tag và lưu preset phối nhạc.
+Studio có thể random trong tập đang tích hoặc theo preset đã lưu. Bài thuộc
+nhiều nhóm chỉ tính một lần; bài đã bỏ tích không tham gia random. Tkinter,
+Web và MCP dùng chung quy tắc chọn nhạc và preset cục bộ.
+
+Phiên bản 0.6.3 gom tùy chọn thành **từng vị trí nghỉ EPUB**: không nghỉ,
+khoảng lặng hoặc nhạc; nhạc phát trọn hoặc theo số giây cố định, có fade-in/out
+riêng. Ô số giây bị khóa khi phát trọn; fade chỉ bật khi chọn nhạc; tắt đọc
+tiêu đề/quyển sẽ khóa nhịp tương ứng. Nhạc cố định/random và MCP dùng chung
+quy tắc `generation.epub.breaks`, tương thích thiết lập cũ.
+
+Phiên bản 0.6.2 thêm **random nhạc trong nhóm chủ đề** (ví dụ `tam-quoc`),
+trộn hết nhóm trước khi lặp, có lượt trộn để tiếp tục checkpoint ổn định. Thư viện
+có mô tả/tag/chủ đề trong `library.json` và `MUSIC_CATALOG.md`; GUI hiển thị mô tả,
+MCP lọc nhóm, cập nhật metadata, xem trước kế hoạch và cho agent chỉ định nhạc
+từng nhịp bằng `track_overrides`. Xem [thư viện nhạc và random](docs/music-library.md).
+
+Mục **Độ dài nhạc** cho chọn **Số giây cố định** hoặc **Phát trọn bản nhạc**.
+Khi phát trọn, mỗi nhịp có nhạc dùng độ dài thực của bài đã
+chọn và SRT tự dịch theo cùng PCM; dùng được với cả bản cố định và random.
 
 Phiên bản 0.6.1 thêm **nhạc đệm trong nhịp nghỉ EPUB**: thư viện riêng có nghe
 thử/nhập nhạc, chọn âm lượng và vị trí giữa chương hoặc sau tên chương. Nhạc tự
@@ -46,11 +75,18 @@ như cũ. VIVOS x-low còn cho chọn đủ 65 speaker. VieNeu v3 Turbo cung c�
    chỉnh nhịp…**; Web tải sách vào **File nguồn** rồi mở phần **Đọc sách EPUB**.
 2. Xem trước nội dung, chọn khoảng chương (vị trí bắt đầu từ 1; kết thúc 0 là
    hết sách), chọn giọng/model thường dùng và bật **Xuất kèm SRT** nếu cần phụ đề.
-3. Đặt **Nghỉ sau tên chương** và **Nghỉ giữa hai chương** riêng biệt. Mặc định
-   1,2 giây và 2,5 giây; nghỉ đoạn, chuyển cảnh và tên quyển có thiết lập riêng.
-4. Muốn có nhạc, bật **Nhạc đệm trong khoảng nghỉ**, chọn bản nhạc, âm lượng và
-   vị trí phát. **Nghe thử nhạc** phát đoạn đã trim/fade vừa nhịp hiện tại.
-5. Tự thêm MP3/WAV/FLAC/OGG/M4A bằng **Thêm nhạc…**. Chỉ chép file vào
+   Trong **Nội dung đưa vào giọng đọc**, kiểm tra nguồn, URL, ghi chú và chữ Hán;
+   xem các tab **Văn bản sẽ đọc / Bản gốc / Đã bỏ / đã đổi / Chữ Hán còn lại**.
+3. Chọn **Loại nghỉ** ở từng vị trí sau tên chương/giữa hai chương: không nghỉ,
+   khoảng lặng hoặc nhạc. Nhạc có số giây cố định/phát trọn và fade riêng; các
+   ô không áp dụng tự khóa. Chuyển cảnh và tên quyển có thiết lập riêng.
+4. Muốn phối nhiều nhóm, vào tab **Nhạc** sau tab **Giọng**, tích các chủ đề và
+   thêm/bỏ từng bài. Đặt tên, **Lưu preset**, rồi **Dùng preset đã lưu trong
+   Studio**. Có thể **Dùng tập đang tích trong Studio** mà không lưu preset.
+5. Ở **Nguồn nhạc cho các nhịp nghỉ**, chọn preset hoặc tập đã tích, lượt trộn
+   và âm lượng. Đặt **Loại nghỉ → Nhạc** tại vị trí muốn phát; **Nghe thử nhịp
+   này** dùng đúng độ dài/fade của vị trí đó. Preset chỉ quản lý tập bài.
+6. Tự thêm MP3/WAV/FLAC/OGG/M4A bằng **Thêm nhạc…**. Chỉ chép file vào
    `music_library/` **chưa làm ứng dụng tự nhận**: nút này đăng ký vào catalog,
    giữ file gốc, lấy tối đa 30 giây, trim im lặng và cân mức âm.
 
@@ -58,7 +94,8 @@ EPUB xuất từng chương hoặc một bản ghép WAV/MP3; SRT cùng timeline
 kể cả các khoảng nghỉ có nhạc. Nên thử 1–2 chương trước khi chạy cả sách.
 Khi mở lại cùng nguồn và thiết lập, chương đã hoàn tất được dùng lại từ cache.
 
-`music_library/` là thư viện riêng trên từng máy, gồm audio và `library.json`.
+`music_library/` là thư viện riêng trên từng máy, gồm audio, `library.json`,
+`MUSIC_CATALOG.md` và các preset trong `presets.json`.
 Giữ/copy cả thư mục này khi chuyển máy; các bản nhạc riêng và API key không được
 đưa lên Git. Máy mới clone repo cần nhập nhạc của mình hoặc chuyển thư viện riêng
 sang. Mở lại Colin và kết nối MCP sau khi cập nhật để nhận tính năng mới.

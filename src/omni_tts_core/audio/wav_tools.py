@@ -62,6 +62,7 @@ def concatenate_segments_with_pauses(
     pauses_ms: list[int],
     crossfade_ms: int = 0,
     *, pause_audio_segments: list[np.ndarray | None] | None = None,
+    pause_sample_counts: list[int] | None = None,
 ) -> np.ndarray:
     """Join segments with one explicit pause for each adjacent pair."""
     if not segments:
@@ -73,19 +74,24 @@ def concatenate_segments_with_pauses(
     if pause_audio_segments is not None and len(pause_audio_segments) != len(pauses_ms):
         raise ValueError("Số đoạn nhạc nghỉ không khớp với số khoảng nghỉ.")
     normalized = [max(0, int(value)) for value in pauses_ms]
-    if not any(normalized):
+    if pause_sample_counts is not None:
+        if len(pause_sample_counts) != len(pauses_ms) or any(n < 0 for n in pause_sample_counts):
+            raise ValueError("Số mẫu PCM của nhịp nghỉ không hợp lệ.")
+        samples = [int(n) for n in pause_sample_counts]
+    else:
+        samples = [int(sample_rate * ms / 1000) for ms in normalized]
+    if not any(samples):
         return concatenate_segments(segments, sample_rate, 0, crossfade_ms)
 
     mono = [_to_mono_float32(segment) for segment in segments]
     pieces: list[np.ndarray] = []
     for index, segment in enumerate(mono):
         pieces.append(segment)
-        if index >= len(normalized):
+        if index >= len(samples):
             continue
-        pause_ms = normalized[index]
-        if pause_ms:
+        expected_samples = samples[index]
+        if expected_samples:
             pause = pause_audio_segments[index] if pause_audio_segments is not None else None
-            expected_samples = int(sample_rate * pause_ms / 1000)
             if pause is None:
                 pause = np.zeros(expected_samples, dtype=np.float32)
             else:

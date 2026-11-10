@@ -107,6 +107,16 @@ class DeclarativeProviderGroup(_Group):
             self._widgets[setting.key] = widget
             self.add(setting.key, f"{setting.label}:", widget)
 
+    def set_locked(self, keys, tooltip_text: str) -> None:
+        """Disable settings another feature owns (Nhịp đọc); values are kept."""
+        locked = set(keys)
+        for setting in self._settings:
+            widget = self._widgets[setting.key]
+            widget.setEnabled(setting.key not in locked)
+            widget.setToolTip(
+                f"{tooltip_text}\n\n{setting.tooltip}" if setting.key in locked else setting.tooltip
+            )
+
     def values(self) -> dict[str, bool | int | float | str]:
         result: dict[str, bool | int | float | str] = {}
         for setting in self._settings:

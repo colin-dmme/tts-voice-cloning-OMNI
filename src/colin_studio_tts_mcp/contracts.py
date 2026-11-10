@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from omni_tts_shared.epub import EpubOptions
+from omni_tts_shared.narrative_pacing import NarrativePacingOptions
+from omni_tts_shared.schemas import RemoteComputeTarget, RuntimeTarget
 
 from omni_tts_core.gpu_safety_preferences import GPU_SAFETY_FIELDS
 from omni_tts_core.ui_presenters.settings_state import GenerationSettings
@@ -75,7 +77,8 @@ class GenerationOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     language: str = Field(default="vi", min_length=2, max_length=16)
-    runtime_target: Literal["auto", "cpu", "cuda", "remote"] = "auto"
+    runtime_target: RuntimeTarget = "auto"
+    remote_compute: RemoteComputeTarget | None = None
     speed: float = Field(default=1.0, ge=0.5, le=1.8)
     pitch_shift: float = Field(default=0.0, ge=-12.0, le=12.0)
     emotion: str = Field(default="natural", max_length=100)
@@ -83,11 +86,21 @@ class GenerationOptions(BaseModel):
     provider_options: dict[str, Any] = Field(default_factory=dict)
     advanced: dict[str, Any] = Field(default_factory=dict)
     epub: EpubOptions = Field(default_factory=EpubOptions)
+    # Nhịp đọc: tiered pauses (+ music bridges for merged TXT/SRT). scope="full"
+    # lets it own every pause layer; see describe_reading_rhythm.
+    pacing: NarrativePacingOptions = Field(default_factory=NarrativePacingOptions)
+
+    @model_validator(mode="after")
+    def require_remote_runtime_for_compute_target(self):
+        if self.remote_compute is not None and self.runtime_target != "remote":
+            raise ValueError("remote_compute yêu cầu runtime_target=remote.")
+        return self
 
 
 class TextGenerationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
     text: str = Field(min_length=1, max_length=500_000)
     model_id: str = Field(min_length=1, max_length=200)
     voice: VoiceSelection = Field(default_factory=VoiceSelection)
@@ -117,6 +130,7 @@ class TextGenerationInput(BaseModel):
 class FileGenerationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
     source_files: list[str] = Field(min_length=1, max_length=100)
     model_id: str = Field(min_length=1, max_length=200)
     voice: VoiceSelection = Field(default_factory=VoiceSelection)
@@ -162,12 +176,13 @@ class FileGenerationInput(BaseModel):
 
 
 _PROTECTED_SETTINGS = {
-    "epub_options",
+    "epub_options", "narrative_pacing",
     "model_id", "language", "voice_source_mode", "voice_profile_id",
     "reference_audio_path", "reference_text", "speaker_id", "designed_voice_id",
     "output_dir", "output_stem", "append_stem_suffix", "overwrite", "split_output",
     "output_audio_format", "mp3_bitrate_kbps", "output_srt",
     "join_split_output_audio", "runtime_target", "speed", "pitch_shift", "emotion",
+    "remote_execution_kind", "remote_worker_profile_id", "remote_execution_backend",
     "max_chunk_chars", "provider_options",
 }
 _SETTING_FIELDS = {item.name for item in fields(GenerationSettings)}
@@ -200,6 +215,13 @@ def _to_settings(
         )
     # Per-request advanced values deliberately take precedence over shared defaults.
     values.update(generation.advanced)
+    target = generation.remote_compute
+    if target is not None:
+        values.update(
+            remote_execution_kind=target.kind,
+            remote_worker_profile_id=target.worker_profile_id,
+            remote_execution_backend=target.backend,
+        )
     values.update(
         model_id=model_id.strip(),
         language=generation.language,
@@ -211,6 +233,7 @@ def _to_settings(
         max_chunk_chars=generation.max_chunk_chars,
         provider_options=dict(generation.provider_options),
         epub_options=generation.epub.model_dump(),
+        narrative_pacing=generation.pacing.model_dump(),
         output_dir=Path(output.directory) if output.directory else None,
         output_stem=output.stem,
         append_stem_suffix=output.append_voice_duration_suffix,

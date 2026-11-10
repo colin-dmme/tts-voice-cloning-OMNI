@@ -222,6 +222,8 @@ class PresetOnnxSubprocessEngine(BaseTtsEngine):
                 "language": requests[0].language,
                 "speed": requests[0].speed,
                 "options": options,
+                # Nhịp đọc pause parameters (Kokoro: sentence_pause/clause_pause).
+                "pause_options": dict(requests[0].pause_options or {}),
                 "chunks": chunks,
             }
             reported: set[int] = set()

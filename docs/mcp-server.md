@@ -94,10 +94,46 @@ Desktop Coworker sẽ công bố tool dưới dạng `tts__health`,
 | `delete_chapter_music_preset` | Xóa preset, giữ nguyên file nhạc |
 | `resolve_chapter_music_selection` | Xem tập bài thực sau hợp nhóm/bài, bỏ trùng và loại trừ |
 | `plan_epub_music` | Xem trước từng nhịp, random theo nhóm/tập chọn/preset hoặc agent chỉ định |
+| `plan_narrative_pacing` | Xem trước vị trí theme/nhạc chuyển theo cue SRT, không render |
+| `pace_existing_audio` | Xếp nhịp lại audio + SRT đã có: nghỉ theo tầng, nhạc giao thoa, SRT/chapters mới |
+| `describe_reading_rhythm` | Nhịp đọc cho một model: mỗi tầng nghỉ do model hay app làm, bị giới hạn hay không áp dụng, kèm lý do và tùy chọn riêng (giống nhãn trong Qt Studio). `get_generation_contract` cũng có khối `rhythm`; kết quả job có `rhythm_plan` |
 | `get_job` | Đọc trạng thái, tiến độ, lỗi và kết quả |
 | `list_jobs` | Đọc lịch sử job gần nhất |
 | `cancel_job` | Hủy an toàn job queued/running |
 | `retry_job` | Tạo job mới từ payload của job đã kết thúc |
+| `colab_status` | Xem tài khoản, quyền Google, runtime và hàng đợi Colab tự động |
+| `colab_configure` | Lưu tùy chọn Colab và import tệp OAuth Desktop |
+| `colab_auth_start` | Tạo liên kết Google cho lần cấp quyền và chờ callback |
+| `colab_auth_status` | Xem kết quả cấp quyền Google |
+| `colab_control` | Tạm dừng, tiếp tục, hủy job hoặc trả runtime do Studio cấp |
+| `cpu_worker_status` | Xem máy đã ghép, model đang công bố, trạng thái và hàng đợi CPU |
+| `cpu_worker_control` | Ngừng nhận việc, tiếp tục, dừng máy hoặc bật tắt tham gia nhóm chia tải |
+| `cpu_job_control` | Tạm dừng, tiếp tục hoặc hủy job CPU |
+
+Khi bật Colab tự động, `generation.runtime_target="remote"` dùng hàng đợi chung
+với Qt trong package [colin_colab_remote](C:/Coder/tts-voice-cloning-OMNI/src/colin_colab_remote/README.md).
+Hai tool `start_*` nhận `idempotency_key` tùy chọn cho job Colab managed. Giữ
+cùng khóa và yêu cầu để tra lại job sau khi mất phản hồi. Job có tiền tố `colab-`.
+Trạng thái `waiting` giữ tiến độ và nêu `error_code` cần xử lý, dùng
+`colab_control(action="resume", job_id=...)` hoặc `retry_job` để tiếp tục job đó.
+Runtime và audio có trạng thái riêng, xem `colab_status` để xác nhận trả máy.
+
+Với [CPU máy khác](C:/Coder/tts-voice-cloning-OMNI/src/colin_remote_compute/README.md), lấy `worker_profile_id` và model từ `cpu_worker_status`, rồi truyền lựa chọn đích trong `generation` của tool `start_*`.
+
+```json
+{
+  "runtime_target": "remote",
+  "remote_compute": {
+    "kind": "existing_worker",
+    "worker_profile_id": "<profile ID của máy đã ghép>",
+    "backend": "cpu"
+  }
+}
+```
+
+Job CPU có tiền tố `cpu-job-`. Dùng `get_job` để theo dõi và `cpu_job_control(action="resume", job_id=...)` để tiếp tục sau khi xử lý lỗi. Có thể truyền `idempotency_key` vào tool `start_*` để tra lại yêu cầu sau khi mất kết nối.
+
+Để chia một job qua nhiều máy, gửi `generation.remote_compute={"kind":"cpu_pool","backend":"cpu"}` với `generation.runtime_target="remote"`. Tab **Máy CPU** lưu các máy tham gia và giới hạn đồng thời. `cpu_worker_status` trả `pool_enabled` cho mỗi máy và `cpu_pool_limit` cho nhóm. `cpu_worker_control` dùng `include_pool` hoặc `exclude_pool` để thay đổi danh sách tham gia.
 
 Luồng khuyến nghị:
 

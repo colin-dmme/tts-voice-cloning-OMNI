@@ -36,7 +36,12 @@ class OmniVoiceEngine(BaseTtsEngine):
         if language_name:
             kwargs["language"] = language_name
 
-        generation_config = _build_generation_config(request.num_step)
+        # Nhịp đọc "Giữ khoảng lặng dài": skip OmniVoice's silence removal (it
+        # clamps every pause inside a chunk to about 1 s) and tidy only stalls.
+        keep_silence = (request.pause_options or {}).get("postprocess_output") is False
+        generation_config = _build_generation_config(
+            request.num_step, postprocess_output=False if keep_silence else None
+        )
         if generation_config is not None:
             kwargs["generation_config"] = generation_config
 
@@ -74,7 +79,12 @@ class OmniVoiceEngine(BaseTtsEngine):
         except Exception as exc:
             raise GenerationError("OmniVoice không sinh được audio cho đoạn hiện tại.") from exc
         check_cancel(request.cancel_event)
-        return TtsEngineResult(audio=_first_audio_array(audio), sample_rate=self.sample_rate)
+        wave = _first_audio_array(audio)
+        if keep_silence:
+            from omni_tts_core.rhythm.silence_tools import tidy_silences
+
+            wave = tidy_silences(wave, self.sample_rate)
+        return TtsEngineResult(audio=wave, sample_rate=self.sample_rate)
 
     def close(self) -> None:
         """Drop the in-process model(s) and release their VRAM.
@@ -185,20 +195,27 @@ def _voice_clone_prompt_cls() -> Any | None:
         return None
 
 
-def _build_generation_config(num_step: int | None) -> Any | None:
-    """Build an OmniVoiceGenerationConfig overriding the diffusion step count.
+def _build_generation_config(
+    num_step: int | None, *, postprocess_output: bool | None = None
+) -> Any | None:
+    """Build an OmniVoiceGenerationConfig overriding step count / post-processing.
 
-    Returns None (model defaults) when num_step is unset or the config class is
-    unavailable, so a missing value never blocks generation.
+    Returns None (model defaults) when nothing is overridden or the config class
+    is unavailable, so a missing value never blocks generation.
     """
-    if not num_step:
+    overrides: dict[str, Any] = {}
+    if num_step:
+        overrides["num_step"] = int(num_step)
+    if postprocess_output is not None:
+        overrides["postprocess_output"] = bool(postprocess_output)
+    if not overrides:
         return None
     try:
         from omnivoice import OmniVoiceGenerationConfig
     except Exception:
         return None
     try:
-        return OmniVoiceGenerationConfig(num_step=int(num_step))
+        return OmniVoiceGenerationConfig(**overrides)
     except Exception:
         return None
 

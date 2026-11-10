@@ -79,6 +79,7 @@ def _synthesize(payload: dict) -> None:
                         fallback_sentence_pause_ms=max(
                             0, int(payload.get("sentence_pause_ms") or 0)
                         ),
+                        trim_edges=bool(payload.get("trim_split_edges")),
                     )
                 else:
                     voice.synthesize_wav(
@@ -101,8 +102,14 @@ def _synthesize_segments(
     synthesis_config,
     *,
     fallback_sentence_pause_ms: int,
+    trim_edges: bool = False,
 ) -> None:
-    """Write Piper fragments and exact PCM silence into one valid WAV."""
+    """Write Piper fragments and exact PCM silence into one valid WAV.
+
+    ``trim_edges`` (Nhịp đọc): each fragment loses the silence Piper leaves at
+    its edges where it meets another fragment, so ``pause_after_ms`` becomes
+    the total pause heard (Piper adds ~0.45 s around a split otherwise).
+    """
     first_audio = True
     for segment_index, segment in enumerate(segments):
         audio_chunks = list(
@@ -111,6 +118,20 @@ def _synthesize_segments(
                 syn_config=synthesis_config,
             )
         )
+        if trim_edges and audio_chunks:
+            first = audio_chunks[0]
+            if first_audio:
+                wav_file.setframerate(first.sample_rate)
+                wav_file.setsampwidth(first.sample_width)
+                wav_file.setnchannels(first.sample_channels)
+                first_audio = False
+            wav_file.writeframes(_trimmed_segment(
+                audio_chunks, fallback_sentence_pause_ms,
+                lead=segment_index > 0, tail=segment_index < len(segments) - 1,
+            ))
+            if segment_index < len(segments) - 1:
+                _write_silence(wav_file, audio_chunks[-1], max(0, int(segment.get("pause_after_ms") or 0)))
+            continue
         for audio_index, audio_chunk in enumerate(audio_chunks):
             if first_audio:
                 wav_file.setframerate(audio_chunk.sample_rate)
@@ -130,6 +151,39 @@ def _synthesize_segments(
                 audio_chunks[-1],
                 max(0, int(segment.get("pause_after_ms") or 0)),
             )
+
+
+def _trimmed_segment(audio_chunks, fallback_pause_ms: int, *, lead: bool, tail: bool) -> bytes:
+    import numpy as np
+
+    first = audio_chunks[0]
+    channels = first.sample_channels
+    gap = np.zeros(int(first.sample_rate * fallback_pause_ms / 1000) * channels, dtype=np.int16)
+    parts = []
+    for index, chunk in enumerate(audio_chunks):
+        parts.append(np.frombuffer(chunk.audio_int16_bytes, dtype=np.int16))
+        if index < len(audio_chunks) - 1 and fallback_pause_ms > 0:
+            parts.append(gap)
+    samples = np.concatenate(parts)
+    start, end = _speech_bounds(samples, first.sample_rate * channels)
+    return samples[start if lead else 0:end if tail else len(samples)].tobytes()
+
+
+def _speech_bounds(samples, rate: int, threshold_db: float = -45.0, keep: float = 0.02) -> tuple[int, int]:
+    """First/last sample of speech (int16), keeping a few ms of air."""
+    import numpy as np
+
+    hop = max(1, int(rate * 0.005))
+    usable = len(samples) // hop * hop
+    if not usable:
+        return 0, len(samples)
+    frames = samples[:usable].astype(np.float64).reshape(-1, hop) / 32768.0
+    level = 20 * np.log10(np.sqrt((frames ** 2).mean(axis=1)) + 1e-9)
+    loud = np.flatnonzero(level >= threshold_db)
+    if not loud.size:
+        return 0, len(samples)
+    margin = int(rate * keep)
+    return max(0, loud[0] * hop - margin), min(len(samples), (loud[-1] + 1) * hop + margin)
 
 
 def _write_silence(wav_file, audio_chunk, pause_ms: int) -> None:

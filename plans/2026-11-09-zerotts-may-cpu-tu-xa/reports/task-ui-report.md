@@ -1,0 +1,9 @@
+# Studio Task 1 · CPU máy khác
+
+- Contract giữ `runtime_target=remote`, thêm `RemoteComputeTarget` tùy chọn và ba field phẳng trong `GenerationSettings`. Qt, MCP, history và user state giữ đúng profile. Khôi phục bản sao cũ xóa route thiếu trong bản sao để dùng đúng hành vi legacy.
+- Qt thêm lựa chọn chung cho ZeroTTS Official, Piper ONNX, VieNeu v3 Turbo và selector CPU riêng. Kiểm tra kết nối đối chiếu quyền thiết bị, desired/observed state, heartbeat và capability CPU. Hồ sơ đã mất vẫn hiện để chọn lại.
+- Bảng quản lý dùng mã inspect trước khi cấp quyền, ghi hồ sơ broker trên máy chính, hiển thị hai trạng thái điều khiển, hỗ trợ pause, resume, stop và revoke. Có thể chọn lại hồ sơ từ danh sách nếu phản hồi ghép nối bị gián đoạn. Dùng broker đã cấu hình.
+- File sửa theo ownership trong `task-ui-brief.md`, thêm `src/colin_remote_compute/ui/pc_devices_dialog.py` và `tests/test_remote_cpu_settings.py`, cập nhật kỳ vọng Piper trong `tests/test_control_policy.py`. `contracts.py`, `schemas.py`, `settings_state.py`, `settings_panel.py`, `user_state.py` có hunks narrative pacing từ trước.
+- RED `python -m pytest -q tests/test_remote_cpu_settings.py` → 9 lỗi cần feature, 2 pass. Các case bổ sung lần lượt đỏ ở restore combo (`auto`), dialog chưa có và restore backup cũ kế thừa `pc-old`.
+- GREEN `python -m pytest -q tests/test_remote_cpu_settings.py tests/test_control_policy.py tests/test_qt_input_behavior.py tests/test_higgs_remote.py tests/test_ui_presenters.py tests/test_user_state.py tests/test_colab_remote_compatibility.py tests/test_colin_studio_tts_mcp.py --tb=short` → **96 passed**. Qt chạy offscreen với broker giả lập.
+- Self-review: selector không dùng GPU/model local để xác định khả năng PC; profile PC tách khỏi lựa chọn Colab chung; approval và revoke dùng đúng ID; hiển thị trạng thái đã quan sát riêng với lệnh vừa gửi. Pilot thật và full suite thuộc bước tích hợp.

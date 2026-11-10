@@ -135,10 +135,21 @@ class McpProtocolTests(unittest.IsolatedAsyncioTestCase):
                     'save_chapter_music_preset',
                     'delete_chapter_music_preset',
                     'resolve_chapter_music_selection',
+                    "plan_narrative_pacing",
+                    "pace_existing_audio",
+                    "describe_reading_rhythm",
                     "get_job",
                     "list_jobs",
                     "cancel_job",
                     "retry_job",
+                    "colab_status",
+                    "cpu_worker_status",
+                    "cpu_worker_control",
+                    "cpu_job_control",
+                    "colab_configure",
+                    "colab_control",
+                    "colab_auth_start",
+                    "colab_auth_status",
                 },
             )
             result = await client.call_tool("health", {})
@@ -185,6 +196,17 @@ class McpProtocolTests(unittest.IsolatedAsyncioTestCase):
                 "get_generation_contract", {"model_id": "zerotts_202m_official"}
             )
             zero_data = zerotts_contract.structured_content
+            rhythm = zero_data["rhythm"]
+            self.assertEqual(rhythm["scope"], "full")
+            self.assertIn("segment_gap_seconds", rhythm["locked_provider_settings"])
+            kokoro = await client.call_tool(
+                "describe_reading_rhythm",
+                {"model_id": "kokoro_82m_v1_timestamped_onnx", "output_mode": "split"},
+            )
+            layers = {item["layer"]: item for item in kokoro.structured_content["layers"]}
+            self.assertEqual(layers["comma"]["state"], "model")
+            self.assertEqual(layers["paragraph"]["state"], "not_applicable")
+            self.assertEqual(kokoro.structured_content["switches"][0]["key"], "kokoro_pause_mode")
             self.assertEqual(zero_data["provider"], "zerotts")
             self.assertEqual(
                 zero_data["form"]["default_fixed_voice_id"], "maichi"

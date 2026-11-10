@@ -36,6 +36,7 @@ omni-tts-gradio = "omni_tts_ui_gradio.main:main"
 omni-tts-tkinter = "omni_tts_ui_tkinter.main:main"
 omni-tts-qt = "omni_tts_ui_qt.main:main"
 colin-studio-tts-mcp = "colin_studio_tts_mcp.server:main"
+colin-colab-remote = "colin_colab_remote.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -50,6 +51,8 @@ packages = [
     "src/omni_tts_ui_tkinter",
     "src/omni_tts_ui_qt",
     "src/colin_studio_tts_mcp",
+    "src/colin_colab_remote",
+    "src/colin_remote_compute",
 ]
 
 [tool.pytest.ini_options]

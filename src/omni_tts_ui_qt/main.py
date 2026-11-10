@@ -29,6 +29,7 @@ from omni_tts_ui_qt.pages.music_page import MusicPage
 from omni_tts_ui_qt.pages.pronunciation_page import PronunciationPage
 from omni_tts_ui_qt.pages.studio_page import StudioPage
 from omni_tts_ui_qt.pages.voices_page import VoicesPage
+from colin_remote_compute.ui.pc_workers_page import pc_workers_page
 from omni_tts_ui_qt.preferences import QtPreferences
 from omni_tts_ui_qt.theme import apply_theme
 from omni_tts_ui_qt.widgets.wheel_guard import install_parameter_wheel_guard
@@ -42,6 +43,7 @@ def _page_factories():
         ("voices", "Giọng", "🗣", VoicesPage),
         ("music", "Nhạc", "🎵", MusicPage),
         ("ai_api", "AI / API", "✨", AiApiPage),
+        ("pc_workers", "Máy CPU", "🖥", pc_workers_page),
         ("license", "Bản quyền", "🔑", LicensePage),
         ("contact", "Liên hệ", "✉", ContactPage),
     ]

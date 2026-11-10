@@ -61,6 +61,13 @@ như cũ. VIVOS x-low còn cho chọn đủ 65 speaker. VieNeu v3 Turbo cung c�
 3.6.4 có đủ 23 giọng 48 kHz và clone Profile trong hai chế độ tách biệt. Xem
 [quản lý giọng cố định](docs/fixed-voice-packages.md).
 
+**Nhịp kể chuyện & nhạc chuyển** (TXT/SRT ghép một file): thay khoảng nghỉ
+đều nhau bằng các tầng nghỉ (nối ý, đoạn thường, sau câu hỏi, chuyển ý), kéo
+dài riêng nghỉ cuối câu và chèn nhạc chuyển fade chồng lên giọng ở các phần lớn.
+Hook đầu để trơn; theme series vào ở câu giới thiệu. Qt có mục **Nhịp kể
+chuyện & nhạc chuyển**; MCP dùng `generation.pacing`, `plan_narrative_pacing`
+và `pace_existing_audio` (áp cho file đã tạo). Xem [nhịp kể chuyện](docs/narrative-pacing.md).
+
 ## Mục tiêu thiết kế
 
 - Model nằm trong thư mục dự án tại `models/`.

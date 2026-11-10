@@ -8,7 +8,7 @@ import sys
 from dataclasses import asdict
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import soundfile as sf
 from mcp.server import MCPServer
@@ -19,6 +19,7 @@ from omni_tts_core.chapter_music import (
 )
 from omni_tts_core.text.epub_reader import read_epub
 from omni_tts_shared.epub import ChapterMusicOptions, EpubOptions, MusicDurationMode
+from omni_tts_shared.narrative_pacing import NarrativePacingOptions
 
 from . import __version__
 from .contracts import (
@@ -40,6 +41,10 @@ mcp = MCPServer(
     ),
 )
 runtime = McpRuntime()
+from colin_colab_remote.mcp_tools import register_tools as register_colab_tools
+register_colab_tools(mcp)
+from colin_remote_compute.mcp_tools import register_tools as register_cpu_tools
+register_cpu_tools(mcp)
 
 
 @mcp.tool()
@@ -108,7 +113,44 @@ def get_generation_contract(model_id: str) -> dict[str, Any]:
         "epub_options_schema": EpubOptions.model_json_schema(),
         "epub_defaults": EpubOptions().model_dump(),
         "epub_note": "Gửi generation.epub trong start_file_generation. Khoảng nghỉ chèn ở audio, SRT dùng cùng timeline; output.mode tách đoạn không áp dụng cho EPUB.",
+        "pacing_options_schema": NarrativePacingOptions.model_json_schema(),
+        "pacing_note": (
+            "generation.pacing = Nhịp đọc. enabled=true; scope='pacing_only' giữ ngắt nghỉ cũ và chỉ giãn "
+            "thêm, scope='full' để Nhịp đọc quản lý mọi tầng (mỗi tầng đúng một bên làm). Giá trị là tổng "
+            "khoảng lặng nghe thấy (ms); layer_ranges={tầng:[min,max]} cho dao động. model_switches cho tùy "
+            "chọn riêng của model (xem rhythm.switches). TXT/MD/SRT ghép: đủ tầng và nhạc chuyển; xuất tách: "
+            "chỉ tầng trong câu; EPUB: tầng trong câu và giữa đoạn, chương/cảnh/nhạc chương do generation.epub "
+            "quản lý. Hook đầu luôn để trơn. Dùng describe_reading_rhythm để biết tầng nào model làm, tầng nào "
+            "app làm hoặc bị giới hạn; plan_narrative_pacing để xem trước vị trí nhạc."
+        ),
+        "rhythm": _rhythm_view(model_id, NarrativePacingOptions(enabled=True, scope="full")).as_dict(),
     }
+
+
+def _rhythm_view(model_id: str, pacing: NarrativePacingOptions, **context: Any):
+    from omni_tts_core.ui_presenters.rhythm_presenter import rhythm_view
+    spec = runtime.controller.service.registry.get(model_id)
+    return rhythm_view(pacing, spec, **context)
+
+
+@mcp.tool()
+def describe_reading_rhythm(
+    model_id: str,
+    pacing: NarrativePacingOptions | None = None,
+    output_mode: Literal["merged", "split"] = "merged",
+    source_kind: Literal["text", "epub"] = "text",
+    chunk_join_mode: Literal["auto", "crossfade", "direct", "silence"] = "auto",
+    runtime_target: str | None = None,
+) -> dict[str, Any]:
+    """Nhịp đọc cho một model: mỗi tầng nghỉ do ai làm và vì sao (giống nhãn trong Qt Studio).
+
+    state: model (thư viện/token của model), app (app cắt câu hoặc giãn lặng), model_app_topup (model
+    có mức riêng, app chỉ bù), limited (chỉ làm được một phần, xem reason), not_applicable, off.
+    Không có pacing thì xem với Nhịp đọc bật, phạm vi 'full'. Gọi trước khi gửi generation.pacing để
+    chỉ chỉnh những tầng model/app thực sự làm được."""
+    options = pacing or NarrativePacingOptions(enabled=True, scope="full")
+    return _rhythm_view(model_id, options, output_mode=output_mode, source_kind=source_kind,
+                        chunk_join_mode=chunk_join_mode, runtime_target=runtime_target).as_dict()
 
 
 @mcp.tool()
@@ -233,6 +275,55 @@ def plan_epub_music(source_file: str, epub: EpubOptions | None = None) -> dict[s
     if path.stat().st_size > 20 * 1024 * 1024:
         raise ValueError("EPUB vượt giới hạn 20 MB của MCP.")
     return build_epub_music_plan(read_epub(path), epub or EpubOptions(), hashlib.sha256(path.read_bytes()).hexdigest())
+
+
+def _absolute_file(value: str, suffixes: set[str], label: str) -> Path:
+    path = Path(value)
+    if not path.is_absolute() or not path.is_file() or path.suffix.lower() not in suffixes:
+        raise ValueError(f"{label} phải là đường dẫn tuyệt đối tới file {'/'.join(sorted(suffixes))} có sẵn.")
+    return path
+
+
+@mcp.tool()
+def plan_narrative_pacing(srt_file: str, pacing: NarrativePacingOptions | None = None,
+                          language: str = "vi") -> dict[str, Any]:
+    """Xem trước cấu trúc nhịp theo các cue SRT (mỗi cue coi là một đoạn): theme, nhạc chuyển ngắn/dài và chỗ
+    lặng dài khi chuyển mục; không đọc audio, không render.
+
+    Muốn tự đặt theo nội dung: pacing.music.bridge_before_units (nhạc), pacing.music.major_before_units (nhạc
+    dài) và pacing.section_before_units
+    (lặng chuyển mục), số đoạn bắt đầu từ 2."""
+    from omni_tts_core.narrative_pacing.existing_output_repacer import read_srt_units
+    from omni_tts_core.narrative_pacing.section_planner import plan_structure
+    units = read_srt_units(_absolute_file(srt_file, {".srt"}, "srt_file"))
+    options = pacing or NarrativePacingOptions()
+    plan = plan_structure(units, options, language)
+    entries = ([("theme", plan.music.intro_before)] if plan.music.intro_before is not None else []) + [
+        ("bridge_long" if b in plan.music.majors_before else "bridge_short", b)
+        for b in plan.music.bridges_before] if options.music.enabled else []
+    entries += [("section", b) for b in plan.sections]
+    return {"unit_count": len(units), "music_enabled": options.music.enabled, "entries": [
+        {"kind": kind, "before_unit": b + 1, "at_seconds": units[b].start, "topic_score": plan.scores[b],
+         "text": units[b].text[:120]}
+        for kind, b in sorted(entries, key=lambda e: e[1])]}
+
+
+@mcp.tool()
+def pace_existing_audio(audio_file: str, srt_file: str, pacing: NarrativePacingOptions | None = None,
+                        output_directory: str | None = None, language: str = "vi") -> dict[str, Any]:
+    """Xếp nhịp lại audio đã tạo (WAV/MP3) theo SRT đi kèm: nghỉ theo tầng, nhạc chuyển giao thoa, SRT/chapters mới.
+
+    Chạy đồng bộ; file 2 giờ mất khoảng 1 phút. Ghi vào output_directory hoặc thư mục 'paced' cạnh audio."""
+    from omni_tts_core.narrative_pacing import repace_existing_output
+    out = None
+    if output_directory:
+        out = Path(output_directory)
+        if not out.is_absolute():
+            raise ValueError("output_directory phải là đường dẫn tuyệt đối.")
+    return repace_existing_output(
+        _absolute_file(audio_file, {".wav", ".mp3", ".flac"}, "audio_file"),
+        _absolute_file(srt_file, {".srt"}, "srt_file"),
+        pacing or NarrativePacingOptions(enabled=True), output_dir=out, language=language)
 
 
 @mcp.tool()

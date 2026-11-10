@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from omni_tts_shared.epub import EpubOptions
+from omni_tts_shared.narrative_pacing import NarrativePacingOptions
 
 from omni_tts_shared.pronunciation import PronunciationSelection, PronunciationSnapshot
 
@@ -145,6 +146,27 @@ class SetupTaskStatus(BaseModel):
     script_name: str = ""
 
 
+PC_EXECUTION_KINDS = frozenset({"existing_worker", "cpu_pool"})
+
+
+class RemoteComputeTarget(BaseModel):
+    """Explicit broker target. Legacy remote requests omit this field."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    kind: Literal["existing_worker", "cpu_pool", "managed_colab"]
+    worker_profile_id: str = Field(default="", max_length=128)
+    backend: Literal["cpu", "cuda"] = "cpu"
+
+    @model_validator(mode="after")
+    def validate_worker_backend(self):
+        if self.kind in PC_EXECUTION_KINDS and self.backend != "cpu":
+            raise ValueError("Máy khác hiện chỉ hỗ trợ xử lý bằng CPU.")
+        if self.kind == "cpu_pool" and self.worker_profile_id:
+            raise ValueError("Chia tải CPU dùng danh sách máy đã bật trong tab Máy CPU.")
+        return self
+
+
 class RemoteEndpointOptions(BaseModel):
     """Connection policy shared by remote model providers.
 
@@ -256,6 +278,7 @@ class GenerateSpeechRequest(BaseModel):
     pitch_shift: float = Field(default=0.0, ge=-12.0, le=12.0)
     emotion: str = "natural"
     runtime_target: RuntimeTarget = "auto"
+    remote_compute: RemoteComputeTarget | None = None
     codec_repo: str | None = None
     temperature: float | None = Field(default=None, ge=0.1, le=2.0)
     top_k: int | None = Field(default=None, ge=1, le=200)
@@ -309,6 +332,8 @@ class GenerateSpeechRequest(BaseModel):
     chunk_crossfade_ms: int = Field(default=80, ge=0, le=1000)
     paragraph_pause_ms: int = Field(default=600, ge=0, le=10000)
     epub_options: EpubOptions = Field(default_factory=EpubOptions)
+    # Merged TXT/SRT jobs only: tiered pauses + cross-faded music bridges.
+    narrative_pacing: NarrativePacingOptions = Field(default_factory=NarrativePacingOptions)
     paragraph_pause_random_enabled: bool = False
     paragraph_pause_min_ms: int = Field(default=500, ge=0, le=10000)
     paragraph_pause_max_ms: int = Field(default=700, ge=0, le=10000)
@@ -360,6 +385,12 @@ class GenerateSpeechRequest(BaseModel):
                     "crossfade" if int(data.get("chunk_pause_ms") or 0) == 0 else "silence"
                 )
         return data
+
+    @model_validator(mode="after")
+    def require_remote_runtime_for_compute_target(self):
+        if self.remote_compute is not None and self.runtime_target != "remote":
+            raise ValueError("remote_compute yêu cầu runtime_target=remote.")
+        return self
 
     @model_validator(mode="after")
     def sync_legacy_pause_field(self):
@@ -426,6 +457,7 @@ class GenerateSpeechRequest(BaseModel):
 
 class GenerateSpeechResult(BaseModel):
     music_plan_path: Path | None = None
+    pacing_report_path: Path | None = None
     reading_text_path: Path | None = None
     reading_report_path: Path | None = None
     references_path: Path | None = None

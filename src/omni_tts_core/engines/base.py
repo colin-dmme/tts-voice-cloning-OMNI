@@ -7,7 +7,7 @@ from typing import Callable
 from typing import Any
 
 import numpy as np
-from omni_tts_shared.schemas import HiggsTtsOptions, RemoteEndpointOptions
+from omni_tts_shared.schemas import HiggsTtsOptions, RemoteComputeTarget, RemoteEndpointOptions
 
 
 @dataclass(frozen=True)
@@ -80,6 +80,11 @@ class TtsEngineRequest:
     remote_endpoint: RemoteEndpointOptions | None = None
     higgs: HiggsTtsOptions | None = None
     provider_options: dict[str, Any] | None = None
+    remote_compute: RemoteComputeTarget | None = None
+    # Pause options decided by Nhịp đọc (omni_tts_core.rhythm.execution), e.g.
+    # Kokoro sentence_pause/clause_pause or OmniVoice postprocess_output=False.
+    # Engines that do not understand a key ignore it.
+    pause_options: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

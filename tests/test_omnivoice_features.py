@@ -59,7 +59,7 @@ class EngineKwargTests(unittest.TestCase):
         engine = self._engine_with(model)
         # Isolate engine wiring from the real omnivoice runtime (app venv only).
         orig = oe._build_generation_config
-        oe._build_generation_config = lambda n: {"num_step": n} if n else None
+        oe._build_generation_config = lambda n, **_kw: {"num_step": n} if n else None
         try:
             engine.generate(
                 TtsEngineRequest(

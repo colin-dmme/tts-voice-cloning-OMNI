@@ -19,7 +19,7 @@ from omni_tts_core.provider_options import (
     provider_settings_for_model,
 )
 from omni_tts_core.provider_registry import provider_descriptor
-from omni_tts_core.runtime_devices import RUNTIME_TARGET_CHOICES
+from omni_tts_core.runtime_devices import REMOTE_CPU_CHOICE, RUNTIME_TARGET_CHOICES, supports_remote_cpu
 from omni_tts_core.ui_presenters.tooltips import tooltip
 from omni_tts_core.worker_installation import worker_label_for_spec
 from omni_tts_shared.languages import language_label
@@ -230,6 +230,9 @@ def build_policy(
             if gpu_available
             else f"{provider_label} chưa có CUDA khả dụng nên chỉ chạy CPU."
         )
+
+    if not is_remote and supports_remote_cpu(spec):
+        device_targets += (("CPU máy khác", REMOTE_CPU_CHOICE),)
 
     return GenerationControlPolicy(
         model_id=spec.model_id,

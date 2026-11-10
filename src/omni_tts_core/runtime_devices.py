@@ -5,7 +5,6 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from omni_tts_core.model_registry import ModelSpec
 from omni_tts_core.paths import PROJECT_ROOT, project_path
@@ -18,13 +17,35 @@ from omni_tts_core.worker_installation import (
     worker_venv_python,
 )
 from omni_tts_shared.errors import ConfigError
+from omni_tts_shared.schemas import PC_EXECUTION_KINDS, RuntimeTarget
 
-RuntimeTarget = Literal["auto", "cpu", "cuda", "remote"]
+REMOTE_CPU_CHOICE = "remote_cpu"
 RUNTIME_TARGET_CHOICES: list[tuple[str, RuntimeTarget]] = [
     ("Auto (khuyến nghị)", "auto"),
     ("CPU", "cpu"),
     ("GPU CUDA", "cuda"),
 ]
+
+
+def supports_remote_cpu(spec: ModelSpec) -> bool:
+    return spec.provider == "piper" or spec.model_id in {"zerotts_202m_official", "vieneu_v3_turbo"}
+
+
+def runtime_choice(runtime_target: str | None, remote_execution_kind: str = "") -> str:
+    if runtime_target == "remote" and remote_execution_kind in PC_EXECUTION_KINDS:
+        return REMOTE_CPU_CHOICE
+    return normalize_runtime_target(runtime_target)
+
+
+def runtime_choice_settings(choice: str | None, worker_profile_id: str = "") -> dict[str, str]:
+    if choice == REMOTE_CPU_CHOICE:
+        return {
+            "runtime_target": "remote",
+            "remote_execution_kind": "existing_worker" if worker_profile_id else "cpu_pool",
+            "remote_worker_profile_id": worker_profile_id,
+            "remote_execution_backend": "cpu",
+        }
+    return {"runtime_target": normalize_runtime_target(choice)}
 
 
 @dataclass(frozen=True)
@@ -189,6 +210,8 @@ class RuntimeDevicePolicy:
 
 def normalize_runtime_target(value: str | None) -> RuntimeTarget:
     value = (value or "auto").strip().lower()
+    if value == REMOTE_CPU_CHOICE:
+        raise ConfigError("Cần chuyển lựa chọn CPU máy khác thành đích xử lý từ xa trước khi chạy.")
     if value in {"auto", "cpu", "cuda", "remote"}:
         return value  # type: ignore[return-value]
     return "auto"

@@ -11,9 +11,11 @@ from omni_tts_core.paths import PROJECT_ROOT
 USER_STATE_ROOT = "user_state"
 SETTINGS_FILE = "settings.json"
 HIGGS_CUSTOM_VOICES_FILE = "higgs_custom_voices.json"
+_REMOTE_EXECUTION_KEYS = ("remote_execution_kind", "remote_worker_profile_id", "remote_execution_backend")
 
 PORTABLE_TKINTER_KEYS = {
     "epub_options",
+    "narrative_pacing",
     "language",
     "model_id",
     "voice_source_mode",
@@ -23,6 +25,7 @@ PORTABLE_TKINTER_KEYS = {
     "pitch_shift",
     "emotion",
     "runtime_target",
+    *_REMOTE_EXECUTION_KEYS,
     "codec_repo",
     "temperature",
     "top_k",
@@ -248,6 +251,12 @@ def _restore_settings_file(target_path: Path, portable: dict[str, Any], *, overw
             current = _read_json(target_path)
         except ValueError:
             current = {}
+    if "runtime_target" in portable:
+        # The runtime target and its route are one setting. An older backup
+        # that omitted the route must not inherit the current CPU worker.
+        for key in _REMOTE_EXECUTION_KEYS:
+            if key not in portable:
+                current.pop(key, None)
     current.update(portable)
     _write_json(target_path, current)
     return True

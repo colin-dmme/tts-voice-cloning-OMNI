@@ -40,6 +40,7 @@ def _synthesize(payload: dict) -> None:
     options = dict(payload.get("options") or {})
     total_steps = int(options.get("total_steps", 8))
 
+    trim_split = bool(dict(payload.get("pause_options") or {}).get("split_total"))
     for chunk in payload.get("chunks") or []:
         parts: list[np.ndarray] = []
         segments = chunk.get("segments")
@@ -60,7 +61,10 @@ def _synthesize(payload: dict) -> None:
                 lang=language,
                 verbose=False,
             )
-            parts.append(np.asarray(audio, dtype=np.float32).reshape(-1))
+            piece = np.asarray(audio, dtype=np.float32).reshape(-1)
+            if trim_split and len(items) > 1:
+                piece = _trim_edges(piece, int(tts.sample_rate), lead=index > 0, tail=index < len(items) - 1)
+            parts.append(piece)
             pause_ms = int(item.get("pause_after_ms") or 0)
             if index < len(items) - 1 and pause_ms > 0:
                 parts.append(
@@ -97,6 +101,26 @@ def main() -> None:
         _synthesize(json.loads(args.request.read_text(encoding="utf-8-sig")))
     else:
         parser.error("Cần --serve hoặc --request.")
+
+
+def _trim_edges(audio, sample_rate: int, *, lead: bool, tail: bool, threshold_db: float = -45.0):
+    """Nhịp đọc: drop the silence a fragment carries where it meets another
+    fragment, so the inserted pause_after_ms is the total pause heard."""
+    import numpy as np
+
+    hop = max(1, int(sample_rate * 0.005))
+    usable = len(audio) // hop * hop
+    if not usable or not (lead or tail):
+        return audio
+    frames = np.asarray(audio[:usable], dtype=np.float64).reshape(-1, hop)
+    level = 20 * np.log10(np.sqrt((frames ** 2).mean(axis=1)) + 1e-9)
+    loud = np.flatnonzero(level >= threshold_db)
+    if not loud.size:
+        return audio
+    margin = int(sample_rate * 0.02)
+    start = max(0, loud[0] * hop - margin) if lead else 0
+    end = min(len(audio), (loud[-1] + 1) * hop + margin) if tail else len(audio)
+    return audio[start:end]
 
 
 if __name__ == "__main__":

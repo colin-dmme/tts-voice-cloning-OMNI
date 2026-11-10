@@ -855,6 +855,9 @@ class AppController:
         if not text.strip():
             raise OmniTtsError("Bạn chưa nhập nội dung cần đọc.")
         self.validate_license_for_model(settings.model_id)
+        from colin_colab_remote.client import should_manage, generate_text
+        if should_manage(settings):
+            return generate_text(text, settings, progress_callback, cancel_event)
         status_callback = _status_from(progress_callback)
         with self.generation_coordinator.acquire(
             settings, cancel_event, status_callback
@@ -875,6 +878,9 @@ class AppController:
         if not tasks:
             raise OmniTtsError("Bạn chưa chọn file nguồn.")
         self.validate_license_for_model(settings.model_id)
+        from colin_colab_remote.client import should_manage, generate_files
+        if should_manage(settings):
+            return generate_files(tasks, settings, progress_callback, file_event_callback, cancel_event)
         outcomes: list[FileGenerationOutcome] = []
         normalized_tasks = [
             task

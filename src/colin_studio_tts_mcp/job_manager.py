@@ -47,6 +47,17 @@ class McpJobManager:
         return self._submit("files", request.model_dump(mode="json"))
 
     def _submit(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        from colin_colab_remote.client import ColabClient, should_manage, public_job as colab_public_job
+        request = TextGenerationInput.model_validate(payload) if kind == "text" else FileGenerationInput.model_validate(payload)
+        settings = self._settings_for(request)
+        if should_manage(settings):
+            data = {"settings": settings}
+            if kind == "text":
+                data["text"] = request.text
+            else:
+                data["tasks"] = [{"item_id": f"mcp-{index}", "source_path": path, "pronunciation": None}
+                                 for index, path in enumerate(request.source_files, 1)]
+            return colab_public_job(ColabClient().submit(kind, data, request.idempotency_key))
         record = self.store.create(kind, payload)
         job_id = record["job_id"]
         cancel_event = Event()
@@ -93,7 +104,7 @@ class McpJobManager:
                     progress_callback=lambda event: self._progress(job_id, event),
                     cancel_event=cancel_event,
                 )
-                result_data = result.model_dump(mode="json")
+                result_data = _with_rhythm_plan(result.model_dump(mode="json"))
             else:
                 request = FileGenerationInput.model_validate(payload)
                 tasks = [
@@ -106,7 +117,7 @@ class McpJobManager:
                     progress_callback=lambda event: self._progress(job_id, event),
                     cancel_event=cancel_event,
                 )
-                result_data = {"files": [_jsonable(item) for item in outcomes]}
+                result_data = {"files": [_with_rhythm_plan(_jsonable(item)) for item in outcomes]}
                 failed = [item for item in outcomes if item.error]
                 if failed:
                     self.store.update(
@@ -141,13 +152,22 @@ class McpJobManager:
             )
 
     def get(self, job_id: str) -> dict[str, Any]:
+        if job_id.startswith(("colab-", "cpu-job-")):
+            from colin_colab_remote.client import ColabClient, public_job as colab_public_job
+            return colab_public_job(ColabClient().store.get(job_id))
         return public_job(self.store.get(job_id))
 
     def list(self, limit: int = 20, status: str | None = None) -> dict[str, Any]:
         items = [public_job(item) for item in self.store.list(limit, status)]
+        from colin_colab_remote.client import ColabClient, public_job as colab_public_job
+        items += [colab_public_job(item) for item in ColabClient().store.list(limit, status)]
+        items = sorted(items, key=lambda item: item["created_at"], reverse=True)[:limit]
         return {"count": len(items), "jobs": items}
 
     def cancel(self, job_id: str) -> dict[str, Any]:
+        if job_id.startswith(("colab-", "cpu-job-")):
+            from colin_colab_remote.client import ColabClient
+            return ColabClient().control(job_id, "cancel")
         record = self.store.get(job_id)
         if record["status"] in TERMINAL_STATUSES:
             return public_job(record)
@@ -171,6 +191,9 @@ class McpJobManager:
         return public_job(record)
 
     def retry(self, job_id: str) -> dict[str, Any]:
+        if job_id.startswith(("colab-", "cpu-job-")):
+            from colin_colab_remote.client import ColabClient
+            return ColabClient().control(job_id, "resume")
         record = self.store.get(job_id)
         if record["status"] not in TERMINAL_STATUSES:
             raise ValueError("Chỉ có thể thử lại job đã kết thúc")
@@ -179,8 +202,27 @@ class McpJobManager:
         return self.start_files(FileGenerationInput.model_validate(record["request"]))
 
     def active_count(self) -> int:
+        from colin_colab_remote.client import ColabClient
+        remote_count = sum(item["status"] not in {"succeeded", "failed", "cancelled", "waiting"}
+                           for item in ColabClient().store.list(100))
         with self._lock:
-            return len(self._futures)
+            return len(self._futures) + remote_count
+
+
+def _with_rhythm_plan(data: Any) -> Any:
+    """Copy the resolved Nhịp đọc plan from pacing_report.json into the result."""
+    if not isinstance(data, dict):
+        return data
+    nested = data.get("result") if isinstance(data.get("result"), dict) else data
+    report = nested.get("pacing_report_path")
+    if report:
+        try:
+            plan = json.loads(Path(report).read_text(encoding="utf-8")).get("rhythm_plan")
+        except (OSError, ValueError):
+            plan = None
+        if plan:
+            nested["rhythm_plan"] = plan
+    return data
 
 
 def public_job(record: dict[str, Any]) -> dict[str, Any]:

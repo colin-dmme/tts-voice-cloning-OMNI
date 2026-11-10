@@ -39,6 +39,9 @@ MUSIC_THEME_LABELS = {
     "su-thi": "Sử thi",
     "huyen-bi": "Huyền bí",
     "trung-tinh": "Trung tính",
+    "mo-ket": "Nhạc mở / kết series",
+    "binh-sach": "Bình sách / Văn chương (nhạc chuyển ngắn)",
+    "chuyen-chuong": "Nhạc chuyển chương (dài)",
 }
 
 

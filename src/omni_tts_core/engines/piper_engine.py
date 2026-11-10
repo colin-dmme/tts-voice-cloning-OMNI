@@ -205,6 +205,9 @@ class PiperSubprocessEngine(BaseTtsEngine):
     ) -> list[TtsEngineResult]:
         if not requests:
             return []
+        if any(request.runtime_target == "remote" for request in requests):
+            from colin_remote_compute.piper import generate_piper
+            return generate_piper(self.spec.model_id, requests, progress_callback, chunk_callback)
         runtime = _SHARED_PIPER_POOL.worker_runtime()
         (PROJECT_ROOT / "outputs").mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="piper_", dir=PROJECT_ROOT / "outputs") as temp_dir:
@@ -216,23 +219,7 @@ class PiperSubprocessEngine(BaseTtsEngine):
                     "output_path": str(temp_path / f"chunk_{index:03d}.wav"),
                 }
                 if request.punctuation_pause_enabled:
-                    config = PunctuationPauseConfig(
-                        sentence_ms=request.sentence_pause_ms,
-                        comma_ms=request.comma_pause_ms,
-                        clause_ms=request.clause_pause_ms,
-                        ellipsis_ms=request.ellipsis_pause_ms,
-                        sentence_range=_request_pause_range(request, "sentence"),
-                        comma_range=_request_pause_range(request, "comma"),
-                        clause_range=_request_pause_range(request, "clause"),
-                        ellipsis_range=_request_pause_range(request, "ellipsis"),
-                    )
-                    item["segments"] = [
-                        {
-                            "text": segment.text,
-                            "pause_after_ms": segment.pause_after_ms,
-                        }
-                        for segment in split_with_punctuation_pauses(request.text, config)
-                    ]
+                    item["segments"] = piper_segments(request)
                 chunks.append(item)
             payload = {
                 "model_path": str(self.spec.local_path / str(self.spec.runtime["model_file"])),
@@ -247,6 +234,8 @@ class PiperSubprocessEngine(BaseTtsEngine):
                     if requests[0].punctuation_pause_enabled
                     else 0
                 ),
+                # Nhịp đọc: pause_after_ms is the total pause heard at a split.
+                "trim_split_edges": bool((requests[0].pause_options or {}).get("split_total")),
                 "chunks": chunks,
             }
             reported_chunks: set[int] = set()
@@ -273,6 +262,25 @@ class PiperSubprocessEngine(BaseTtsEngine):
                 audio, sample_rate = sf.read(str(output_path), dtype="float32")
                 results.append(TtsEngineResult(audio=audio, sample_rate=int(sample_rate)))
             return results
+
+
+def piper_segments(request: TtsEngineRequest) -> list[dict]:
+    if not request.punctuation_pause_enabled:
+        return []
+    config = PunctuationPauseConfig(
+        sentence_ms=request.sentence_pause_ms,
+        comma_ms=request.comma_pause_ms,
+        clause_ms=request.clause_pause_ms,
+        ellipsis_ms=request.ellipsis_pause_ms,
+        sentence_range=_request_pause_range(request, "sentence"),
+        comma_range=_request_pause_range(request, "comma"),
+        clause_range=_request_pause_range(request, "clause"),
+        ellipsis_range=_request_pause_range(request, "ellipsis"),
+    )
+    return [
+        {"text": segment.text, "pause_after_ms": segment.pause_after_ms}
+        for segment in split_with_punctuation_pauses(request.text, config)
+    ]
 
 
 def _request_pause_range(request: TtsEngineRequest, prefix: str) -> PauseRange | None:

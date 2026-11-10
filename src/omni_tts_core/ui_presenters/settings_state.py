@@ -14,6 +14,7 @@ from typing import Any
 from omni_tts_shared.schemas import (
     GenerateSpeechRequest,
     HiggsTtsOptions,
+    RemoteComputeTarget,
     RemoteEndpointOptions,
 )
 from omni_tts_shared.pronunciation import PronunciationSelection
@@ -23,6 +24,7 @@ from omni_tts_shared.pronunciation import PronunciationSelection
 # GUI-specific and live in each GUI's own preferences store, not here.
 DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "epub_options": {},
+    "narrative_pacing": {},
     "language": "vi",
     "model_id": "omnivoice_vietnamese",
     "voice_source_mode": "fixed",
@@ -36,6 +38,9 @@ DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "pitch_shift": 0.0,
     "emotion": "natural",
     "runtime_target": "auto",
+    "remote_execution_kind": "",
+    "remote_worker_profile_id": "",
+    "remote_execution_backend": "",
     "codec_repo": None,
     "temperature": None,
     "top_k": None,
@@ -201,6 +206,7 @@ class GenerationSettings:
     chunk_crossfade_ms: int = 80
     paragraph_pause_ms: int = 600
     epub_options: dict[str, Any] = field(default_factory=dict)
+    narrative_pacing: dict[str, Any] = field(default_factory=dict)
     paragraph_pause_random_enabled: bool = False
     paragraph_pause_min_ms: int = 500
     paragraph_pause_max_ms: int = 700
@@ -245,8 +251,19 @@ class GenerationSettings:
     pronunciation_enabled: bool = False
     pronunciation_preset_ids: list[str] = field(default_factory=list)
     provider_options: dict[str, Any] = field(default_factory=dict)
+    remote_execution_kind: str = ""
+    remote_worker_profile_id: str = ""
+    remote_execution_backend: str = ""
 
     def to_request(self, text: str) -> GenerateSpeechRequest:
+        remote_compute = None
+        kind = (self.remote_execution_kind or "").strip()
+        if kind:
+            remote_compute = RemoteComputeTarget(
+                kind=kind,
+                worker_profile_id=self.remote_worker_profile_id,
+                backend=self.remote_execution_backend or "cpu",
+            )
         return GenerateSpeechRequest(
             text=text,
             language=self.language,
@@ -262,6 +279,7 @@ class GenerationSettings:
             pitch_shift=self.pitch_shift,
             emotion=self.emotion,
             runtime_target=self.runtime_target,
+            remote_compute=remote_compute,
             codec_repo=self.codec_repo,
             temperature=self.temperature,
             top_k=self.top_k,
@@ -315,6 +333,7 @@ class GenerationSettings:
             chunk_crossfade_ms=self.chunk_crossfade_ms,
             paragraph_pause_ms=self.paragraph_pause_ms,
             epub_options=self.epub_options,
+            narrative_pacing=self.narrative_pacing,
             paragraph_pause_random_enabled=self.paragraph_pause_random_enabled,
             paragraph_pause_min_ms=self.paragraph_pause_min_ms,
             paragraph_pause_max_ms=self.paragraph_pause_max_ms,

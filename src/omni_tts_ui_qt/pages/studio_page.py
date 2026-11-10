@@ -1714,6 +1714,7 @@ class StudioPage(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        self.settings_panel.remote_compute_group.reload()
         self.settings_panel.refresh_pronunciation_presets()
         self._refresh_queue_pronunciation_choices()
         self._refresh_queue()

@@ -38,6 +38,7 @@ from omni_tts_core.pause_presets import (
     PUNCTUATION_PAUSE_FIELDS,
 )
 from omni_tts_core.chunk_join import CUSTOM_CHUNK_JOIN_CHOICES
+from omni_tts_core.runtime_devices import REMOTE_CPU_CHOICE, runtime_choice, runtime_choice_settings
 from omni_tts_core.voice_library import group_by_project
 from omni_tts_core.ui_presenters import control_policy, field_limits, model_groups
 from omni_tts_core.ui_presenters.control_policy import (
@@ -77,6 +78,9 @@ from omni_tts_ui_qt.widgets.higgs_custom_voice_creator import (
     HiggsCustomVoiceCreator,
 )
 from omni_tts_ui_qt.widgets.epub_options import EpubOptionsWidget
+from omni_tts_core.rhythm.presets import rhythm_from_legacy
+from omni_tts_core.ui_presenters.rhythm_presenter import LOCK_TOOLTIP, RhythmTracker, rhythm_view
+from omni_tts_ui_qt.widgets.narrative_pacing import NarrativePacingWidget
 
 _AUDIO_FORMATS = [("WAV", "wav"), ("MP3", "mp3")]
 _BITRATES = [("128 kbps", 128), ("160 kbps", 160), ("192 kbps", 192), ("256 kbps", 256), ("320 kbps", 320)]
@@ -100,6 +104,7 @@ class SettingsPanel(QScrollArea):
         self._provider_option_cache: dict[str, dict] = {}
         self._configured_option_model: str | None = None
         self._model_search_matches: list[tuple[str, str]] = []
+        self._restored_colab_target: dict[str, str] = {}
 
         container = QWidget()
         self.setWidget(container)
@@ -119,8 +124,21 @@ class SettingsPanel(QScrollArea):
         self.epub_options.changed.connect(self._emit_changed)
         epub_section.body_layout.addWidget(self.epub_options)
         self._layout.addWidget(epub_section)
+        self.pacing_section = CollapsibleSection("Nhịp đọc && nhạc chuyển", expanded=False)
+        self.narrative_pacing = NarrativePacingWidget()
+        self.narrative_pacing.changed.connect(self._emit_changed)
+        self.pacing_section.body_layout.addWidget(self.narrative_pacing)
+        self._layout.addWidget(self.pacing_section)
         self._build_gpu_safety()
         self._layout.addStretch()
+        # Nhịp đọc badges and locks follow the model, output mode and join.
+        self._rhythm_tracker = RhythmTracker()
+        self.narrative_pacing.changed.connect(self._refresh_rhythm)
+        self.narrative_pacing.legacy_requested.connect(self._suggest_rhythm_from_legacy)
+        self.split_output.toggled.connect(self._refresh_rhythm)
+        self.device_combo.currentIndexChanged.connect(self._refresh_rhythm)
+        self.chunk_join_custom.toggled.connect(self._refresh_rhythm)
+        self.chunk_join_mode.currentIndexChanged.connect(self._refresh_rhythm)
 
         self._loading = False
         # Start on the default model's provider so the list opens short.
@@ -135,6 +153,7 @@ class SettingsPanel(QScrollArea):
         )
         self.remote_compute_group = RemoteComputeGroup()
         self.remote_compute_group.changed.connect(self._emit_changed)
+        self.device_combo.currentIndexChanged.connect(self._sync_remote_controls)
         self.remote_compute_section.body_layout.addWidget(
             self.remote_compute_group
         )
@@ -682,6 +701,8 @@ class SettingsPanel(QScrollArea):
                 seed_defaults = model_id != self._seeded_model_id
             self.model_info.setText(self.ctrl.model_choice_info(model_id))
             self.runtime_status.setText(self.ctrl.runtime_status_text(model_id))
+            if self._policy is not None and self._policy.model_id != model_id:
+                self._restored_colab_target.clear()
             self._policy = self.ctrl.control_policy(model_id)
             self._apply_policy(self._policy, seed_defaults=seed_defaults)
             if seed_defaults:
@@ -698,6 +719,61 @@ class SettingsPanel(QScrollArea):
             self.gpu_guidance.setText(self.ctrl.gpu_temperature_guidance())
         finally:
             self._loading = was_loading
+        self._refresh_rhythm()
+
+    # --- Nhịp đọc ----------------------------------------------------------
+
+    def _refresh_rhythm(self, *_args) -> None:
+        """Show who realises each pause layer for the current model and lock
+        the old pause controls Nhịp đọc has taken over."""
+        if not hasattr(self, "_rhythm_tracker"):
+            return  # still building the panel
+        model_id = self.current_model_id()
+        try:
+            spec = self.ctrl.service.registry.get(model_id)
+        except Exception:  # noqa: BLE001 - an unknown model just shows no badges
+            self.narrative_pacing.set_view(None)
+            return
+        device = str(self.device_combo.currentData() or "")
+        view = rhythm_view(
+            self.narrative_pacing.options(), spec,
+            output_mode="split" if self.split_output.isChecked() else "merged",
+            chunk_join_mode=self._current_chunk_join_mode(),
+            runtime_target="remote" if device in {"remote", REMOTE_CPU_CHOICE} else None,
+        )
+        self.narrative_pacing.set_view(view)
+        self._apply_rhythm_locks(view)
+        changes = self._rhythm_tracker.update(model_id, view.plan)
+        # Model switches happen inside _loading blocks too; only restoring
+        # saved preferences (or history) stays silent.
+        if changes and not getattr(self, "_restoring_preferences", False):
+            self.context.log(f"Nhịp đọc · {view.plan.model_label}: " + "; ".join(changes))
+
+    def _apply_rhythm_locks(self, view) -> None:
+        locked = view.old_controls_locked
+        # The header badge says "DO NHỊP ĐỌC QUẢN LÝ"; the title stays short.
+        self.punctuation_section.set_locked(
+            locked, "DEACTIVE · DO NHỊP ĐỌC QUẢN LÝ", LOCK_TOOLTIP
+        )
+        self.paragraph_pause_editor.setEnabled(not locked)
+        self.paragraph_pause_editor.setToolTip(LOCK_TOOLTIP if locked else "")
+        self.declarative_provider_group.set_locked(view.locked_settings, LOCK_TOOLTIP)
+
+    def _suggest_rhythm_from_legacy(self) -> None:
+        ranges = rhythm_from_legacy(self._pause_values())
+        if not ranges:
+            self.context.log("Nhịp đọc: mục Ngắt nghỉ theo dấu câu đang tắt, không có giá trị cũ để lấy.")
+            return
+        lines = "\n".join(
+            f"• {layer}: {low / 1000:.2f}–{high / 1000:.2f}s" for layer, (low, high) in ranges.items()
+        )
+        answer = QMessageBox.question(
+            self, "Lấy từ cài đặt cũ",
+            "Cài đặt cũ tính khoảng lặng chèn thêm; Nhịp đọc tính tổng khoảng lặng nghe thấy, "
+            "nên đề xuất đã cộng thêm khoảng nghỉ model tự có:\n\n" + lines + "\n\nÁp dụng?",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.narrative_pacing.apply_ranges(ranges)
 
     def _apply_policy(self, policy: GenerationControlPolicy, *, seed_defaults: bool) -> None:
         """Enable/disable every control according to what the model supports."""
@@ -707,12 +783,9 @@ class SettingsPanel(QScrollArea):
                            policy.default_device(self.device_combo.currentData()))
         self.device_note.setText(policy.device_note)
         self.device_note.setVisible(bool(policy.device_note))
-        self.remote_compute_section.setVisible(
-            policy.model_id in {"zerotts_202m_official", "vieneu_v3_turbo"}
-        )
-        if policy.model_id in {"zerotts_202m_official", "vieneu_v3_turbo"}:
-            self.remote_compute_group.set_model_id(policy.model_id)
-            self.remote_compute_group.reload()
+        self.remote_compute_group.set_model_id(policy.model_id)
+        self.remote_compute_group.reload()
+        self._sync_remote_controls()
 
         self._apply_control(self.speed, policy.speed, NEUTRAL_SPEED)
         self.speed.setRange(policy.speed_minimum, policy.speed_maximum)
@@ -799,6 +872,15 @@ class SettingsPanel(QScrollArea):
             combo.addItem(label, value)
         index = combo.findData(selected)
         combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _sync_remote_controls(self, *_args) -> None:
+        choice = str(self.device_combo.currentData() or "auto")
+        allow_colab = self.device_combo.findData("remote") >= 0
+        self.remote_compute_group.set_runtime_choice(choice, allow_colab=allow_colab)
+        self.remote_compute_section.setVisible(choice == REMOTE_CPU_CHOICE or allow_colab)
+        self.remote_compute_section.set_title(
+            "Máy chạy CPU" if choice == REMOTE_CPU_CHOICE else "Điện toán Colab"
+        )
 
     def _apply_descriptor(self, descriptor, model_id: str) -> None:
         self._voice_form.setRowVisible(self._mode_row, descriptor.show_voice_mode_selector)
@@ -1321,8 +1403,13 @@ class SettingsPanel(QScrollArea):
         f5_seed = f5.seed.value()
         cb_seed = cb.seed.value()
         pause_values = self._pause_values()
+        choice = str(self.device_combo.currentData() or "auto")
+        runtime = runtime_choice_settings(choice, self.remote_compute_group.pc_profile_id)
+        if choice == "remote":
+            runtime.update(self._restored_colab_target)
         return GenerationSettings(
             epub_options=self.epub_options.options(),
+            narrative_pacing=self.narrative_pacing.options(),
             language=str(self.language_combo.currentData() or "vi"),
             model_id=self.current_model_id(),
             pronunciation_enabled=bool(
@@ -1346,7 +1433,7 @@ class SettingsPanel(QScrollArea):
             speed=self.speed.value() if (policy is None or policy.speed) else NEUTRAL_SPEED,
             pitch_shift=self.pitch.value() if (policy is None or policy.pitch) else NEUTRAL_PITCH,
             emotion=str(vieneu.emotion_combo.currentData()) if emotion_on else NEUTRAL_EMOTION,
-            runtime_target=str(self.device_combo.currentData() or "auto"),
+            **runtime,
             codec_repo=str(vieneu.codec_combo.currentData())
             if codec_on and vieneu.codec_combo.currentData() else None,
             temperature=vieneu.temperature.value() if sampling_on else None,
@@ -1476,7 +1563,16 @@ class SettingsPanel(QScrollArea):
     # --- Preferences round-trip --------------------------------------------
 
     def load_preferences(self, data: dict) -> None:
+        self._restoring_preferences = True
+        try:
+            self._load_preferences(data)
+        finally:
+            self._restoring_preferences = False
+        self._refresh_rhythm()
+
+    def _load_preferences(self, data: dict) -> None:
         self.epub_options.set_options(data.get("epub_options", {}))
+        self.narrative_pacing.set_options(data.get("narrative_pacing", {}))
         self._loading = True
         try:
             self._select_model(data.get("model_id"))
@@ -1498,7 +1594,19 @@ class SettingsPanel(QScrollArea):
             # Only restore values the current model actually supports; the rest
             # stay at the neutral values apply_model just set.
             self._set_combo(self.language_combo, data.get("language"))
-            self._set_combo(self.device_combo, data.get("runtime_target"))
+            execution_kind = data.get("remote_execution_kind") or ""
+            self._restored_colab_target = {}
+            if execution_kind == "managed_colab":
+                self._restored_colab_target = {
+                    "remote_execution_kind": execution_kind,
+                    "remote_worker_profile_id": data.get("remote_worker_profile_id") or "",
+                    "remote_execution_backend": data.get("remote_execution_backend") or "",
+                }
+            if execution_kind in {"existing_worker", "cpu_pool"}:
+                self.remote_compute_group.set_pc_profile_id(data.get("remote_worker_profile_id"))
+            if "runtime_target" in data:
+                self._set_combo(self.device_combo, runtime_choice(data["runtime_target"], execution_kind))
+            self._sync_remote_controls()
             if self._policy is None or self._policy.speed:
                 self.speed.setValue(float(data.get("speed", NEUTRAL_SPEED)))
             if self._policy is None or self._policy.pitch:

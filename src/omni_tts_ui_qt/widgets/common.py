@@ -107,6 +107,25 @@ class CollapsibleSection(QFrame):
     def is_active(self) -> bool:
         return self.activation is None or self.activation.isChecked()
 
+    def set_locked(self, locked: bool, text: str = "", tooltip: str = "") -> None:
+        """Freeze the section while another feature owns it; the user's own
+        ACTIVE choice is kept and comes back when the lock is lifted."""
+        if self.activation is None:
+            self.body.setEnabled(not locked)
+            self.setToolTip(tooltip if locked else "")
+            return
+        if locked:
+            self.activation.setEnabled(False)
+            self.activation.setText(text or self._inactive_text)
+            self.activation.setToolTip(tooltip)
+            self.body.setEnabled(False)
+            self._locked = True
+        elif getattr(self, "_locked", False):
+            self._locked = False
+            self.activation.setEnabled(True)
+            self.activation.setToolTip("")
+            self._set_active(self.activation.isChecked())
+
     def set_visible(self, visible: bool) -> None:
         self.setVisible(visible)
 

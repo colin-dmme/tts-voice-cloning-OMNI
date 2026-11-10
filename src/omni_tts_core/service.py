@@ -579,6 +579,9 @@ class TtsService:
         request = self._apply_voice_profile(request)
         spec = self.registry.get(request.model_id)
         self._ensure_request_can_generate(request, spec)
+        from omni_tts_core.rhythm.execution import prepare_rhythm
+        rhythm = prepare_rhythm(request, spec, source_kind="epub" if source_units is not None else "text")
+        request = rhythm.request
         units = _prepared_text_units(
             request.text,
             request.language,
@@ -588,6 +591,7 @@ class TtsService:
             higgs=request.higgs,
             pronunciation_snapshot=request.pronunciation_snapshot,
             source_units=source_units,
+            force_split=_cpu_pool_requested(request),
         )
         chunks = [chunk for unit in units for chunk in unit["chunks"]]
         music_renderers = {}
@@ -677,6 +681,7 @@ class TtsService:
                 pitch_shift=request.pitch_shift,
                 emotion=request.emotion,
                 runtime_target=request.runtime_target,
+                remote_compute=request.remote_compute,
                 codec_repo=_codec_repo_for_request(request, spec),
                 temperature=request.temperature if spec.provider == "vieneu" else None,
                 top_k=request.top_k if spec.provider == "vieneu" else None,
@@ -747,6 +752,7 @@ class TtsService:
                 ),
                 higgs=request.higgs if spec.provider == "higgs_remote" else None,
                 provider_options=dict(request.provider_options),
+                pause_options=dict(rhythm.engine_options) or None,
             )
             for chunk in chunks
         ]
@@ -778,11 +784,15 @@ class TtsService:
                 paragraph_pauses_ms[i] = override
         boundary_music = [None] * len(units)
         boundary_sample_counts = [0] * len(units)
+        pacing_on = rhythm.pacing_active
+        pacing_units = []
 
         for unit_index, unit in enumerate(units):
             unit_chunks = unit["chunks"]
             unit_results = batch_results[chunk_cursor : chunk_cursor + len(unit_chunks)]
             chunk_cursor += len(unit_chunks)
+            if rhythm.engine_options.get("split_total"):
+                unit_results = _trim_seam_edges(unit_results)
             unit_audio_segments = []
             chunk_windows: list[tuple[float, float]] = []
             unit_sample_rate = sample_rate
@@ -811,6 +821,13 @@ class TtsService:
                             next_duration,
                         )
                 unit_audio_segments.append(result.audio)
+
+            if pacing_on:
+                from omni_tts_core.narrative_pacing.merged_output_pacing import unit_window
+                window = unit_window(chunk_windows, unit["unit"].text,
+                                     locked_after=bool(unit["unit"].pause_kind))
+                if window is not None:
+                    pacing_units.append(window)
 
             window_cursor = 0
             for segment in unit["segments"]:
@@ -874,6 +891,13 @@ class TtsService:
             tail_music = boundary_music[-1]
             tail = tail_music if tail_music is not None else np.zeros(boundary_sample_counts[-1], dtype=np.float32)
             combined = np.concatenate([combined, tail])
+        pacing_report_path = None
+        if pacing_on and pacing_units:
+            from omni_tts_core.narrative_pacing.merged_output_pacing import pace_merged_output
+            emit_progress(progress_callback, "Đang xếp nhịp kể chuyện và nhạc chuyển...", len(chunks), len(chunks))
+            combined, timings, pacing_report_path = pace_merged_output(
+                combined, sample_rate, pacing_units, timings, request, job_dir, rhythm=rhythm
+            )
         # Finalise the filename now that the real duration is known, so the
         # optional "_{voice}_{duration}" suffix can be appended.
         final_duration = duration_seconds(combined, sample_rate)
@@ -911,6 +935,7 @@ class TtsService:
             segment_count=len(timings),
             duration_seconds=final_duration,
             message="Đã tạo audio và SRT." if request.output_srt else "Đã tạo audio.",
+            pacing_report_path=pacing_report_path,
             pronunciation_report_path=pronunciation_report_path,
             pronunciation_snapshot_hash=pronunciation_analysis.snapshot_hash,
             pronunciation_preset_ids=pronunciation_analysis.preset_ids,
@@ -1050,10 +1075,7 @@ class TtsService:
 
     def _ensure_request_can_generate(self, request: GenerateSpeechRequest, spec: ModelSpec) -> None:
         _validate_request_for_model(request, spec)
-        uses_remote_compute = (
-            request.runtime_target == "remote"
-            and spec.model_id in {"zerotts_202m_official", "vieneu_v3_turbo"}
-        )
+        uses_remote_compute = request.runtime_target == "remote"
         if not uses_remote_compute and not self.storage.is_installed(spec):
             if spec.provider in ("vieneu", "valtec"):
                 raise ModelMissingError(
@@ -1159,6 +1181,9 @@ class TtsService:
         emit_progress(progress_callback, f"Đã tách thành {len(units)} file audio.", 0, len(units))
         spec = self.registry.get(request.model_id)
         self._ensure_request_can_generate(request, spec)
+        from omni_tts_core.rhythm.execution import prepare_rhythm
+        rhythm = prepare_rhythm(request, spec)
+        request = rhythm.request
         job_id, job_dir = self.job_store.create_job_dir()
         output_stem = _resolve_output_stem(request)
         if request.append_stem_suffix:
@@ -1202,6 +1227,7 @@ class TtsService:
                 provider=spec.provider,
                 chunk_join_mode=request.chunk_join_mode,
                 higgs=request.higgs,
+                force_split=_cpu_pool_requested(request),
             )
             if not chunks:
                 continue
@@ -1222,6 +1248,7 @@ class TtsService:
                         pitch_shift=request.pitch_shift,
                         emotion=request.emotion,
                         runtime_target=request.runtime_target,
+                        remote_compute=request.remote_compute,
                         codec_repo=_codec_repo_for_request(request, spec),
                         temperature=request.temperature if spec.provider == "vieneu" else None,
                         top_k=request.top_k if spec.provider == "vieneu" else None,
@@ -1300,10 +1327,12 @@ class TtsService:
                         ),
                         higgs=request.higgs if spec.provider == "higgs_remote" else None,
                         provider_options=dict(request.provider_options),
+                        pause_options=dict(rhythm.engine_options) or None,
                     )
                 )
             split_jobs.append(
                 {
+                    "rhythm": rhythm,
                     "unit": unit,
                     "chunks": chunks,
                     "start_index": start_index,
@@ -1484,6 +1513,9 @@ class TtsService:
         audio_segments = []
         sample_rate = 24000
 
+        rhythm = job.get("rhythm")
+        if rhythm is not None and rhythm.engine_options.get("split_total"):
+            job_results = _trim_seam_edges(job_results)
         for result in job_results:
             sample_rate = result.sample_rate
             audio_segments.append(result.audio)
@@ -1495,6 +1527,16 @@ class TtsService:
             _chunk_pause_values(request, spec, chunks),
             _chunk_crossfade_ms(request, spec),
         )
+        rhythm = job.get("rhythm")
+        if rhythm is not None and rhythm.plan.enabled and rhythm.plan.scope == "full":
+            # Split files have no paragraph boundaries; only the pauses inside
+            # sentences are paced. Seeded per file so save and join agree.
+            from omni_tts_core.narrative_pacing.merged_output_pacing import stretch_sentence_pauses
+            unit = job["unit"]
+            combined = stretch_sentence_pauses(
+                combined, sample_rate, unit.text, rhythm.pacing_options,
+                rhythm.skip_layers, seed=rhythm.pacing_options.seed + int(unit.index),
+            )
 
         return combined, sample_rate, len(chunks)
 
@@ -1562,6 +1604,10 @@ def _prepare_text(text: str, language: str) -> str:
     return text.strip()
 
 
+def _cpu_pool_requested(request: GenerateSpeechRequest) -> bool:
+    return request.runtime_target == "remote" and bool(request.remote_compute and request.remote_compute.kind == "cpu_pool")
+
+
 def _prepared_text_units(
     text: str,
     language: str,
@@ -1572,6 +1618,7 @@ def _prepared_text_units(
     higgs=None,
     pronunciation_snapshot: PronunciationSnapshot | None = None,
     source_units: list[SourceUnit] | None = None,
+    force_split: bool = False,
 ) -> list[dict]:
     prepared_units = []
     for unit in source_units if source_units is not None else text_units_from_blank_lines(text):
@@ -1588,6 +1635,7 @@ def _prepared_text_units(
                 provider=provider,
                 chunk_join_mode=chunk_join_mode,
                 higgs=higgs,
+                force_split=force_split,
             )
             segments = [
                 {"display_text": chunk, "chunks": [chunk]}
@@ -1613,7 +1661,7 @@ def _prepared_text_units(
             policy = resolve_chunk_join_policy(chunk_join_mode, descriptor)
             raw_display_chunks = (
                 [display_text]
-                if policy.delegates_text_boundaries
+                if policy.delegates_text_boundaries and not force_split
                 else split_text(display_text, max_chunk_chars)
             )
             for display_text in raw_display_chunks:
@@ -1628,6 +1676,7 @@ def _prepared_text_units(
                     provider=provider,
                     chunk_join_mode=chunk_join_mode,
                     higgs=higgs,
+                    force_split=force_split,
                 )
                 if speech_chunks:
                     segments.append(
@@ -1656,6 +1705,7 @@ def _chunks_for_provider(
     provider: str,
     chunk_join_mode: str = "auto",
     higgs=None,
+    force_split: bool = False,
 ) -> list[str]:
     if provider == "higgs_remote":
         analysis = validate_higgs_script(text)
@@ -1676,9 +1726,23 @@ def _chunks_for_provider(
         else _prepare_text(text, language)
     )
     policy = resolve_chunk_join_policy(chunk_join_mode, descriptor)
-    if policy.delegates_text_boundaries:
+    if policy.delegates_text_boundaries and not force_split:
         return [prepared] if prepared else []
     return split_text(prepared, max_chunk_chars)
+
+
+def _trim_seam_edges(results: list[TtsEngineResult]) -> list[TtsEngineResult]:
+    """Nhịp đọc split seams: drop each chunk's silence where it meets another
+    chunk, so the seam pause (from the punctuation) is the total pause heard."""
+    from dataclasses import replace
+
+    from omni_tts_core.rhythm.silence_tools import trim_edges
+
+    last = len(results) - 1
+    return [
+        replace(result, audio=trim_edges(result.audio, result.sample_rate, lead=i > 0, tail=i < last))
+        for i, result in enumerate(results)
+    ]
 
 
 def _paragraph_pause_ms(request: GenerateSpeechRequest) -> int:
@@ -1747,6 +1811,8 @@ def _chunk_pause_values(
         return []
     descriptor = provider_descriptor(spec.provider)
     policy = resolve_chunk_join_policy(request.chunk_join_mode, descriptor)
+    if policy.effective == "native" and _cpu_pool_requested(request):
+        return [max(0, int(request.chunk_pause_ms))] * (len(chunks) - 1)
     if policy.effective in {"native", "crossfade", "direct"}:
         return [0] * (len(chunks) - 1)
     fallback = max(0, int(request.chunk_pause_ms))
@@ -1803,10 +1869,25 @@ def _resolve_output_stem(request: GenerateSpeechRequest) -> str:
 
 
 def _validate_request_for_model(request: GenerateSpeechRequest, spec: ModelSpec) -> None:
-    if request.runtime_target == "remote" and not (
-        spec.model_id in {"zerotts_202m_official", "vieneu_v3_turbo"}
-    ):
-        raise ConfigError("Colab từ xa chỉ hỗ trợ ZeroTTS 202M Official và VieNeu v3 Turbo.")
+    if request.runtime_target == "remote":
+        from omni_tts_shared.schemas import PC_EXECUTION_KINDS
+
+        target = request.remote_compute
+        if target and target.kind in PC_EXECUTION_KINDS:
+            from omni_tts_core.runtime_devices import supports_remote_cpu
+            from colin_colab_remote.context import managed_execution
+            if not supports_remote_cpu(spec):
+                raise ConfigError("Model chưa hỗ trợ CPU máy khác.")
+            context = managed_execution()
+            if context is None or not getattr(context.lifecycle, "is_existing_worker", False):
+                raise ConfigError("Dùng Studio hoặc MCP để xếp job CPU máy khác.")
+            if target.kind == "cpu_pool":
+                if not getattr(context.lifecycle, "is_cpu_pool", False):
+                    raise ConfigError("Đích nhóm CPU không khớp job đã xếp.")
+            elif getattr(context.lifecycle, "is_cpu_pool", False) or target.worker_profile_id != context.lifecycle.profile.profile_id:
+                raise ConfigError("Máy CPU đã chọn không khớp đích của job.")
+        elif spec.model_id not in {"zerotts_202m_official", "vieneu_v3_turbo"}:
+            raise ConfigError("Colab từ xa chỉ hỗ trợ ZeroTTS 202M Official và VieNeu v3 Turbo.")
     caps = _effective_capabilities(spec)
     voice_mode = request.voice_source_mode or "fixed"
     voice_input = effective_voice_input(spec)

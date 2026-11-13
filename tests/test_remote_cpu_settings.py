@@ -8,7 +8,7 @@ from omni_tts_core.ui_presenters.settings_state import GenerationSettings
 from omni_tts_shared.schemas import GenerateSpeechRequest, RuntimeStatus
 
 
-CPU_TARGET = {"kind": "existing_worker", "worker_profile_id": "pc-test", "backend": "cpu"}
+CPU_TARGET = {"kind": "existing_worker", "worker_profile_id": "pc-test", "backend": "cpu", "include_local": False}
 
 
 def test_explicit_remote_target_survives_schema_and_legacy_is_unambiguous():

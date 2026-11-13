@@ -21,6 +21,7 @@ from .targets import pc_target, resolve_pc_pool, resolve_pc_profile
 
 
 CPU_POOL_PROTOCOL = 1
+HYBRID_CPU_PROTOCOL = 1
 
 
 def jsonable(value):
@@ -62,6 +63,9 @@ def public_job(record: dict) -> dict:
     elif target.get("kind") == "cpu_pool":
         summary["execution"] = {"kind": "cpu_pool", "backend": "cpu", "worker_name": "Nhóm CPU",
                                 "machines": [item["label"] for item in target["profiles"]], "limit": target["limit"]}
+        summary["execution"]["include_local"] = target.get("include_local", False)
+        if target.get("include_local"):
+            summary["execution"]["machines"].insert(0, "CPU máy này")
     return {key: record.get(key) for key in ("job_id", "kind", "status", "progress", "message", "error",
                                             "error_code", "created_at", "updated_at", "started_at", "finished_at", "result", "paused")} | {"request_summary": summary}
 
@@ -121,8 +125,10 @@ class ColabClient:
             if (settings.remote_execution_backend or "cpu") != "cpu" or not supports_remote_cpu(ModelRegistry().get(settings.model_id)):
                 raise GenerationError("Model chưa hỗ trợ CPU máy khác.")
             if settings.remote_execution_kind == "cpu_pool":
-                profiles, limit = resolve_pc_pool()
-                target = {"kind": "cpu_pool", "profiles": jsonable(profiles), "limit": limit}
+                include_local = bool(settings.remote_include_local)
+                profiles, limit = resolve_pc_pool(include_local=True) if include_local else resolve_pc_pool()
+                target = {"kind": "cpu_pool", "profiles": jsonable(profiles), "limit": limit,
+                          "include_local": include_local}
             else:
                 profile = resolve_pc_profile(settings.remote_worker_profile_id)
                 target = {"kind": "existing_worker", "profile": jsonable(profile)}
@@ -152,6 +158,8 @@ class ColabClient:
                 if time.monotonic() >= deadline:
                     raise GenerationError("Bộ điều phối nền cần cập nhật. Khởi động lại Windows để nạp bản mới.")
                 time.sleep(0.1)
+            if target.get("include_local") and self.store.state("supervisor", {}).get("hybrid_cpu_protocol") != HYBRID_CPU_PROTOCOL:
+                raise GenerationError("Bộ điều phối chưa nạp chế độ CPU kết hợp. Cần nạp lại bộ điều phối trước khi gửi job này.")
         return self.store.create(kind, payload, request_key)
 
     def control(self, job_id, action):
@@ -203,8 +211,20 @@ class ColabClient:
         last_update = None
         started = last_notice = time.monotonic()
         last_file_event = 0
+        last_event = 0
         while True:
             record = self.store.get(job_id)
+            delivered = set()
+            if progress_callback:
+                while True:
+                    events = self.store.read_events(job_id, last_event)
+                    for event in events:
+                        last_event = event["id"]
+                        if event["message"].strip():
+                            delivered.add(event["message"])
+                            progress_callback(ProgressEvent(event["message"], record["progress"], 100))
+                    if len(events) < 200:
+                        break
             if file_event_callback:
                 from omni_tts_core.app_controller import FileGenerationEvent
                 from omni_tts_core.file_queue import FileQueueStatus
@@ -226,7 +246,7 @@ class ColabClient:
             waiting_notice = record["status"] == "queued" and tick - last_notice >= 30
             if update != last_update or waiting_notice:
                 last_update, last_notice = update, tick
-                if progress_callback:
+                if progress_callback and (message not in delivered or waiting_notice):
                     if waiting_notice:
                         message = f"Vẫn đang chờ sau {int(tick - started)} giây · {message}"
                     progress_callback(ProgressEvent(message, record["progress"], 100))

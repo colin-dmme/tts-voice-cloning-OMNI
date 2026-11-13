@@ -38,7 +38,7 @@ from omni_tts_core.pause_presets import (
     PUNCTUATION_PAUSE_FIELDS,
 )
 from omni_tts_core.chunk_join import CUSTOM_CHUNK_JOIN_CHOICES
-from omni_tts_core.runtime_devices import REMOTE_CPU_CHOICE, runtime_choice, runtime_choice_settings
+from omni_tts_core.runtime_devices import CPU_POOL_CHOICE, REMOTE_CPU_CHOICE, runtime_choice, runtime_choice_settings
 from omni_tts_core.voice_library import group_by_project
 from omni_tts_core.ui_presenters import control_policy, field_limits, model_groups
 from omni_tts_core.ui_presenters.control_policy import (
@@ -152,6 +152,7 @@ class SettingsPanel(QScrollArea):
             "Điện toán Colab", expanded=True
         )
         self.remote_compute_group = RemoteComputeGroup()
+        self.remote_compute_group.manage_cpu_requested.connect(lambda: self.context.show_page("pc_workers"))
         self.remote_compute_group.changed.connect(self._emit_changed)
         self.device_combo.currentIndexChanged.connect(self._sync_remote_controls)
         self.remote_compute_section.body_layout.addWidget(
@@ -739,7 +740,7 @@ class SettingsPanel(QScrollArea):
             self.narrative_pacing.options(), spec,
             output_mode="split" if self.split_output.isChecked() else "merged",
             chunk_join_mode=self._current_chunk_join_mode(),
-            runtime_target="remote" if device in {"remote", REMOTE_CPU_CHOICE} else None,
+            runtime_target="remote" if device in {"remote", REMOTE_CPU_CHOICE, CPU_POOL_CHOICE} else None,
         )
         self.narrative_pacing.set_view(view)
         self._apply_rhythm_locks(view)
@@ -877,10 +878,20 @@ class SettingsPanel(QScrollArea):
         choice = str(self.device_combo.currentData() or "auto")
         allow_colab = self.device_combo.findData("remote") >= 0
         self.remote_compute_group.set_runtime_choice(choice, allow_colab=allow_colab)
-        self.remote_compute_section.setVisible(choice == REMOTE_CPU_CHOICE or allow_colab)
+        pc = choice in {REMOTE_CPU_CHOICE, CPU_POOL_CHOICE}
+        self.remote_compute_section.setVisible(pc or allow_colab)
         self.remote_compute_section.set_title(
-            "Máy chạy CPU" if choice == REMOTE_CPU_CHOICE else "Điện toán Colab"
+            "Máy chạy CPU" if pc else "Điện toán Colab"
         )
+        if pc:
+            self.device_note.setText(
+                "Chia các đoạn cho CPU máy này (nếu đánh dấu) và các máy phụ đã chọn trong tab Máy CPU."
+                if choice == CPU_POOL_CHOICE else "Gửi việc tới các máy CPU đã ghép; file kết quả được lưu trên máy này."
+            )
+            self.device_note.show()
+        elif self._policy:
+            self.device_note.setText(self._policy.device_note)
+            self.device_note.setVisible(bool(self._policy.device_note))
 
     def _apply_descriptor(self, descriptor, model_id: str) -> None:
         self._voice_form.setRowVisible(self._mode_row, descriptor.show_voice_mode_selector)
@@ -1405,6 +1416,8 @@ class SettingsPanel(QScrollArea):
         pause_values = self._pause_values()
         choice = str(self.device_combo.currentData() or "auto")
         runtime = runtime_choice_settings(choice, self.remote_compute_group.pc_profile_id)
+        if choice == CPU_POOL_CHOICE:
+            runtime["remote_include_local"] = self.remote_compute_group.include_local
         if choice == "remote":
             runtime.update(self._restored_colab_target)
         return GenerationSettings(
@@ -1604,6 +1617,8 @@ class SettingsPanel(QScrollArea):
                 }
             if execution_kind in {"existing_worker", "cpu_pool"}:
                 self.remote_compute_group.set_pc_profile_id(data.get("remote_worker_profile_id"))
+            if execution_kind == "cpu_pool":
+                self.remote_compute_group.set_include_local(bool(data.get("remote_include_local", False)))
             if "runtime_target" in data:
                 self._set_combo(self.device_combo, runtime_choice(data["runtime_target"], execution_kind))
             self._sync_remote_controls()

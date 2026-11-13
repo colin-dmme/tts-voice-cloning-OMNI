@@ -73,7 +73,7 @@ class DeviceTargetsTest(unittest.TestCase):
         policy = _policy(spec=_Spec(provider="piper"), runtime=_runtime(gpu=False))
         values = [value for _label, value in policy.device_targets]
         self.assertNotIn("cuda", values)
-        self.assertEqual(values, ["auto", "cpu", "remote_cpu"])
+        self.assertEqual(values, ["auto", "cpu", "remote_cpu", "cpu_pool"])
         self.assertIn("CUDA", policy.device_note)
 
     def test_default_device_falls_back_when_unavailable(self) -> None:

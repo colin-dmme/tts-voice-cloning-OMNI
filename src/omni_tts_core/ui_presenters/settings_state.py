@@ -41,6 +41,7 @@ DEFAULT_GENERATION_PREFERENCES: dict[str, Any] = {
     "remote_execution_kind": "",
     "remote_worker_profile_id": "",
     "remote_execution_backend": "",
+    "remote_include_local": False,
     "codec_repo": None,
     "temperature": None,
     "top_k": None,
@@ -254,6 +255,7 @@ class GenerationSettings:
     remote_execution_kind: str = ""
     remote_worker_profile_id: str = ""
     remote_execution_backend: str = ""
+    remote_include_local: bool = False
 
     def to_request(self, text: str) -> GenerateSpeechRequest:
         remote_compute = None
@@ -263,6 +265,7 @@ class GenerationSettings:
                 kind=kind,
                 worker_profile_id=self.remote_worker_profile_id,
                 backend=self.remote_execution_backend or "cpu",
+                include_local=self.remote_include_local,
             )
         return GenerateSpeechRequest(
             text=text,

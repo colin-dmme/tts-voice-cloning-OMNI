@@ -25,13 +25,13 @@ def resolve_pc_profile(profile_id: str):
     return _validate_pc_profile(profile)
 
 
-def resolve_pc_pool():
+def resolve_pc_pool(*, include_local: bool = False):
     document = profile_store().load()
     profiles = list({item.worker_id: _validate_pc_profile(item) for item in document.profiles
                      if item.enabled and item.is_pc and item.pool_enabled}.values())
-    if not profiles:
+    if not profiles and not include_local:
         raise ConfigError("Bật ít nhất một máy trong tab Máy CPU để chia tải.")
-    if len({item.broker_url for item in profiles}) != 1:
+    if len({item.broker_url for item in profiles}) > 1:
         raise ConfigError("Các máy tham gia chia tải cần dùng chung một broker.")
     return profiles, document.cpu_pool_limit
 

@@ -20,6 +20,7 @@ from omni_tts_shared.errors import ConfigError
 from omni_tts_shared.schemas import PC_EXECUTION_KINDS, RuntimeTarget
 
 REMOTE_CPU_CHOICE = "remote_cpu"
+CPU_POOL_CHOICE = "cpu_pool"
 RUNTIME_TARGET_CHOICES: list[tuple[str, RuntimeTarget]] = [
     ("Auto (khuyến nghị)", "auto"),
     ("CPU", "cpu"),
@@ -33,11 +34,18 @@ def supports_remote_cpu(spec: ModelSpec) -> bool:
 
 def runtime_choice(runtime_target: str | None, remote_execution_kind: str = "") -> str:
     if runtime_target == "remote" and remote_execution_kind in PC_EXECUTION_KINDS:
+        if remote_execution_kind == "cpu_pool":
+            return CPU_POOL_CHOICE
         return REMOTE_CPU_CHOICE
     return normalize_runtime_target(runtime_target)
 
 
 def runtime_choice_settings(choice: str | None, worker_profile_id: str = "") -> dict[str, str]:
+    if choice == CPU_POOL_CHOICE:
+        return {
+            "runtime_target": "remote", "remote_execution_kind": "cpu_pool",
+            "remote_worker_profile_id": "", "remote_execution_backend": "cpu",
+        }
     if choice == REMOTE_CPU_CHOICE:
         return {
             "runtime_target": "remote",
@@ -210,7 +218,7 @@ class RuntimeDevicePolicy:
 
 def normalize_runtime_target(value: str | None) -> RuntimeTarget:
     value = (value or "auto").strip().lower()
-    if value == REMOTE_CPU_CHOICE:
+    if value in {REMOTE_CPU_CHOICE, CPU_POOL_CHOICE}:
         raise ConfigError("Cần chuyển lựa chọn CPU máy khác thành đích xử lý từ xa trước khi chạy.")
     if value in {"auto", "cpu", "cuda", "remote"}:
         return value  # type: ignore[return-value]

@@ -19,7 +19,7 @@ from omni_tts_core.provider_options import (
     provider_settings_for_model,
 )
 from omni_tts_core.provider_registry import provider_descriptor
-from omni_tts_core.runtime_devices import REMOTE_CPU_CHOICE, RUNTIME_TARGET_CHOICES, supports_remote_cpu
+from omni_tts_core.runtime_devices import CPU_POOL_CHOICE, REMOTE_CPU_CHOICE, RUNTIME_TARGET_CHOICES, supports_remote_cpu
 from omni_tts_core.ui_presenters.tooltips import tooltip
 from omni_tts_core.worker_installation import worker_label_for_spec
 from omni_tts_shared.languages import language_label
@@ -233,6 +233,7 @@ def build_policy(
 
     if not is_remote and supports_remote_cpu(spec):
         device_targets += (("CPU máy khác", REMOTE_CPU_CHOICE),)
+        device_targets += (("Nhóm CPU · máy này + máy khác", CPU_POOL_CHOICE),)
 
     return GenerationControlPolicy(
         model_id=spec.model_id,

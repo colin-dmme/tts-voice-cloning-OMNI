@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from PySide6.QtCore import Qt, QThreadPool, Signal
+from PySide6.QtCore import Qt, QSignalBlocker, QThreadPool, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -25,7 +26,7 @@ from colin_colab_remote.broker.profiles import WorkerProfileStore
 from omni_tts_ui_qt.background import FunctionTask
 from .colab_pairing_dialog import ColabPairingDialog, pairing_client
 from .broker_control import BrokerControlWidget
-from omni_tts_core.runtime_devices import REMOTE_CPU_CHOICE
+from omni_tts_core.runtime_devices import CPU_POOL_CHOICE, REMOTE_CPU_CHOICE
 
 
 _POLICIES = (
@@ -37,6 +38,7 @@ _POLICIES = (
 
 class RemoteComputeGroup(QWidget):
     changed = Signal()
+    manage_cpu_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -62,6 +64,9 @@ class RemoteComputeGroup(QWidget):
         self.form.addRow("Máy xử lý:", self.pc_profile)
         self.form.addRow("Worker Colab ưu tiên:", self.profile)
         self.form.addRow("Khi worker lỗi:", self.policy)
+        self.local_cpu = QCheckBox("Dùng CPU máy này cùng các máy đã chọn")
+        self.local_cpu.setToolTip("Dùng model CPU đã cài trong Studio. Bỏ chọn để máy này ngừng nhận đoạn mới.")
+        self.form.addRow(self.local_cpu)
         layout.addLayout(self.form)
 
         self.status = QLabel("Chưa kiểm tra trạng thái worker.")
@@ -75,6 +80,9 @@ class RemoteComputeGroup(QWidget):
         actions.addWidget(self.check_button)
         actions.addWidget(self.manage_button)
         layout.addLayout(actions)
+        self.manage_cpu_button = QPushButton("Chọn các máy tham gia…")
+        self.manage_cpu_button.clicked.connect(self.manage_cpu_requested.emit)
+        layout.addWidget(self.manage_cpu_button)
 
         pairing_actions = QHBoxLayout()
         self.pair_button = QPushButton("Kết nối Colab bằng mã")
@@ -95,6 +103,7 @@ class RemoteComputeGroup(QWidget):
 
         self.profile.currentIndexChanged.connect(self._save_selection)
         self.pc_profile.currentIndexChanged.connect(self._save_pc_selection)
+        self.local_cpu.toggled.connect(self._save_local_cpu)
         self.policy.currentIndexChanged.connect(self._save_selection)
         self.check_button.clicked.connect(self.check_connections)
         self.manage_button.clicked.connect(self.manage_profiles)
@@ -124,15 +133,42 @@ class RemoteComputeGroup(QWidget):
             self._reset_status()
 
     def _reset_status(self) -> None:
+        if self._choice == CPU_POOL_CHOICE:
+            document = self.store.load()
+            names = [item.label for item in document.profiles if item.is_pc and item.enabled and item.pool_enabled]
+            if self.local_cpu.isChecked():
+                names.insert(0, "CPU máy này")
+            self.status.setText("Đã chọn: " + (", ".join(names) or "chưa có máy") + ". Chỉ máy sẵn sàng và cùng phiên bản model nhận việc.")
+            return
         self.status.setText("Chưa kiểm tra worker cho model đang chọn.")
 
+    @property
+    def include_local(self) -> bool:
+        return self._choice == CPU_POOL_CHOICE and self.local_cpu.isChecked()
+
+    def set_include_local(self, enabled: bool) -> None:
+        # Restoring a job's settings must not change the live machine policy.
+        with QSignalBlocker(self.local_cpu):
+            self.local_cpu.setChecked(bool(enabled))
+        self._reset_status()
+
+    def _save_local_cpu(self, checked: bool) -> None:
+        if self._loading:
+            return
+        self.store.set_cpu_pool_local(checked)
+        self._reset_status()
+        self.changed.emit()
+
     def _sync_controls(self) -> None:
-        pc = self._choice == REMOTE_CPU_CHOICE
+        pool = self._choice == CPU_POOL_CHOICE
+        pc = self._choice in {REMOTE_CPU_CHOICE, CPU_POOL_CHOICE}
         colab = self._allow_colab and not pc
-        self.form.setRowVisible(self.pc_profile, pc)
+        self.form.setRowVisible(self.pc_profile, pc and not pool)
+        self.form.setRowVisible(self.local_cpu, pool)
+        self.manage_cpu_button.setVisible(pc)
         self.form.setRowVisible(self.profile, colab)
         self.form.setRowVisible(self.policy, colab)
-        self.status.setVisible(colab)
+        self.status.setVisible(colab or pool)
         self.check_button.setVisible(colab)
         self.manage_button.setVisible(colab)
         self.pair_button.setVisible(colab)
@@ -151,6 +187,7 @@ class RemoteComputeGroup(QWidget):
         try:
             self.profile.clear()
             self.pc_profile.clear()
+            self.local_cpu.setChecked(document.cpu_pool_local)
             self.pc_profile.addItem("Tự chia tải", "")
             self.pc_profile.setToolTip("Bật hoặc bỏ máy tham gia trong tab Máy CPU bên trái.")
             for item in document.profiles:
@@ -177,6 +214,8 @@ class RemoteComputeGroup(QWidget):
         finally:
             self._loading = False
         self._sync_controls()
+        if self._choice == CPU_POOL_CHOICE:
+            self._reset_status()
         if self._choice == REMOTE_CPU_CHOICE and self._selected_pc_profile() is None:
             self._reset_status()
 

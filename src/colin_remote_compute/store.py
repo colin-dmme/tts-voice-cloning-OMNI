@@ -207,6 +207,16 @@ class ColabStore:
             rows = db.execute("SELECT time,message FROM events WHERE job_id=? ORDER BY id DESC LIMIT ?", (job_id, min(200, max(1, limit)))).fetchall()
         return [dict(row) for row in reversed(rows)]
 
+    def add_event(self, job_id: str, message: str) -> None:
+        with self.connect() as db:
+            db.execute("INSERT INTO events(job_id,time,message) VALUES(?,?,?)", (job_id, now(), message))
+
+    def read_events(self, job_id: str, after: int = 0) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute("SELECT id,time,message FROM events WHERE job_id=? AND id>? ORDER BY id LIMIT 200",
+                              (job_id, after)).fetchall()
+        return [dict(row) for row in rows]
+
     def add_file_event(self, job_id, payload):
         with self.connect() as db:
             db.execute("INSERT INTO file_events(job_id,payload) VALUES(?,?)", (job_id, encode(payload)))

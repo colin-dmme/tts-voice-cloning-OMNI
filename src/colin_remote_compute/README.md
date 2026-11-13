@@ -9,6 +9,18 @@ Studio dùng một broker HTTPS để gửi việc tới các máy Windows x64 �
 3. Trong tab **Máy CPU**, đánh dấu cột **Chia tải** cho các máy bạn muốn dùng chung. Giới hạn mặc định là 4 máy đồng thời mỗi job và có thể chỉnh từ 1 đến 16.
 4. Trong Studio chọn model, vào **Thiết bị xử lý → CPU máy khác** rồi chọn **Tự chia tải** hoặc chọn tên một máy. WAV được lưu theo thư mục đầu ra của Studio.
 
+## CPU máy này cùng CPU các máy phụ
+
+Chọn **Thiết bị xử lý → Nhóm CPU · máy này + máy khác**, rồi đánh dấu **Dùng CPU máy này cùng các máy đã chọn**. Nút **Chọn các máy tham gia…** mở tab **Máy CPU** để đánh dấu từng máy phụ. Có thể bật/tắt CPU máy này ở đầu tab đó. Lựa chọn được lưu; chỉ các job chọn chế độ kết hợp mới dùng CPU máy này.
+
+CPU máy này dùng lại worker và model đã cài trong Studio, không cần cài CPU Worker hoặc ghép mã cho chính mình. Hỗ trợ ZeroTTS Official, Piper ONNX và VieNeu v3 ONNX FP32. Máy hiện tại chiếm một vị trí trong giới hạn **Tối đa máy mỗi job**. Mỗi máy nhận một đoạn một lượt và máy xong trước nhận đoạn tiếp theo. Nếu chỉ chọn máy này, công việc vẫn chạy qua hàng đợi bền vững mà không gửi audio lên broker.
+
+Model trên các máy phải cùng revision và sample rate. Chưa cài đủ hoặc chưa xác minh được revision thì CPU máy này được bỏ qua kèm lý do. Các đoạn đã xác minh được lưu với checksum, tiếp tục dùng lại khi chạy tiếp. Bỏ chọn máy ngừng cấp đoạn mới, không bỏ đoạn đang hoàn tất.
+
+Nhật ký ghi tên máy nhận/hoàn tất từng mã đoạn và các lượt thử lại, không ghi nội dung cần đọc. Sự kiện được lưu và đọc theo thứ tự để không mất log khi nhiều máy trả kết quả giữa hai lần làm mới.
+
+MCP dùng `remote_compute={"kind":"cpu_pool","backend":"cpu","include_local":true}` trong `generation` cùng `runtime_target="remote"`. Bật/tắt nguồn local qua `cpu_worker_control(worker_profile_id="studio-local-cpu", action="include_pool" hoặc "exclude_pool")`; `cpu_worker_status` trả thêm `local_cpu`. Cần bộ điều phối có `hybrid_cpu_protocol=1`; client cũ không tự chạy lẫn local khi chưa bật tùy chọn.
+
 Model trong bộ cài gồm ZeroTTS 202M Official (giọng preset), Piper Ngọc Huyền, Piper 25hours Single Low, Piper VAIS1000 Medium và VieNeu v3 Turbo ONNX FP32 (preset hoặc clone từ Profile). Có thể tắt kết nối worker rồi chạy lại bộ cài để thêm model trong danh sách đã duyệt.
 
 ## Theo dõi và can thiệp

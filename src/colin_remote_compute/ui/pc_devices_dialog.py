@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from PySide6.QtCore import Qt, QSignalBlocker, QThreadPool, QTimer, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QDialogButtonBox, QHeaderView, QHBoxLayout, QLabel,
+    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QHeaderView, QHBoxLayout, QLabel,
     QLineEdit, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
@@ -66,6 +66,12 @@ class PcDevicesDialog(QDialog):
         self.resize(940, 515)
 
         layout = QVBoxLayout(self)
+        from ..local_cpu import LOCAL_CPU_LABEL
+        self.local_cpu = QCheckBox(f"{LOCAL_CPU_LABEL} · tham gia nhóm chia tải")
+        self.local_cpu.setChecked(store.load().cpu_pool_local)
+        self.local_cpu.setToolTip("Dùng model đã cài trong Studio khi chọn Nhóm CPU · máy này + máy khác. Bỏ chọn để ngừng cấp đoạn mới cho máy này.")
+        self.local_cpu.toggled.connect(self._save_local_cpu)
+        layout.addWidget(self.local_cpu)
         layout.addWidget(QLabel("Nhập mã ghép nối hiện trên máy CPU, rồi kiểm tra thông tin trước khi cấp quyền."))
         pairing = QHBoxLayout()
         self.code = QLineEdit()
@@ -170,6 +176,16 @@ class PcDevicesDialog(QDialog):
         except (OSError, RuntimeError, ValueError) as error:
             self.status.setText(f"Chưa lưu được giới hạn máy. {error}")
 
+    def _save_local_cpu(self, enabled):
+        try:
+            self.store.set_cpu_pool_local(enabled)
+            self.status.setText("CPU máy này sẽ nhận đoạn mới khi chọn nhóm CPU kết hợp." if enabled
+                                else "CPU máy này ngừng nhận đoạn mới; đoạn đang chạy được hoàn tất.")
+        except (OSError, ValueError) as error:
+            with QSignalBlocker(self.local_cpu):
+                self.local_cpu.setChecked(self.store.load().cpu_pool_local)
+            self.status.setText(str(error))
+
     def _toggle_pool(self, item):
         if item.column() != 0:
             return
@@ -264,6 +280,8 @@ class PcDevicesDialog(QDialog):
         self._refresh_notice = ""
 
     def _render_devices(self, devices: list[dict]) -> None:
+        with QSignalBlocker(self.local_cpu):
+            self.local_cpu.setChecked(self.store.load().cpu_pool_local)
         current = self._selected()
         selected = (current or {}).get("worker_id", self.selected_profile_id)
         profiles = {item.worker_id: item for item in self.store.load().profiles

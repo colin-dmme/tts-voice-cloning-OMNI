@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import soundfile as sf
@@ -43,13 +44,15 @@ from omni_tts_shared.errors import EngineDependencyError, GenerationError
 class _JsonLineWorker:
     """Persistent isolated worker using the same protocol for preset ONNX TTS."""
 
-    def __init__(self, worker_name: str, provider_label: str) -> None:
+    def __init__(self, worker_name: str, provider_label: str, *, environment: dict | None = None) -> None:
         self.worker_name = worker_name
         self.provider_label = provider_label
         self.worker_dir = project_path(f"engines/{worker_name}")
         self.worker_script = self.worker_dir / "synthesize.py"
         self._process: subprocess.Popen | None = None
         self._lock = threading.Lock()
+        self.environment = environment or {}
+        self._stderr_tail = deque(maxlen=24)
 
     def close(self) -> None:
         process = self._process
@@ -93,7 +96,7 @@ class _JsonLineWorker:
                 except queue.Empty:
                     tick_callback()
                     if process.poll() is not None:
-                        error = process.stderr.read() if process.stderr else ""
+                        error = "".join(self._stderr_tail)
                         self._process = None
                         raise GenerationError(
                             f"{self.provider_label} worker đã thoát: {_clean_error(error)}"
@@ -131,6 +134,7 @@ class _JsonLineWorker:
                 "chọn model rồi bấm Cài worker/môi trường."
             )
         env = dict(os.environ)
+        env.update(self.environment)
         if extra_paths:
             current = env.get("PYTHONPATH", "")
             env["PYTHONPATH"] = os.pathsep.join(
@@ -149,6 +153,15 @@ class _JsonLineWorker:
             bufsize=1,
             creationflags=creationflags,
         )
+        # A resident worker can emit diagnostics for hours. Drain the pipe so a
+        # full Windows stderr buffer cannot block synthesis; keep a bounded tail.
+        self._stderr_tail = tail = deque(maxlen=24)
+        stream = self._process.stderr
+        def drain():
+            if stream is not None:
+                for chunk in iter(lambda: stream.read(1024), ""):
+                    tail.append(chunk)
+        threading.Thread(target=drain, daemon=True).start()
         return self._process
 
 

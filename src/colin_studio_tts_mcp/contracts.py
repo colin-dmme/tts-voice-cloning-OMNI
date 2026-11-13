@@ -182,7 +182,7 @@ _PROTECTED_SETTINGS = {
     "output_dir", "output_stem", "append_stem_suffix", "overwrite", "split_output",
     "output_audio_format", "mp3_bitrate_kbps", "output_srt",
     "join_split_output_audio", "runtime_target", "speed", "pitch_shift", "emotion",
-    "remote_execution_kind", "remote_worker_profile_id", "remote_execution_backend",
+    "remote_execution_kind", "remote_worker_profile_id", "remote_execution_backend", "remote_include_local",
     "max_chunk_chars", "provider_options",
 }
 _SETTING_FIELDS = {item.name for item in fields(GenerationSettings)}
@@ -221,6 +221,7 @@ def _to_settings(
             remote_execution_kind=target.kind,
             remote_worker_profile_id=target.worker_profile_id,
             remote_execution_backend=target.backend,
+            remote_include_local=target.include_local,
         )
     values.update(
         model_id=model_id.strip(),

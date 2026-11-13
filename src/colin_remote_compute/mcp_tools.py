@@ -6,6 +6,7 @@ from typing import Any, Literal
 from .client import ColabClient, public_job
 from .pc_lifecycle import broker_for as _client
 from .targets import profile_store, resolve_pc_profile
+from .local_cpu import LOCAL_CPU_ID, LOCAL_CPU_LABEL
 
 
 def admin_profile():
@@ -24,8 +25,10 @@ def register_tools(mcp):
         local = ColabClient()
         jobs = [public_job(row) | {"verified_units": local.store.state(row["job_id"] + ":verified_units", 0)}
                 for row in local.store.list(50) if row["job_id"].startswith("cpu-job-")]
+        local_cpu = {"worker_profile_id": LOCAL_CPU_ID, "display_name": LOCAL_CPU_LABEL,
+                     "pool_enabled": profile_store().load().cpu_pool_local}
         if profile is None:
-            return {"state": "needs_broker", "devices": [], "jobs": jobs}
+            return {"state": "needs_broker", "devices": [], "jobs": jobs, "local_cpu": local_cpu}
         broker = _client(profile)
         document = profile_store().load()
         enrolled = {item.worker_id: item for item in document.profiles
@@ -38,11 +41,17 @@ def register_tools(mcp):
             saved = enrolled.get(device["worker_id"])
             device["worker_profile_id"] = saved.profile_id if saved else device["worker_id"]
             device["pool_enabled"] = bool(saved and saved.pool_enabled and not device.get("revoked"))
-        return {"state": "ok", "devices": devices, "jobs": jobs, "cpu_pool_limit": document.cpu_pool_limit}
+        return {"state": "ok", "devices": devices, "jobs": jobs, "cpu_pool_limit": document.cpu_pool_limit,
+                "local_cpu": local_cpu}
 
     @mcp.tool()
     def cpu_worker_control(worker_profile_id: str, action: Literal["pause", "resume", "stop", "include_pool", "exclude_pool"]) -> dict[str, Any]:
         """Điều khiển máy đã ghép hoặc chọn máy tham gia nhóm chia tải."""
+        if worker_profile_id == LOCAL_CPU_ID:
+            if action not in {"include_pool", "exclude_pool"}:
+                raise ValueError("CPU máy này dùng include_pool hoặc exclude_pool để bật/tắt cấp đoạn mới.")
+            profile_store().set_cpu_pool_local(action == "include_pool")
+            return {"worker_profile_id": LOCAL_CPU_ID, "pool_enabled": action == "include_pool"}
         profile = resolve_pc_profile(worker_profile_id)
         if action in {"include_pool", "exclude_pool"}:
             enabled = action == "include_pool"

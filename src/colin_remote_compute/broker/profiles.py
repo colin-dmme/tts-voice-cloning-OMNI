@@ -15,6 +15,7 @@ class WorkerProfileDocument(BaseModel):
     profiles: list[WorkerProfile] = Field(default_factory=list)
     selection: WorkerSelectionSettings = Field(default_factory=WorkerSelectionSettings)
     cpu_pool_limit: int = Field(default=4, ge=1, le=16)
+    cpu_pool_local: bool = False
 
 
 class WorkerProfileStore:
@@ -64,6 +65,12 @@ class WorkerProfileStore:
             values = self.load().model_dump() | {"cpu_pool_limit": limit}
             self._write(WorkerProfileDocument.model_validate(values))
 
+    def set_cpu_pool_local(self, enabled: bool) -> None:
+        with self._lock:
+            document = self.load()
+            document.cpu_pool_local = bool(enabled)
+            self._write(document)
+
     def set_cpu_pool_worker(self, profile_id: str, enabled: bool) -> None:
         with self._lock:
             document = self.load()
@@ -109,6 +116,7 @@ class WorkerProfileStore:
         return WorkerProfileDocument(
             profiles=profiles,
             cpu_pool_limit=document.cpu_pool_limit,
+            cpu_pool_local=document.cpu_pool_local,
             selection=WorkerSelectionSettings(
                 selected_profile_id=selected,
                 switch_policy=document.selection.switch_policy,

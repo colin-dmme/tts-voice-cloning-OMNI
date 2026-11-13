@@ -16,7 +16,7 @@ from colin_colab_remote.google_mcp import GoogleColabProvider, ProviderError
 from colin_colab_remote.lifecycle import ColabLifecycle
 from colin_colab_remote.settings import SettingsStore, data_root
 
-from .client import CPU_POOL_PROTOCOL, jsonable
+from .client import CPU_POOL_PROTOCOL, HYBRID_CPU_PROTOCOL, jsonable
 from .broker.client import BrokerConnectionError
 from .broker.models import WorkerProfile
 from .context import ManagedExecution
@@ -65,7 +65,8 @@ class ColabSupervisor:
     def _loop(self):
         while not self._stop.is_set():
             self.store.set_state("supervisor", {"pid": os.getpid(), "heartbeat": time.time(),
-                                                "cpu_pool_protocol": CPU_POOL_PROTOCOL})
+                                                "cpu_pool_protocol": CPU_POOL_PROTOCOL,
+                                                "hybrid_cpu_protocol": HYBRID_CPU_PROTOCOL})
             if self._active and not self._active.is_alive():
                 self._active = None
             if not self._active:
@@ -97,7 +98,8 @@ class ColabSupervisor:
             is_pc = target.get("kind") in PC_EXECUTION_KINDS
             if target.get("kind") == "cpu_pool":
                 profiles = [WorkerProfile.model_validate(item) for item in target["profiles"]]
-                lifecycle = CpuPoolLifecycle(self.store, job_id, profiles, target["limit"])
+                lifecycle = CpuPoolLifecycle(self.store, job_id, profiles, target["limit"],
+                                             include_local=target.get("include_local", False))
             elif is_pc:
                 lifecycle = ExistingWorkerLifecycle(self.store, job_id, WorkerProfile.model_validate(target["profile"]))
             if job["cancel_requested"]:

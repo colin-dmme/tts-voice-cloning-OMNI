@@ -157,9 +157,12 @@ class RemoteComputeTarget(BaseModel):
     kind: Literal["existing_worker", "cpu_pool", "managed_colab"]
     worker_profile_id: str = Field(default="", max_length=128)
     backend: Literal["cpu", "cuda"] = "cpu"
+    include_local: bool = False
 
     @model_validator(mode="after")
     def validate_worker_backend(self):
+        if self.include_local and self.kind != "cpu_pool":
+            raise ValueError("CPU máy này chỉ tham gia khi chọn nhóm chia tải CPU.")
         if self.kind in PC_EXECUTION_KINDS and self.backend != "cpu":
             raise ValueError("Máy khác hiện chỉ hỗ trợ xử lý bằng CPU.")
         if self.kind == "cpu_pool" and self.worker_profile_id:

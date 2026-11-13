@@ -180,7 +180,10 @@ class BrokerClient:
     def download_result(self, job: RemoteTtsJob, destination: Path) -> Path:
         if job.result is None:
             raise GenerationError(f"Remote job {job.job_id} chưa có metadata kết quả.")
-        body = self._request("GET", f"/v1/jobs/{quote(job.job_id, safe='')}/result")
+        body = self._request(
+            "GET", f"/v1/jobs/{quote(job.job_id, safe='')}/result",
+            timeout_seconds=max(180.0, self.options.request_timeout_seconds),
+        )
         digest = hashlib.sha256(body).hexdigest()
         if digest != job.result.sha256:
             raise GenerationError(
@@ -225,6 +228,7 @@ class BrokerClient:
         body: bytes | None = None,
         extra_headers: dict[str, str] | None = None,
         authenticated: bool = True,
+        timeout_seconds: float | None = None,
     ) -> bytes:
         headers = {
             "Accept": "application/json, audio/wav",
@@ -236,12 +240,15 @@ class BrokerClient:
         attempts = self.options.max_retries + 1
         retryable = {502, 503, 504, 520, 521, 522, 523, 524}
         url = f"{self.options.base_url}{path}"
+        request_timeout = (
+            self.options.request_timeout_seconds if timeout_seconds is None else timeout_seconds
+        )
         last_error: Exception | None = None
         for attempt in range(attempts):
             request = Request(url, data=body, headers=headers, method=method)
             try:
                 opening = self._opener.open if self._opener else urlopen
-                with opening(request, timeout=self.options.request_timeout_seconds) as response:
+                with opening(request, timeout=request_timeout) as response:
                     return response.read()
             except HTTPError as exc:
                 detail = _http_error_detail(exc)

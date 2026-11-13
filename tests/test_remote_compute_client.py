@@ -197,8 +197,9 @@ class BrokerClientTest(unittest.TestCase):
                 with patch(
                     "omni_tts_core.remote_compute.client.urlopen",
                     return_value=_Response(audio),
-                ):
+                ) as download:
                     self.client.download_result(job, output)
+                    self.assertGreaterEqual(download.call_args.kwargs["timeout"], 180)
             self.assertEqual(output.read_bytes(), audio)
 
     def test_download_does_not_replace_output_on_bad_sha256(self) -> None:

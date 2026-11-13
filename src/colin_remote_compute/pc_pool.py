@@ -103,6 +103,7 @@ class CpuPoolLifecycle:
 
     def _distribute(self, context, pending, available, cancel_event, *, total, rate):
         active = {}
+        completed = total - len(pending)
         retries = defaultdict(int)
         cooldowns = {}
         failure = None
@@ -138,7 +139,7 @@ class CpuPoolLifecycle:
                         continue
                     raise GenerationError("Nhóm CPU chưa có máy cùng phiên bản model để nhận đoạn còn lại. Bấm Tiếp tục khi máy sẵn sàng.")
 
-                context.status(f"Nhóm CPU · {total - len(pending) - len(active)}/{total} đoạn đã xác minh · {len(active)} máy")
+                context.status(f"Nhóm CPU · {completed}/{total} đoạn đã xác minh · {len(active)} máy")
                 done, _ = wait(active, timeout=1, return_when=FIRST_COMPLETED)
                 for future in done:
                     profile, unit, digest = active.pop(future)
@@ -152,6 +153,7 @@ class CpuPoolLifecycle:
                     except (GenerationError, OSError, ValueError) as error:
                         failure = failure or error
                     else:
+                        completed += 1
                         retries[profile.profile_id] = 0
                         available.appendleft(profile)
             if failure is not None:

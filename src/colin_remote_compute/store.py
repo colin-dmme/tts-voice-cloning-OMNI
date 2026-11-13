@@ -112,6 +112,18 @@ class ColabStore:
                 db.execute("UPDATE jobs SET status='running',started_at=COALESCE(started_at,?),updated_at=? WHERE job_id=?", (now(), now(), row["job_id"]))
         return self.get(row["job_id"]) if row else None
 
+    def queue_ahead(self, job_id: str, *, allow_colab: bool = True) -> list[dict]:
+        """Scheduler-eligible work ahead, without loading source text or settings."""
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT job_id,status,message FROM jobs
+                   WHERE status IN ('queued','running','cancelling') AND paused=0
+                   AND (? OR job_id LIKE 'cpu-job-%')
+                   AND (created_at,rowid) < (SELECT created_at,rowid FROM jobs WHERE job_id=?)
+                   ORDER BY created_at,rowid""", (allow_colab, job_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def update(self, job_id: str, **changes) -> dict:
         allowed = {"status", "progress", "message", "error", "error_code", "result", "started_at", "finished_at"}
         if not changes.keys() <= allowed:

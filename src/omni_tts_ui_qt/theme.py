@@ -100,7 +100,10 @@ QPushButton:disabled {{ color: #686878; background: #12121d; }}
 QPushButton#primaryButton {{
     background: #6d28d9; border-color: {ACCENT}; font-weight: 600; color: white;
 }}
-QPushButton#primaryButton:hover {{ background: {ACCENT_STRONG}; }}
+QPushButton#primaryButton:hover:enabled {{ background: {ACCENT_STRONG}; }}
+QPushButton#primaryButton:disabled {{
+    color: #86869a; background: #191923; border-color: #34344b;
+}}
 QPushButton#dangerButton:hover {{ border-color: {DANGER}; }}
 QToolButton {{
     background: #1a1a2a; border: 1px solid #34344b;

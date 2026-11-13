@@ -164,6 +164,8 @@ class StudioPage(QWidget):
         self._queue_status_message = ""
         self._queue_active = False
         self._text_active = False
+        self._text_cancelling = False
+        self._text_status_message = ""
         self._queue_pronunciation_preset_names: dict[str, str] = {}
         self.remote_switch_requested.connect(self._show_remote_switch_prompt)
         self.ctrl.set_remote_switch_confirm(self._confirm_remote_switch)
@@ -1561,13 +1563,17 @@ class StudioPage(QWidget):
                 "processing", self._queue_status_message or "Đang chạy hàng đợi…"
             )
         elif text_running:
-            self.context.set_worker_status("processing", "Đang tạo giọng đọc…")
+            self.context.set_worker_status(
+                "processing", self._text_status_message or "Đang tạo giọng đọc…"
+            )
         else:
             self.context.set_worker_status(fallback_status, fallback_message)
 
     # --- Text generation ----------------------------------------------------
 
     def _generate_text(self) -> None:
+        if self._text_active:
+            return
         text = self.text_input.toPlainText().strip()
         if not text:
             QMessageBox.information(self, "Thiếu nội dung", "Bạn chưa nhập nội dung cần đọc.")
@@ -1598,17 +1604,28 @@ class StudioPage(QWidget):
         self._text_worker.failed.connect(self._on_text_failed)
         self._text_worker.cancelled.connect(self._on_text_cancelled)
         self.generate_button.setEnabled(False)
+        self.generate_button.setText("Đang xử lý…")
         self.text_cancel_button.setEnabled(True)
         self._text_active = True
+        self._text_cancelling = False
+        self._text_status_message = "Đang chuẩn bị tác vụ tạo giọng…"
         self.text_progress_bar.setVisible(True)
         self.text_progress_bar.setValue(0)
-        self.text_job_label.setText("Đang tạo giọng đọc…")
+        self.text_job_label.setText(self._text_status_message)
         self._sync_global_worker_status()
+        self.context.log(self._text_status_message)
         self.result_view.setPlainText("Đang xử lý…")
         self._text_worker.start()
 
     def _cancel_text(self) -> None:
-        if self._text_worker is not None:
+        if self._text_worker is not None and not self._text_cancelling:
+            self._text_cancelling = True
+            self.generate_button.setText("Đang hủy…")
+            self.text_cancel_button.setEnabled(False)
+            self._text_status_message = "Đang hủy tác vụ · chờ xác nhận hoàn tất."
+            self.text_job_label.setText(self._text_status_message)
+            self.context.log(self._text_status_message)
+            self._sync_global_worker_status()
             self._text_worker.request_cancel()
 
     def _on_text_progress(self, event) -> None:
@@ -1616,8 +1633,12 @@ class StudioPage(QWidget):
         self.text_progress_bar.setValue(
             int(max(0.0, min(1.0, percent)) * 100)
         )
-        self.text_job_label.setText(event.message)
-        self.context.log(event.message)
+        if event.message.strip():
+            self.context.log(event.message)
+            if not self._text_cancelling:
+                self._text_status_message = event.message
+                self.text_job_label.setText(event.message)
+                self._sync_global_worker_status()
 
     def _on_text_done(self, result) -> None:
         self._last_text_result = result
@@ -1659,6 +1680,7 @@ class StudioPage(QWidget):
 
     def _finish_text(self, status: str, message: str) -> None:
         self.generate_button.setEnabled(True)
+        self.generate_button.setText("Tạo giọng đọc")
         self.text_cancel_button.setEnabled(False)
         self.text_progress_bar.setVisible(False)
         self.text_job_label.setText("Sẵn sàng")
@@ -1666,6 +1688,8 @@ class StudioPage(QWidget):
         self._text_worker = None
         self._active_text_settings = None
         self._text_active = False
+        self._text_cancelling = False
+        self._text_status_message = ""
         self._sync_global_worker_status(status, message)
 
     def _record_text_history(
@@ -1721,4 +1745,4 @@ class StudioPage(QWidget):
         self._schedule_pronunciation_preview()
 
     def is_busy(self) -> bool:
-        return self.queue.is_running() or (self._text_worker is not None and self._text_worker.isRunning())
+        return self.queue.is_running() or self._text_active

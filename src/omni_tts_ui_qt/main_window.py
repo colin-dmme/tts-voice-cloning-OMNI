@@ -218,6 +218,8 @@ class MainWindow(QMainWindow):
             self.log("Không có model nào đang chiếm VRAM để giải phóng.")
 
     def log(self, message: str) -> None:
+        if not message.strip():
+            return
         stamp = datetime.now().strftime("%H:%M:%S")
         self.log_view.appendPlainText(f"[{stamp}] {message}")
 

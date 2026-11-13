@@ -171,9 +171,37 @@ class ColabClient:
                 "cleanup_error": self.store.state("cleanup_error"),
                 "jobs": [public_job(job) | {"verified_units": self.store.state(job["job_id"] + ":verified_units", 0)} for job in self.store.list()]}
 
+    def _progress_message(self, record):
+        status = record["status"]
+        if status == "cancelling":
+            return "Đang hủy tác vụ từ xa · chờ xác nhận từ bộ điều phối."
+        if record["paused"] and status not in TERMINAL:
+            return "Tác vụ đã tạm dừng · bấm Tiếp tục trong bảng quản lý để chạy tiếp."
+        if str(record["message"] or "").strip():
+            return record["message"]
+        if status == "queued":
+            ahead = self.store.queue_ahead(
+                record["job_id"], allow_colab=SettingsStore(self.directory).load().enabled,
+            )
+            if ahead:
+                message = f"Đã xếp hàng · {len(ahead)} tác vụ phía trước."
+                active = next((job for job in ahead if job["status"] in {"running", "cancelling"}), None)
+                if active and active["message"]:
+                    message += " Tác vụ đang chạy: " + active["message"]
+                return message
+            return "Đã xếp hàng · đang chờ bộ điều phối nhận việc."
+        return {
+            "running": "Bộ điều phối đang chuẩn bị tác vụ tạo giọng.",
+            "succeeded": "Audio đã hoàn tất.",
+            "cancelled": "Đã hủy tác vụ tạo giọng.",
+            "failed": "Tác vụ tạo giọng thất bại.",
+            "waiting": "Tác vụ cần kiểm tra trong bảng quản lý trước khi tiếp tục.",
+        }.get(status, "Đang kiểm tra trạng thái tác vụ tạo giọng.")
+
     def wait(self, job_id, *, progress_callback=None, cancel_event=None, file_event_callback=None):
         from omni_tts_core.progress import ProgressEvent
         last_update = None
+        started = last_notice = time.monotonic()
         last_file_event = 0
         while True:
             record = self.store.get(job_id)
@@ -192,10 +220,16 @@ class ColabClient:
                         file_event_callback(FileGenerationEvent(**item))
                     if len(batch) < 200:
                         break
-            if record["updated_at"] != last_update:
-                last_update = record["updated_at"]
+            message = self._progress_message(record)
+            update = (record["status"], record["progress"], message)
+            tick = time.monotonic()
+            waiting_notice = record["status"] == "queued" and tick - last_notice >= 30
+            if update != last_update or waiting_notice:
+                last_update, last_notice = update, tick
                 if progress_callback:
-                    progress_callback(ProgressEvent(record["message"], record["progress"], 100))
+                    if waiting_notice:
+                        message = f"Vẫn đang chờ sau {int(tick - started)} giây · {message}"
+                    progress_callback(ProgressEvent(message, record["progress"], 100))
             if cancel_event is not None and cancel_event.is_set() and record["status"] not in TERMINAL:
                 self.store.control(job_id, "cancel")
             if record["status"] == "succeeded":

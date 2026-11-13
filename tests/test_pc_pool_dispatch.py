@@ -6,8 +6,11 @@ from colin_remote_compute.context import ManagedExecution
 from colin_remote_compute.inference_units import InferenceUnit, execute_units
 from colin_remote_compute.pc_lifecycle import PcWorkerUnavailable
 from colin_remote_compute.pc_pool import CpuPoolLifecycle
+import colin_remote_compute.pc_pool as pool_module
 from colin_remote_compute.store import ColabStore
 from omni_tts_core.service import _chunks_for_provider
+from omni_tts_shared.errors import GenerationError
+import pytest
 
 
 def test_pool_splits_paragraphs_for_providers_with_native_chunk_boundaries():
@@ -73,3 +76,39 @@ def test_pool_cancel_reconciles_every_outstanding_unit(tmp_path):
     lifecycle.cancel_pending()
     assert sorted(cancelled) == ["remote-0", "remote-1"]
     assert not lifecycle.has_pending()
+
+
+@pytest.mark.parametrize("recover", [True, False])
+def test_pool_retries_after_all_machines_temporarily_fail(tmp_path, monkeypatch, recover):
+    store = ColabStore(tmp_path / "queue")
+    profiles = [WorkerProfile(profile_id=f"pc-retry-{i}", worker_id=f"pc-retry-{i}", label=str(i),
+                              broker_url="http://127.0.0.1:18958") for i in range(2)]
+    job = store.create("text", {"remote_target": {"kind": "cpu_pool"}})
+    lifecycle = CpuPoolLifecycle(store, job["job_id"], profiles, 2)
+    context = ManagedExecution(store, job["job_id"], lifecycle)
+    monkeypatch.setattr(lifecycle, "_groups", lambda _: {("r1", 48000): profiles})
+    monkeypatch.setattr(lifecycle, "_allowed", lambda _: True)
+    ticks, attempts, mutex = [0.0], {}, Lock()
+    monkeypatch.setattr(pool_module, "time", SimpleNamespace(
+        monotonic=lambda: ticks[0], sleep=lambda seconds: ticks.__setitem__(0, ticks[0] + seconds),
+    ))
+
+    def process(_context, profile, unit, _digest, _rate):
+        with mutex:
+            attempt = attempts[profile.profile_id] = attempts.get(profile.profile_id, 0) + 1
+        if not recover or attempt == 1:
+            raise PcWorkerUnavailable("temporary upload failure")
+        unit.destination.write_text(unit.request.text, encoding="utf-8")
+
+    monkeypatch.setattr(lifecycle, "_run_unit", process)
+    units = [InferenceUnit(RemoteTtsRequest(
+        client_job_id="retry-source", inference_unit_id=str(i), idempotency_key=f"retry-{i}",
+        model_id="zerotts_202m_official", text=f"unit {i}",
+    ), tmp_path / f"{i}.wav") for i in range(2)]
+    if recover:
+        list(execute_units(context, units))
+        assert [unit.destination.read_text(encoding="utf-8") for unit in units] == ["unit 0", "unit 1"]
+    else:
+        with pytest.raises(GenerationError, match="Nhóm CPU"):
+            list(execute_units(context, units))
+        assert set(attempts.values()) == {3}

@@ -103,6 +103,8 @@ class CpuPoolLifecycle:
 
     def _distribute(self, context, pending, available, cancel_event, *, total, rate):
         active = {}
+        retries = defaultdict(int)
+        cooldowns = {}
         failure = None
         with ThreadPoolExecutor(max_workers=self.limit) as executor:
             while pending or active:
@@ -112,6 +114,10 @@ class CpuPoolLifecycle:
                     except GenerationCancelled as error:
                         failure = error
                 paused = self.store.get(self.job_id)["paused"]
+                for profile_id, (deadline, profile) in list(cooldowns.items()):
+                    if time.monotonic() >= deadline:
+                        available.append(profile)
+                        del cooldowns[profile_id]
                 while not (failure or paused) and pending and available and len(active) < self.limit:
                     profile = available.popleft()
                     if not self._allowed(profile):
@@ -126,19 +132,27 @@ class CpuPoolLifecycle:
                         context.status("Đã tạm dừng cấp đoạn mới cho nhóm CPU")
                         time.sleep(0.5)
                         continue
+                    if cooldowns:
+                        context.status("Đang chờ máy CPU kết nối lại")
+                        time.sleep(0.5)
+                        continue
                     raise GenerationError("Nhóm CPU chưa có máy cùng phiên bản model để nhận đoạn còn lại. Bấm Tiếp tục khi máy sẵn sàng.")
 
                 context.status(f"Nhóm CPU · {total - len(pending) - len(active)}/{total} đoạn đã xác minh · {len(active)} máy")
-                done, _ = wait(active, return_when=FIRST_COMPLETED)
+                done, _ = wait(active, timeout=1, return_when=FIRST_COMPLETED)
                 for future in done:
                     profile, unit, digest = active.pop(future)
                     try:
                         future.result()
                     except PcWorkerUnavailable:
                         pending.appendleft((unit, digest))
+                        retries[profile.profile_id] += 1
+                        if retries[profile.profile_id] < 3:
+                            cooldowns[profile.profile_id] = (time.monotonic() + 10 * retries[profile.profile_id], profile)
                     except (GenerationError, OSError, ValueError) as error:
                         failure = failure or error
                     else:
+                        retries[profile.profile_id] = 0
                         available.appendleft(profile)
             if failure is not None:
                 raise failure

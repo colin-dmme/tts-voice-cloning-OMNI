@@ -22,7 +22,7 @@ class PcWorkerUnavailable(GenerationError):
 def broker_for(profile: WorkerProfile) -> BrokerClient:
     return BrokerClient(BrokerConnectionOptions(
         base_url=profile.broker_url, auth_env=profile.auth_env, auth_token_file=profile.auth_token_file,
-        request_timeout_seconds=20, max_retries=0,
+        request_timeout_seconds=20, max_retries=2,
     ), no_redirect=True)
 
 

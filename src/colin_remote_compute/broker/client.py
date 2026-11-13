@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from http.client import IncompleteRead
 import json
 import os
 import socket
@@ -250,7 +251,7 @@ class BrokerClient:
                 )
                 if exc.code not in retryable or attempt + 1 >= attempts:
                     raise last_error from exc
-            except (URLError, socket.timeout, TimeoutError) as exc:
+            except (URLError, socket.timeout, TimeoutError, ConnectionError, IncompleteRead) as exc:
                 last_error = BrokerConnectionError("Tạm mất kết nối broker trên PC.")
                 if attempt + 1 >= attempts:
                     raise last_error from exc

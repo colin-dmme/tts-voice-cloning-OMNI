@@ -25,7 +25,7 @@ from omni_tts_core.app_controller import (
 from omni_tts_core.file_queue import FileQueueStatus
 from omni_tts_core.progress import ProgressEvent
 from omni_tts_core.ui_presenters.settings_state import GenerationSettings
-from omni_tts_shared.errors import GenerationCancelled, GenerationError
+from omni_tts_shared.errors import ConfigError, GenerationCancelled, GenerationError
 from omni_tts_shared.schemas import GenerateSpeechResult
 
 
@@ -109,6 +109,53 @@ def queued(tmp_path, monkeypatch):
 
 def submit_text(queued, settings=None, key=None):
     return queued.client.submit("text", {"text": "Xin chào", "settings": settings or queued.settings}, key)
+
+
+def test_configuration_error_is_preserved_instead_of_hidden_by_generic_error(queued):
+    queued.controller.failure = ConfigError("Hãy chọn chủ đề để random nhạc.")
+    job = submit_text(queued)
+    queued.supervisor.run_job(queued.store.next_job())
+    saved = queued.store.get(job["job_id"])
+    assert saved["status"] == "waiting"
+    assert saved["error"] == str(queued.controller.failure)
+    assert saved["error_code"] == "retry_required"
+
+
+def test_unexpected_error_has_a_diagnostic_in_work_folder(queued):
+    queued.controller.failure = RuntimeError("diagnostic-test")
+    job = submit_text(queued)
+    queued.supervisor.run_job(queued.store.next_job())
+    diagnostic = queued.client.work_dir(job["job_id"]) / "error.log"
+    assert "RuntimeError: diagnostic-test" in diagnostic.read_text(encoding="utf-8")
+
+
+def test_invalid_music_is_rejected_before_a_remote_job_is_created(queued):
+    queued.settings.narrative_pacing = {"enabled": True, "music": {"enabled": True, "selection_mode": "random_theme"}}
+    with pytest.raises(ConfigError, match="chủ đề"):
+        submit_text(queued)
+    assert not queued.store.list()
+
+
+def test_resume_updates_only_music_and_keeps_the_original_job_and_speech_payload(queued, monkeypatch):
+    from omni_tts_core.narrative_pacing import music_bridge_mixer
+    validate = Mock()
+    monkeypatch.setattr(music_bridge_mixer, "validate_narrative_music", validate)
+    job = submit_text(queued)
+    queued.store.wait_or_retry(job["job_id"], "music config", "retry_required")
+    queued.store.set_state("supervisor", {"postprocessing_protocol": 1})
+    original = queued.store.get(job["job_id"])["payload"]
+
+    def finish(job_id, **kwargs):
+        queued.supervisor.run_job(queued.store.next_job())
+        return queued.store.get(job_id)["result"]
+
+    monkeypatch.setattr(queued.client, "wait", finish)
+    result = queued.client.resume_text(job["job_id"], music_options={"enabled": True, "theme": "binh-sach", "selection_mode": "random_theme"})
+    assert result["audio_path"] == str(queued.controller.result.audio_path)
+    assert len(queued.store.list()) == 1
+    assert queued.store.get(job["job_id"])["payload"] == original
+    assert queued.controller.calls[0][1].narrative_pacing["music"]["theme"] == "binh-sach"
+    validate.assert_called()
 
 
 def test_managed_execution_is_disabled_by_default(tmp_path, monkeypatch):

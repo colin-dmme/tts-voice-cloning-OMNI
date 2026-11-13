@@ -21,6 +21,14 @@ MUSIC_PEAK = 0.7
 SILENT_DB = -45.0
 
 
+def validate_narrative_music(options, *, context: str = "", library=None) -> None:
+    """Check library selection before spending time synthesizing speech."""
+    from omni_tts_shared.narrative_pacing import NarrativePacingOptions
+    options = NarrativePacingOptions.model_validate(options)
+    if options.enabled and options.music.enabled:
+        BridgeMusic(options.music, 48000, -18.0, context=context, library=library)
+
+
 class BridgeMusic:
     """Picks bridge tracks (fixed / random theme / selection / preset) and levels them."""
 

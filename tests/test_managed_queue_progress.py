@@ -70,3 +70,19 @@ def test_running_legacy_record_has_a_nonempty_start_message(tmp_path):
 
     client.wait(job["job_id"], progress_callback=on_progress)
     assert events[0].message.strip()
+
+
+def test_waiting_job_reports_recovery_metadata_and_work_folder(tmp_path):
+    import pytest
+    from omni_tts_shared.errors import GenerationError
+    client = ColabClient(tmp_path)
+    job = client.store.create("text", {})
+    client.store.set_state(job["job_id"] + ":verified_units", 219)
+    client.store.wait_or_retry(job["job_id"], "Select music theme", "retry_required")
+    events = []
+    with pytest.raises(GenerationError, match="Select music"):
+        client.wait(job["job_id"], progress_callback=events.append)
+    assert events[-1].managed_job_id == job["job_id"]
+    assert events[-1].verified_units == 219
+    assert events[-1].status == "waiting"
+    assert client.work_dir(job["job_id"]).is_dir()

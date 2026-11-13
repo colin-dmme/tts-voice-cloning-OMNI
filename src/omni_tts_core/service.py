@@ -582,6 +582,8 @@ class TtsService:
         from omni_tts_core.rhythm.execution import prepare_rhythm
         rhythm = prepare_rhythm(request, spec, source_kind="epub" if source_units is not None else "text")
         request = rhythm.request
+        from omni_tts_core.narrative_pacing.music_bridge_mixer import validate_narrative_music
+        validate_narrative_music(rhythm.pacing_options, context=request.text[:2000])
         units = _prepared_text_units(
             request.text,
             request.language,

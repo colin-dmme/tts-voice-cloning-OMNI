@@ -22,6 +22,7 @@ from .targets import pc_target, resolve_pc_pool, resolve_pc_profile
 
 CPU_POOL_PROTOCOL = 1
 HYBRID_CPU_PROTOCOL = 1
+POSTPROCESSING_PROTOCOL = 1
 
 
 def jsonable(value):
@@ -116,6 +117,9 @@ class ColabClient:
 
     def submit(self, kind: str, payload: dict, request_key: str | None = None):
         settings = payload["settings"]
+        if kind == "text":
+            from omni_tts_core.narrative_pacing.music_bridge_mixer import validate_narrative_music
+            validate_narrative_music(settings.narrative_pacing, context=payload["text"][:2000])
         is_pc = pc_target(settings)
         if not is_pc and not SettingsStore(self.directory).load().enabled:
             raise GenerationError("Bật Colab tự động trong bảng quản lý trước khi tạo job.")
@@ -166,6 +170,34 @@ class ColabClient:
         self.ensure_daemon()
         return public_job(self.store.control(job_id, action))
 
+    def work_dir(self, job_id: str) -> Path:
+        self.store.get(job_id)
+        path = self.directory / "artifacts" / job_id
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def resume_text(self, job_id, *, music_options=None, progress_callback=None, cancel_event=None):
+        from omni_tts_shared.narrative_pacing import NarrativePacingOptions
+        from omni_tts_core.narrative_pacing.music_bridge_mixer import validate_narrative_music
+        record = self.store.get(job_id)
+        if record["kind"] != "text" or record["status"] in {"cancelled", "failed"}:
+            raise GenerationError("Lượt này không thể tiếp tục. Chọn một lượt văn bản đang chờ xử lý.")
+        if record["status"] == "succeeded":
+            return record["result"]
+        self.ensure_daemon()
+        if music_options is not None and self.store.state("supervisor", {}).get("postprocessing_protocol") != POSTPROCESSING_PROTOCOL:
+            raise GenerationError("Bộ điều phối cần nạp bản mới để tiếp tục với lựa chọn nhạc đã chỉnh.")
+        if music_options is not None:
+            if record["status"] != "waiting":
+                raise GenerationError("Chỉ thay lựa chọn nhạc khi lượt đang chờ xử lý.")
+            pacing = NarrativePacingOptions.model_validate(record["payload"]["settings"].get("narrative_pacing", {}))
+            music = pacing.music.model_validate(music_options)
+            pacing = pacing.model_copy(update={"music": music})
+            validate_narrative_music(pacing, context=record["payload"]["text"][:2000])
+            self.store.set_state(job_id + ":postprocessing", {"music": music.model_dump()})
+        self.control(job_id, "resume")
+        return self.wait(job_id, progress_callback=progress_callback, cancel_event=cancel_event)
+
     def release(self):
         self.store.set_state("release_requested", True)
         self.ensure_daemon()
@@ -212,8 +244,13 @@ class ColabClient:
         started = last_notice = time.monotonic()
         last_file_event = 0
         last_event = 0
+        work_dir = str(self.work_dir(job_id))
         while True:
             record = self.store.get(job_id)
+            def event_for(message):
+                return ProgressEvent(message, record["progress"], 100, managed_job_id=job_id,
+                                     work_dir=work_dir, status=record["status"],
+                                     verified_units=self.store.state(job_id + ":verified_units", 0))
             delivered = set()
             if progress_callback:
                 while True:
@@ -222,7 +259,7 @@ class ColabClient:
                         last_event = event["id"]
                         if event["message"].strip():
                             delivered.add(event["message"])
-                            progress_callback(ProgressEvent(event["message"], record["progress"], 100))
+                            progress_callback(event_for(event["message"]))
                     if len(events) < 200:
                         break
             if file_event_callback:
@@ -249,7 +286,7 @@ class ColabClient:
                 if progress_callback and (message not in delivered or waiting_notice):
                     if waiting_notice:
                         message = f"Vẫn đang chờ sau {int(tick - started)} giây · {message}"
-                    progress_callback(ProgressEvent(message, record["progress"], 100))
+                    progress_callback(event_for(message))
             if cancel_event is not None and cancel_event.is_set() and record["status"] not in TERMINAL:
                 self.store.control(job_id, "cancel")
             if record["status"] == "succeeded":

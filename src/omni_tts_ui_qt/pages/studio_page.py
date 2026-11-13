@@ -166,6 +166,10 @@ class StudioPage(QWidget):
         self._text_active = False
         self._text_cancelling = False
         self._text_status_message = ""
+        self._managed_text_job_id = ""
+        self._managed_text_state = ""
+        self._text_work_dir: Path | None = None
+        self._text_verified_units = 0
         self._queue_pronunciation_preset_names: dict[str, str] = {}
         self.remote_switch_requested.connect(self._show_remote_switch_prompt)
         self.ctrl.set_remote_switch_confirm(self._confirm_remote_switch)
@@ -197,6 +201,11 @@ class StudioPage(QWidget):
         self._sync_higgs_script_toolbar()
         self._refresh_queue_pronunciation_choices()
         self._refresh_queue()
+        self._restore_managed_text_job()
+        self._managed_timer = QTimer(self)
+        self._managed_timer.setInterval(1500)
+        self._managed_timer.timeout.connect(self._refresh_managed_text_state)
+        self._managed_timer.start()
 
     def _confirm_remote_switch(self, current, replacement, reason: str) -> bool:
         if QApplication.instance() is not None and (
@@ -418,8 +427,13 @@ class StudioPage(QWidget):
         self.generate_button.setObjectName("primaryButton")
         self.text_cancel_button = QPushButton("Hủy")
         self.text_cancel_button.setEnabled(False)
+        self.text_resume_button = QPushButton("Tiếp tục")
+        self.text_resume_button.setObjectName("primaryButton")
+        self.text_resume_button.setEnabled(False)
+        self.text_resume_button.setToolTip("Tiếp tục đúng lượt đã lưu, dùng lại các đoạn đã xác minh. Chỉ cập nhật lựa chọn nhạc; giữ nội dung và giọng của lượt cũ.")
         stem_row.addWidget(self.generate_button)
         stem_row.addWidget(self.text_cancel_button)
+        stem_row.addWidget(self.text_resume_button)
         # Per-text output folder override. Empty = fall back to the global
         # "Đầu ra" setting (which itself defaults to the job folder).
         dir_row = QHBoxLayout()
@@ -485,6 +499,10 @@ class StudioPage(QWidget):
         self.text_progress_bar.setVisible(False)
         text_progress_row.addWidget(self.text_job_label, 1)
         text_progress_row.addWidget(self.text_progress_bar, 1)
+        self.text_work_folder_button = QPushButton("📂 Thư mục làm việc")
+        self.text_work_folder_button.setEnabled(False)
+        self.text_work_folder_button.setToolTip("Mở các đoạn WAV và nhật ký đã lưu, kể cả khi lượt đang chạy hoặc cần tiếp tục.")
+        text_progress_row.addWidget(self.text_work_folder_button)
         layout.addWidget(self.authoring_assist_bar)
         layout.addWidget(self.higgs_script_toolbar)
         layout.addLayout(pronunciation_row)
@@ -497,6 +515,8 @@ class StudioPage(QWidget):
         layout.addWidget(self.result_view)
         self.generate_button.clicked.connect(self._generate_text)
         self.text_cancel_button.clicked.connect(self._cancel_text)
+        self.text_resume_button.clicked.connect(self._resume_text)
+        self.text_work_folder_button.clicked.connect(self._open_text_work_folder)
         self.text_preview_button.clicked.connect(self._preview_text_audio)
         self.text_open_folder_button.clicked.connect(self._open_text_result_folder)
         self.text_copy_path_button.clicked.connect(self._copy_text_result_path)
@@ -528,6 +548,70 @@ class StudioPage(QWidget):
             lambda: self.ctrl.open_result_folder(manifest),
             "Đã mở thư mục kết quả",
         )
+
+    def _open_text_work_folder(self) -> None:
+        if self._text_work_dir is not None and self._text_work_dir.is_dir():
+            open_path(self._text_work_dir)
+
+    def _update_text_job_controls(self) -> None:
+        self.text_work_folder_button.setEnabled(bool(self._text_work_dir and self._text_work_dir.is_dir()))
+        self.text_resume_button.setEnabled(bool(
+            self._managed_text_job_id and self._managed_text_state == "waiting" and not self._text_active
+        ))
+
+    def _restore_managed_text_job(self) -> None:
+        from colin_remote_compute.client import ColabClient
+        from colin_remote_compute.daemon import restore_settings
+        try:
+            client = ColabClient()
+            saved_id = self.context.preferences.load().get("active_text_managed_job_id")
+            records = [client.store.get(saved_id)] if saved_id else client.store.list(30)
+            record = next((row for row in records if row["kind"] == "text" and row["status"] != "cancelled"), None)
+            if record is None:
+                return
+            self._managed_text_job_id = record["job_id"]
+            if not self.text_input.toPlainText().strip():
+                settings = restore_settings(record["payload"]["settings"])
+                override = client.store.state(record["job_id"] + ":postprocessing", {})
+                if override.get("music") is not None:
+                    settings.narrative_pacing = dict(settings.narrative_pacing, music=override["music"])
+                self.settings_panel.load_preferences(settings.to_preferences())
+                self.text_input.setPlainText(record["payload"]["text"])
+            self._refresh_managed_text_state()
+        except (OSError, ValueError, KeyError):
+            return
+
+    def _refresh_managed_text_state(self) -> None:
+        if not self._managed_text_job_id:
+            return
+        from colin_remote_compute.client import ColabClient
+        try:
+            client = ColabClient()
+            record = client.store.get(self._managed_text_job_id)
+            self._managed_text_state = record["status"]
+            self._text_work_dir = client.work_dir(record["job_id"])
+            self._text_verified_units = client.store.state(record["job_id"] + ":verified_units", 0)
+        except (OSError, ValueError, KeyError):
+            return
+        self._update_text_job_controls()
+        if not self._text_active and record["status"] == "waiting":
+            self.text_job_label.setText(f"Đã lưu {self._text_verified_units} đoạn · có thể tiếp tục")
+            details = (
+                f"Cần xử lý: {record['error'] or record['message']}\n"
+                "Chỉnh lựa chọn nhạc nếu cần, rồi bấm Tiếp tục. Các đoạn đã xác minh được dùng lại."
+            )
+            if self.result_view.toPlainText() != details:
+                self.result_view.setPlainText(details)
+            self._sync_global_worker_status("paused", f"Đã lưu {self._text_verified_units} đoạn · có thể tiếp tục.")
+        elif not self._text_active and record["status"] == "succeeded" and record["result"]:
+            from omni_tts_shared.schemas import GenerateSpeechResult
+            self._last_text_result = GenerateSpeechResult.model_validate(record["result"])
+            details = labels.format_result(self._last_text_result)
+            if self.result_view.toPlainText() != details:
+                self.result_view.setPlainText(details)
+            for button in (self.text_preview_button, self.text_open_folder_button,
+                           self.text_copy_path_button, self.text_copy_content_button):
+                button.setEnabled(True)
 
     def _copy_text_result_path(self) -> None:
         if self._last_text_result is None:
@@ -1594,11 +1678,39 @@ class StudioPage(QWidget):
         )
         self._active_text_source_text = text
         self._last_text_result = None
+        self._managed_text_job_id = ""
+        self._managed_text_state = ""
+        self._text_work_dir = None
+        self._text_verified_units = 0
         self.text_preview_button.setEnabled(False)
         self.text_open_folder_button.setEnabled(False)
         self.text_copy_path_button.setEnabled(False)
         self.text_copy_content_button.setEnabled(False)
         self._text_worker = GenerationWorker(self.ctrl, "text", settings, text=text)
+        self._start_text_worker()
+
+    def _resume_text(self) -> None:
+        if self._text_active or not self._managed_text_job_id:
+            return
+        from colin_remote_compute.client import ColabClient
+        from colin_remote_compute.daemon import restore_settings
+        try:
+            record = ColabClient().store.get(self._managed_text_job_id)
+            settings = restore_settings(record["payload"]["settings"])
+            current = self.settings_panel.current_settings()
+            settings.narrative_pacing = dict(settings.narrative_pacing, music=current.narrative_pacing.get("music", {}))
+        except (OSError, ValueError, KeyError) as error:
+            QMessageBox.warning(self, "Chưa tiếp tục được", str(error))
+            return
+        self._active_text_settings = settings
+        self._active_text_source_text = record["payload"]["text"]
+        self._active_text_char_count = len(self._active_text_source_text)
+        self._active_text_source_label = settings.output_stem or default_stem_from_text(self._active_text_source_text)
+        self._text_worker = GenerationWorker(self.ctrl, "resume_text", settings,
+                                             managed_job_id=self._managed_text_job_id)
+        self._start_text_worker()
+
+    def _start_text_worker(self) -> None:
         self._text_worker.progress_event.connect(self._on_text_progress)
         self._text_worker.completed.connect(self._on_text_done)
         self._text_worker.failed.connect(self._on_text_failed)
@@ -1616,6 +1728,7 @@ class StudioPage(QWidget):
         self.context.log(self._text_status_message)
         self.result_view.setPlainText("Đang xử lý…")
         self._text_worker.start()
+        self._update_text_job_controls()
 
     def _cancel_text(self) -> None:
         if self._text_worker is not None and not self._text_cancelling:
@@ -1629,6 +1742,13 @@ class StudioPage(QWidget):
             self._text_worker.request_cancel()
 
     def _on_text_progress(self, event) -> None:
+        if event.managed_job_id:
+            self._managed_text_job_id = event.managed_job_id
+            self._managed_text_state = event.status
+            self._text_verified_units = event.verified_units
+        if event.work_dir:
+            self._text_work_dir = Path(event.work_dir)
+        self._update_text_job_controls()
         percent = (event.current / event.total) if event.total else 0.0
         self.text_progress_bar.setValue(
             int(max(0.0, min(1.0, percent)) * 100)
@@ -1653,7 +1773,9 @@ class StudioPage(QWidget):
     def _on_text_failed(self, message: str) -> None:
         self.result_view.setPlainText(f"Lỗi: {message}")
         self._record_text_history(HistoryStatus.FAILED, error=message)
-        self._finish_text("error", "Tạo giọng thất bại.")
+        recoverable = self._managed_text_state == "waiting"
+        self._finish_text("paused" if recoverable else "error",
+                          "Đã lưu tiến độ. Chỉnh cấu hình rồi bấm Tiếp tục." if recoverable else "Tạo giọng thất bại.")
         if "license" in message.lower() or "License" in message:
             self.context.show_page("license")
 
@@ -1690,6 +1812,7 @@ class StudioPage(QWidget):
         self._text_active = False
         self._text_cancelling = False
         self._text_status_message = ""
+        self._update_text_job_controls()
         self._sync_global_worker_status(status, message)
 
     def _record_text_history(
@@ -1735,6 +1858,7 @@ class StudioPage(QWidget):
         data["main_splitter_b64"] = bytes(self._splitter.saveState().toBase64()).decode("ascii")
         data["queue_status_filter"] = self.filter_combo.currentData()
         data["text_append_stem_suffix"] = self.text_suffix_check.isChecked()
+        data["active_text_managed_job_id"] = self._managed_text_job_id
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)

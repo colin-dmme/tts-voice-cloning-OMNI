@@ -125,11 +125,12 @@ class GenerationWorker(QThread):
     def __init__(
         self,
         controller: AppController,
-        mode: str,  # "text" | "files"
+        mode: str,  # "text" | "resume_text" | "files"
         settings: GenerationSettings,
         *,
         text: str = "",
         tasks: list[tuple[str, Path]] | None = None,
+        managed_job_id: str = "",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -138,6 +139,7 @@ class GenerationWorker(QThread):
         self._settings = settings
         self._text = text
         self._tasks = tasks or []
+        self._managed_job_id = managed_job_id
         self._cancel_event = Event()
 
     def request_cancel(self) -> None:
@@ -153,7 +155,16 @@ class GenerationWorker(QThread):
             self.file_event.emit(event)
 
         try:
-            if self._mode == "text":
+            if self._mode == "resume_text":
+                from colin_remote_compute.client import ColabClient
+                from omni_tts_shared.narrative_pacing import NarrativePacingOptions
+                from omni_tts_shared.schemas import GenerateSpeechResult
+                music = NarrativePacingOptions.model_validate(self._settings.narrative_pacing).music
+                result = GenerateSpeechResult.model_validate(ColabClient().resume_text(
+                    self._managed_job_id, music_options=music.model_dump(),
+                    progress_callback=on_progress, cancel_event=self._cancel_event,
+                ))
+            elif self._mode == "text":
                 result = self._controller.generate_text(
                     self._text, self._settings, on_progress, self._cancel_event
                 )

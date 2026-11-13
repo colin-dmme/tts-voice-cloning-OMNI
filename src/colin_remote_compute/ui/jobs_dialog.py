@@ -38,6 +38,9 @@ class PcJobsDialog(QDialog):
             button.clicked.connect(lambda _checked=False, value=action: self.control(value))
             self.actions[action] = button
             buttons.addWidget(button)
+        self.work_folder = QPushButton("Thư mục làm việc")
+        self.work_folder.clicked.connect(self.open_work_folder)
+        buttons.addWidget(self.work_folder)
         buttons.addStretch(1)
         layout.addLayout(buttons)
         self.note = QLabel()
@@ -83,6 +86,7 @@ class PcJobsDialog(QDialog):
 
     def show_job(self):
         job = self.rows.get(self.selected())
+        self.work_folder.setEnabled(job is not None)
         active = job is not None and job["status"] not in TERMINAL and job["status"] != "cancelling"
         for action, button in self.actions.items():
             allowed = active and self.task is None
@@ -113,6 +117,11 @@ class PcJobsDialog(QDialog):
         self.task.signals.failed.connect(self._done)
         QThreadPool.globalInstance().start(self.task)
         self.show_job()
+
+    def open_work_folder(self):
+        if self.selected():
+            from omni_tts_ui_qt.widgets.common import open_path
+            open_path(self.client.work_dir(self.selected()))
 
     def _done(self, message):
         self.task = None

@@ -25,6 +25,10 @@ Model trong bộ cài gồm ZeroTTS 202M Official (giọng preset), Piper Ngọc
 
 ## Theo dõi và can thiệp
 
+Trong tab Văn bản, **Thư mục làm việc** mở các WAV đã nhận ngay cả khi chưa xuất được file cuối. `segments.json` ghi mã đoạn, tên file cache và trạng thái checksum; lỗi kỹ thuật ngoài dự kiến được lưu ở `error.log`. **Tiếp tục** sáng khi job cần xử lý, dùng lại đúng job và các đoạn đã xác minh. Có thể chỉnh nguồn nhạc trước khi tiếp tục; nội dung, giọng và thông số tạo các đoạn vẫn dùng bản đã lưu. Mở lại Studio sẽ khôi phục lượt gần nhất cùng các nút này, không tự xếp thêm một bản sao.
+
+Bật nhạc ngẫu nhiên theo chủ đề phải chọn chủ đề có bài trong thư viện. Cấu hình nhạc được kiểm tra trước khi gửi job mới hoặc tạo giọng, để không phải chờ xong toàn bộ các đoạn mới nhận thông báo thiếu nguồn nhạc.
+
 - **Máy CPU** hiển thị trạng thái, model đã cài và số lượt nhận, hoàn tất, WAV theo từng máy và toàn nhóm. Bỏ dấu **Chia tải** ngừng cấp đoạn mới cho máy đó. Dùng **Tạm ngừng**, **Dừng xử lý** hoặc **Ngắt quyền** để điều khiển trực tiếp máy. Bảng tự làm mới khi mở.
 - **Hàng đợi CPU** hiển thị tiến độ, lượt đã xác minh, thông báo và kết quả. Tạm dừng job để các đoạn đang chạy hoàn tất. Tiếp tục dùng lại các đầu ra đã xác minh. Hủy job đối soát mọi đoạn đã gửi với broker.
 - Trên máy phụ, **Thống kê nhận việc** hiện số lượt đã nhận, đã hoàn tất và số WAV broker đã nhận, cùng lịch sử 7 ngày. Bấm **X** để thu bảng xuống khay hệ thống. **Chạy cùng Windows** được bật mặc định để worker đã ghép tự chạy sau khi đăng nhập. Có thể bỏ dấu chọn trong bảng.

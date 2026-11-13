@@ -6,17 +6,18 @@ import hashlib
 import os
 import threading
 import time
+import traceback
 from pathlib import Path
 
 from filelock import FileLock, Timeout
 
-from omni_tts_shared.errors import GenerationCancelled, GenerationError
+from omni_tts_shared.errors import GenerationCancelled, GenerationError, OmniTtsError
 from omni_tts_shared.schemas import PC_EXECUTION_KINDS
 from colin_colab_remote.google_mcp import GoogleColabProvider, ProviderError
 from colin_colab_remote.lifecycle import ColabLifecycle
 from colin_colab_remote.settings import SettingsStore, data_root
 
-from .client import CPU_POOL_PROTOCOL, HYBRID_CPU_PROTOCOL, jsonable
+from .client import CPU_POOL_PROTOCOL, HYBRID_CPU_PROTOCOL, POSTPROCESSING_PROTOCOL, jsonable
 from .broker.client import BrokerConnectionError
 from .broker.models import WorkerProfile
 from .context import ManagedExecution
@@ -66,7 +67,8 @@ class ColabSupervisor:
         while not self._stop.is_set():
             self.store.set_state("supervisor", {"pid": os.getpid(), "heartbeat": time.time(),
                                                 "cpu_pool_protocol": CPU_POOL_PROTOCOL,
-                                                "hybrid_cpu_protocol": HYBRID_CPU_PROTOCOL})
+                                                "hybrid_cpu_protocol": HYBRID_CPU_PROTOCOL,
+                                                "postprocessing_protocol": POSTPROCESSING_PROTOCOL})
             if self._active and not self._active.is_alive():
                 self._active = None
             if not self._active:
@@ -115,6 +117,13 @@ class ColabSupervisor:
                 if VoiceProfileManager().get_profile(snapshot["profile_id"]).model_dump(mode="json") != snapshot:
                     raise GenerationError("Profile giọng đã đổi. Tạo job mới để dùng cấu hình giọng hiện tại.")
             settings = restore_settings(payload["settings"])
+            postprocessing = self.store.state(job_id + ":postprocessing", {})
+            if postprocessing.get("music") is not None:
+                from omni_tts_shared.narrative_pacing import NarrativePacingOptions
+                pacing = NarrativePacingOptions.model_validate(settings.narrative_pacing)
+                settings.narrative_pacing = pacing.model_copy(update={
+                    "music": pacing.music.model_validate(postprocessing["music"]),
+                }).model_dump()
             if settings.output_dir is None:
                 settings.output_dir = self.directory / "outputs" / job_id
             if not is_pc:
@@ -182,9 +191,12 @@ class ColabSupervisor:
             self.store.wait_or_retry(job["job_id"], str(error), error.code, retry=retry)
             if retry:
                 self._stop.wait(min(30, 5 * (retries + 1)))
-        except (GenerationError, OSError, ValueError) as error:
+        except (OmniTtsError, OSError, ValueError) as error:
             self.store.wait_or_retry(job["job_id"], str(error)[:400], "retry_required")
         except Exception:
+            diagnostic = self.directory / "artifacts" / job["job_id"] / "error.log"
+            diagnostic.parent.mkdir(parents=True, exist_ok=True)
+            diagnostic.write_text(traceback.format_exc(), encoding="utf-8")
             self.store.wait_or_retry(job["job_id"], "Lỗi xử lý job từ xa. Kiểm tra cấu hình rồi bấm Tiếp tục.", "job_error")
         finally:
             if lifecycle and not is_pc and (self.settings.load().auto_release or self.store.state("release_requested", False)):

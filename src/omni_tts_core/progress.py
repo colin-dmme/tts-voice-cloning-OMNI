@@ -12,6 +12,10 @@ class ProgressEvent:
     message: str
     current: float = 0.0
     total: float = 1.0
+    managed_job_id: str = ""
+    work_dir: str = ""
+    status: str = ""
+    verified_units: int = 0
 
     @property
     def percent(self) -> float:

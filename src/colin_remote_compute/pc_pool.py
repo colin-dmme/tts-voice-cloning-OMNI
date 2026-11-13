@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import time
+import json
+import hashlib
 from collections import defaultdict, deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import replace
@@ -94,6 +96,15 @@ class CpuPoolLifecycle:
         try:
             self._dispatch(context, units)
         finally:
+            manifest = context.units / "segments.json"
+            if manifest.is_file():
+                rows = json.loads(manifest.read_text(encoding="utf-8"))
+                for row in rows:
+                    cache = context.units / row["file"]
+                    proof = cache.with_suffix(cache.suffix + ".sha256")
+                    row["verified"] = bool(cache.is_file() and proof.is_file()
+                                           and hashlib.sha256(cache.read_bytes()).hexdigest() == proof.read_text().strip())
+                manifest.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
             if self.local is not None:
                 self.local.close()
 
@@ -115,12 +126,15 @@ class CpuPoolLifecycle:
         revision = signature[0]
         self.store.set_state(f"{self.job_id}:model:{model_id}", revision)
         pending = deque()
+        manifest = []
         for unit in units:
             request = unit.request.model_copy(update={"execution_backend": "cpu", "model_revision": revision})
             unit = replace(unit, request=request)
             digest, cache, proof = context.cache_paths(request, unit.destination, is_pc=True)
+            manifest.append({"unit": request.inference_unit_id, "file": cache.name})
             if not context.copy_verified(cache, proof, unit.destination):
                 pending.append((unit, digest))
+        (context.units / "segments.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         if not pending:
             return
 

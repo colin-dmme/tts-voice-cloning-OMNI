@@ -116,10 +116,51 @@ def test_local_output_is_verified_and_resume_does_not_synthesize_again(tmp_path,
     assert destination.is_file()
 
 
-def test_unverified_folder_revision_is_rejected(tmp_path):
+def test_model_without_download_metadata_uses_file_fingerprint(tmp_path):
     (tmp_path / "model.onnx").write_bytes(b"model")
-    with pytest.raises(GenerationError, match="phiên bản"):
-        _folder_revision(tmp_path, ["model.onnx"])
+    original = _folder_revision(tmp_path, ["model.onnx"])
+    assert original.startswith("files-sha256:")
+    assert _folder_revision(tmp_path, ["model.onnx"]) == original
+    (tmp_path / "model.onnx").write_bytes(b"changed-model")
+    assert _folder_revision(tmp_path, ["model.onnx"]) != original
+
+
+def test_manual_piper_uses_existing_package_without_download_metadata(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    (tmp_path / "voice.onnx").write_bytes(b"model")
+    (tmp_path / "voice.json").write_text(json.dumps({"audio": {"sample_rate": 22050}}))
+    runtime = {"model_file": "voice.onnx", "config_file": "voice.json",
+               "model_sha256": hashlib.sha256((tmp_path / "voice.onnx").read_bytes()).hexdigest(),
+               "config_sha256": hashlib.sha256((tmp_path / "voice.json").read_bytes()).hexdigest()}
+    spec = SimpleNamespace(provider="piper", source_kind="manual", runtime=runtime, local_path=tmp_path)
+    monkeypatch.setattr(local_cpu, "ModelRegistry", lambda: SimpleNamespace(get=lambda _: spec))
+    monkeypatch.setattr(local_cpu, "is_worker_installed", lambda _: True)
+    before = {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in tmp_path.iterdir()}
+    slot = LocalCpuExecutor("manual-voice")
+    assert slot.capability.revision.startswith("files-sha256:")
+    assert slot.capability.sample_rate == 22050
+    assert before == {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in tmp_path.iterdir()}
+    (tmp_path / "voice.onnx").write_bytes(b"bad-model")
+    with pytest.raises(GenerationError, match="SHA-256"):
+        LocalCpuExecutor("manual-voice")
+
+
+def test_file_fingerprint_is_independent_of_package_location_and_file_names(tmp_path):
+    (tmp_path / "first.onnx").write_bytes(b"model")
+    (tmp_path / "first.json").write_bytes(b"config")
+    (tmp_path / "renamed.onnx").write_bytes(b"model")
+    (tmp_path / "renamed.json").write_bytes(b"config")
+    assert _folder_revision(tmp_path, ["first.onnx", "first.json"]) == _folder_revision(
+        tmp_path, ["renamed.onnx", "renamed.json"])
+
+
+def test_downloaded_models_keep_existing_hub_revision_and_cache_identity(tmp_path):
+    (tmp_path / "model.onnx").write_bytes(b"model")
+    metadata = tmp_path / ".cache" / "huggingface" / "download" / "model.onnx.metadata"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("a" * 40 + "\netag\n0\n")
+    assert _folder_revision(tmp_path, ["model.onnx"]) == "a" * 40
 
 
 def test_fast_machine_events_are_all_delivered_even_between_two_polls(tmp_path):

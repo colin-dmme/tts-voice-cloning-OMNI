@@ -598,11 +598,20 @@ class StudioPage(QWidget):
             self.text_job_label.setText(f"Đã lưu {self._text_verified_units} đoạn · có thể tiếp tục")
             details = (
                 f"Cần xử lý: {record['error'] or record['message']}\n"
-                "Chỉnh lựa chọn nhạc nếu cần, rồi bấm Tiếp tục. Các đoạn đã xác minh được dùng lại."
+                "Xử lý nguyên nhân ở trên rồi bấm Tiếp tục. Các đoạn đã xác minh được dùng lại."
             )
             if self.result_view.toPlainText() != details:
                 self.result_view.setPlainText(details)
             self._sync_global_worker_status("paused", f"Đã lưu {self._text_verified_units} đoạn · có thể tiếp tục.")
+        elif not self._text_active and record["status"] in {"queued", "running", "cancelling"}:
+            message = client._progress_message(record)
+            self.text_job_label.setText(message)
+            self.text_progress_bar.setVisible(True)
+            self.text_progress_bar.setValue(int(record["progress"]))
+            details = f"{message}\n{self._text_verified_units} đoạn đã xác minh."
+            if self.result_view.toPlainText() != details:
+                self.result_view.setPlainText(details)
+            self._sync_global_worker_status("processing", message)
         elif not self._text_active and record["status"] == "succeeded" and record["result"]:
             from omni_tts_shared.schemas import GenerateSpeechResult
             self._last_text_result = GenerateSpeechResult.model_validate(record["result"])
@@ -612,6 +621,9 @@ class StudioPage(QWidget):
             for button in (self.text_preview_button, self.text_open_folder_button,
                            self.text_copy_path_button, self.text_copy_content_button):
                 button.setEnabled(True)
+            self.text_progress_bar.setVisible(False)
+            self.text_job_label.setText("Đã hoàn tất")
+            self._sync_global_worker_status("ready", "Đã tạo giọng đọc.")
 
     def _copy_text_result_path(self) -> None:
         if self._last_text_result is None:

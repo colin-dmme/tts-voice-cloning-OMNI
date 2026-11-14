@@ -168,3 +168,24 @@ def test_reopening_studio_restores_waiting_job_and_recovery_buttons(tmp_path, mo
         widget._managed_timer.stop()
         widget.close()
         app.processEvents()
+
+
+def test_background_resume_and_completion_replace_stale_waiting_status(page, tmp_path, monkeypatch):
+    from colin_remote_compute import client as client_module
+    from colin_remote_compute.client import ColabClient
+    client = ColabClient(tmp_path)
+    job = client.store.create("text", {})
+    page._managed_text_job_id = job["job_id"]
+    monkeypatch.setattr(client_module, "ColabClient", lambda: client)
+    client.store.next_job()
+    client.store.update(job["job_id"], progress=33, message="CPU máy này đang xử lý")
+    StudioPage._refresh_managed_text_state(page)
+    assert page.context.set_worker_status.call_args.args == ("processing", "CPU máy này đang xử lý")
+    assert not page.text_resume_button.isEnabled()
+    assert page.text_progress_bar.value() == 33
+    client.store.complete(job["job_id"], {"job_id": "result", "audio_path": str(tmp_path / "result.wav"),
+        "job_dir": str(tmp_path), "segment_count": 1, "duration_seconds": 1, "message": "Complete"})
+    StudioPage._refresh_managed_text_state(page)
+    assert page.context.set_worker_status.call_args.args == ("ready", "Đã tạo giọng đọc.")
+    assert page.text_preview_button.isEnabled()
+    assert page.text_progress_bar.isHidden()

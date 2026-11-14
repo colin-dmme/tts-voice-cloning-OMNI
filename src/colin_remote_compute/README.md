@@ -17,6 +17,8 @@ CPU máy này dùng lại worker và model đã cài trong Studio, không cần 
 
 Model trên các máy phải cùng revision và sample rate. Chưa cài đủ hoặc chưa xác minh được revision thì CPU máy này được bỏ qua kèm lý do. Các đoạn đã xác minh được lưu với checksum, tiếp tục dùng lại khi chạy tiếp. Bỏ chọn máy ngừng cấp đoạn mới, không bỏ đoạn đang hoàn tất.
 
+Piper nhập từ package local (ví dụ Vbee Export) dùng dấu vân tay SHA-256 của các file ONNX/JSON đã cài để nhận diện phiên bản; kiểm tra checksum package nếu catalog có khai báo. Không cần tải lại hoặc có metadata từ Hugging Face. Nếu các máy phụ chưa cài đúng model này, nhóm vẫn dùng CPU máy hiện tại khi đã đánh dấu tham gia.
+
 Nhật ký ghi tên máy nhận/hoàn tất từng mã đoạn và các lượt thử lại, không ghi nội dung cần đọc. Sự kiện được lưu và đọc theo thứ tự để không mất log khi nhiều máy trả kết quả giữa hai lần làm mới.
 
 MCP dùng `remote_compute={"kind":"cpu_pool","backend":"cpu","include_local":true}` trong `generation` cùng `runtime_target="remote"`. Bật/tắt nguồn local qua `cpu_worker_control(worker_profile_id="studio-local-cpu", action="include_pool" hoặc "exclude_pool")`; `cpu_worker_status` trả thêm `local_cpu`. Cần bộ điều phối có `hybrid_cpu_protocol=1`; client cũ không tự chạy lẫn local khi chưa bật tùy chọn.

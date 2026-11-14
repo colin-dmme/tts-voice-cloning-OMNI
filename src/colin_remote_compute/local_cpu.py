@@ -40,18 +40,40 @@ def _snapshot(repo: str) -> Path:
     raise GenerationError(f"Chưa có model trong cache máy này: {repo}.")
 
 
-def _folder_revision(root: Path, files: list[str]) -> str:
+def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _folder_revision(root: Path, files: list[str], *, expected_hashes: dict[str, str] | None = None,
+                     force_content: bool = False) -> str:
+    """Use a Hub revision when available, or identify installed package bytes.
+
+    Imported/local copies do not have Hub download metadata. Their content hash
+    gives a stable identity without downloading or changing any model file.
+    """
     revisions = set()
+    hashes = {}
+    expected_hashes = expected_hashes or {}
     for name in files:
         path = root / name
         if not path.is_file() or not path.stat().st_size:
-            raise GenerationError("Model trên máy này còn thiếu tệp. Mở tab Model để tải đầy đủ.")
+            raise GenerationError(f"Model trên máy này thiếu tệp {name}. Kiểm tra thư mục model hoặc nhập lại package.")
+        if name in expected_hashes:
+            hashes[name] = _file_digest(path)
+            if hashes[name] != expected_hashes[name].lower():
+                raise GenerationError(f"Tệp {name} không khớp SHA-256 của package đã khai báo. Kiểm tra đúng package model.")
         metadata = root / ".cache" / "huggingface" / "download" / (name + ".metadata")
         lines = metadata.read_text().splitlines() if metadata.is_file() else []
         revisions.add(lines[0].strip() if lines else "")
-    if len(revisions) != 1 or not re.fullmatch(r"[a-f0-9]{40}", next(iter(revisions), "")):
-        raise GenerationError("Chưa đối chiếu được phiên bản model trên máy này. Tải lại model trong tab Model trước khi chia tải.")
-    return revisions.pop()
+    if not force_content and len(revisions) == 1 and re.fullmatch(r"[a-f0-9]{40}", next(iter(revisions), "")):
+        return revisions.pop()
+    # Roles/order, not installation paths or filenames, define package identity.
+    contents = [hashes.get(name) or _file_digest(root / name) for name in files]
+    return "files-sha256:" + hashlib.sha256(json.dumps(contents).encode("ascii")).hexdigest()
 
 
 class LocalCpuExecutor:
@@ -77,7 +99,11 @@ class LocalCpuExecutor:
             self.root = spec.local_path
             files = list(dict.fromkeys([str(spec.runtime["model_file"]), str(spec.runtime["config_file"]),
                                         *spec.runtime.get("required_files", [])]))
-            revision = _folder_revision(self.root, files)
+            expected = {str(spec.runtime[file_key]): str(spec.runtime[hash_key])
+                        for file_key, hash_key in (("model_file", "model_sha256"), ("config_file", "config_sha256"))
+                        if spec.runtime.get(hash_key)}
+            revision = _folder_revision(self.root, files, expected_hashes=expected,
+                                        force_content=getattr(spec, "source_kind", "") == "manual")
             config = json.loads((self.root / str(spec.runtime["config_file"])).read_text(encoding="utf-8"))
             rate = int(config.get("audio", {}).get("sample_rate", 48000)) if spec.provider == "piper" else 48000
         else:

@@ -41,6 +41,7 @@ from omni_tts_ui_qt.context import AppContext
 class QueueController(QObject):
     items_changed = Signal()
     log = Signal(str)
+    progress_log = Signal(str, str)
     worker_status = Signal(str, str)  # status, message
     progress = Signal(float, str)  # percent 0..1 (or -1 to hide), message
     run_state_changed = Signal(bool)  # True = a run is active
@@ -392,8 +393,12 @@ class QueueController(QObject):
         self.items_changed.emit()
     def _on_progress(self, event) -> None:
         percent = (event.current / event.total) if event.total else 0.0
-        self.progress.emit(percent, f"Toàn hàng đợi · {event.message}")
-        self.log.emit(event.message)
+        if not event.log_only:
+            self.progress.emit(percent, f"Toàn hàng đợi · {event.message}")
+        if event.log_level:
+            self.progress_log.emit(event.message, event.log_level)
+        elif not event.status_only:
+            self.log.emit(event.message)
 
     def _on_completed(self, _outcomes) -> None:
         self._finish("ready", "Hoàn tất hàng đợi.")

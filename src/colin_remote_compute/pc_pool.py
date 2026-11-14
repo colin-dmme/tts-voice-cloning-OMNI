@@ -19,6 +19,10 @@ from .pc_lifecycle import (
 )
 from .targets import profile_store
 from .local_cpu import LOCAL_CPU_ID, LOCAL_CPU_LABEL, LocalCpuExecutor
+from .piper_model_sync import InstalledPiperPackage, PiperPoolSync
+
+
+MODEL_SYNC_WAIT_SECONDS = 180
 
 
 class CpuPoolLifecycle:
@@ -54,7 +58,7 @@ class CpuPoolLifecycle:
                    and current.broker_url == profile.broker_url and current.enabled and current.pool_enabled
                    for current in profile_store().load().profiles)
 
-    def _groups(self, units):
+    def _local_groups(self, units):
         groups = defaultdict(list)
         if self.include_local and self._allowed(self.local_profile):
             try:
@@ -64,7 +68,11 @@ class CpuPoolLifecycle:
                 if all(supports_unit(model, unit.request) for unit in units):
                     groups[(model.revision, model.sample_rate)].append(self.local_profile)
             except (GenerationError, OSError, ValueError) as error:
-                self.store.add_event(self.job_id, f"Bỏ qua {LOCAL_CPU_LABEL}: {error}")
+                self.store.add_event(self.job_id, f"Bỏ qua {LOCAL_CPU_LABEL} · {error}", "warning")
+        return groups
+
+    def _groups(self, units):
+        groups = self._local_groups(units)
         if self.broker is None:
             return groups
         try:
@@ -72,7 +80,7 @@ class CpuPoolLifecycle:
         except GenerationError:
             if not groups:
                 raise
-            self.store.add_event(self.job_id, "Chưa liên lạc được broker · tiếp tục bằng CPU máy này; giữ các đoạn từ xa chưa đối soát.")
+            self.store.add_event(self.job_id, "Chưa liên lạc được broker · tiếp tục bằng CPU máy này; giữ các đoạn từ xa chưa đối soát.", "warning")
             return groups
 
     def _remote_groups(self, units, groups):
@@ -116,12 +124,25 @@ class CpuPoolLifecycle:
         model_id = units[0].request.model_id
         group_key = f"{self.job_id}:cpu-group:{model_id}"
         signature = self.store.state(group_key)
+        package = None
+        if self.broker is not None and any(self._allowed(profile) for profile in self.profiles):
+            try:
+                package = InstalledPiperPackage.find(model_id)
+            except (GenerationError, OSError, ValueError) as error:
+                self.store.add_event(self.job_id, f"Chưa thể gửi model Piper từ máy này · {error}", "warning")
+        if package is not None and signature is not None and tuple(signature) != package.signature:
+            self.store.add_event(self.job_id, "Lượt này dùng phiên bản Piper đã lưu. Cần đúng phiên bản đó để chia tải.", "warning")
+            package = None
+        sync = PiperPoolSync(self, package, units) if package is not None else None
         groups = None
         if signature is None:
-            groups = self._groups(units)
-            if not groups:
-                raise GenerationError("Chưa có máy CPU sẵn sàng cho model này. Kiểm tra tab Máy CPU rồi bấm Tiếp tục.")
-            signature = max(groups, key=lambda key: len(groups[key]))
+            if sync:
+                signature = package.signature
+            else:
+                groups = self._groups(units)
+                if not groups:
+                    raise GenerationError("Chưa có máy CPU sẵn sàng cho model này. Kiểm tra tab Máy CPU rồi bấm Tiếp tục.")
+                signature = max(groups, key=lambda key: len(groups[key]))
             self.store.set_state(group_key, signature)
         revision = signature[0]
         self.store.set_state(f"{self.job_id}:model:{model_id}", revision)
@@ -132,19 +153,25 @@ class CpuPoolLifecycle:
             unit = replace(unit, request=request)
             digest, cache, proof = context.cache_paths(request, unit.destination, is_pc=True)
             manifest.append({"unit": request.inference_unit_id, "file": cache.name})
-            if not context.copy_verified(cache, proof, unit.destination):
+            if context.copy_verified(cache, proof, unit.destination):
+                self.store.record_cpu_result(self.job_id, digest, "", len(request.batch_texts) or 1)
+            else:
                 pending.append((unit, digest))
         (context.units / "segments.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         if not pending:
             return
 
-        groups = groups if groups is not None else self._groups([unit for unit, _digest in pending])
+        if groups is None:
+            groups = self._local_groups(units) if sync else self._groups(units)
         available = deque(groups.get(tuple(signature), ()))
-        selected = ", ".join(profile.label for profile in available) or "chưa có máy phù hợp"
-        self.store.add_event(self.job_id, f"Nhóm CPU · {selected} · tối đa {self.limit} máy cùng lúc.")
+        selected = ", ".join(profile.label for profile in available)
+        if selected:
+            self.store.add_event(self.job_id, f"Nhóm CPU · sẵn sàng {selected} · tối đa {self.limit} máy cùng lúc.", "info")
+        elif sync:
+            self.store.add_event(self.job_id, "Nhóm CPU · đang kiểm tra model trên các máy đã chọn.", "sync")
         if self.local is not None and self.local_profile not in available:
-            self.store.add_event(self.job_id, "CPU máy này không cùng phiên bản model/tần số với nhóm đang dùng; tiếp tục bằng các máy tương thích.")
-        self._distribute(context, pending, available, cancel_event, total=len(units), rate=signature[1])
+            self.store.add_event(self.job_id, "CPU máy này không cùng phiên bản model/tần số với nhóm đang dùng; tiếp tục bằng các máy tương thích.", "warning")
+        self._distribute(context, pending, available, cancel_event, total=len(units), rate=signature[1], sync=sync)
 
     def _run_unit(self, context, profile, unit, digest, rate):
         if profile.profile_id == LOCAL_CPU_ID:
@@ -160,16 +187,19 @@ class CpuPoolLifecycle:
                 raise PcWorkerUnavailable("CPU máy này chưa hoàn tất đoạn; thử lại trên máy phù hợp.") from error
         slot = ExistingWorkerLifecycle(self.store, self.job_id, profile, unit=digest, allowed=self._allowed, sample_rate=rate)
         execution = ManagedExecution(self.store, self.job_id, slot, verified_lock=context.verified_lock)
-        execution.execute(unit.request, unit.destination, cancel_event=unit.cancel_event,
-                          reference_audio=unit.reference_audio)
+        return execution.execute(unit.request, unit.destination, cancel_event=unit.cancel_event,
+                                 reference_audio=unit.reference_audio)
 
-    def _distribute(self, context, pending, available, cancel_event, *, total, rate):
+    def _distribute(self, context, pending, available, cancel_event, *, total, rate, sync=None):
         active = {}
         completed = total - len(pending)
         retries = defaultdict(int)
         cooldowns = {}
         failure = None
-        with ThreadPoolExecutor(max_workers=self.limit) as executor:
+        sync_future, next_refresh, wait_until = None, 0.0, 0.0
+        remote_profiles = {profile.profile_id for profile in self.profiles}
+        ready_ids = set()
+        with ThreadPoolExecutor(max_workers=1) as sync_executor, ThreadPoolExecutor(max_workers=self.limit) as executor:
             while pending or active:
                 if failure is None:
                     try:
@@ -177,16 +207,40 @@ class CpuPoolLifecycle:
                     except GenerationCancelled as error:
                         failure = error
                 paused = self.store.get(self.job_id)["paused"]
+                tick = time.monotonic()
+                if sync_future and sync_future.done():
+                    try:
+                        ready, waiting = sync_future.result()
+                    except (GenerationError, OSError, ValueError):
+                        self.store.add_event(self.job_id, "Đồng bộ Piper gián đoạn · sẽ thử kết nối lại.", "warning")
+                        ready, waiting = [], True
+                    ready_ids = {profile.profile_id for profile in ready}
+                    available = deque(profile for profile in available
+                                      if profile.profile_id not in remote_profiles or profile.profile_id in ready_ids)
+                    occupied = {profile.profile_id for profile, _, _ in active.values()}
+                    occupied.update(profile.profile_id for profile in available)
+                    occupied.update(cooldowns)
+                    available.extend(profile for profile in ready if profile.profile_id not in occupied
+                                     and retries[profile.profile_id] < 3)
+                    if waiting and not wait_until:
+                        wait_until = tick + MODEL_SYNC_WAIT_SECONDS
+                    elif not waiting:
+                        wait_until = 0
+                    sync_future, next_refresh = None, tick + 4
+                if (sync and sync_future is None and pending and not (failure or paused) and tick >= next_refresh
+                        and (active or available or not wait_until or tick < wait_until)):
+                    sync_future = sync_executor.submit(sync.refresh, lambda: context.check(cancel_event))
                 for profile_id, (deadline, profile) in list(cooldowns.items()):
-                    if time.monotonic() >= deadline:
-                        available.append(profile)
+                    if tick >= deadline:
+                        if not sync or profile_id not in remote_profiles or profile_id in ready_ids:
+                            available.append(profile)
                         del cooldowns[profile_id]
                 while not (failure or paused) and pending and available and len(active) < self.limit:
                     profile = available.popleft()
                     if not self._allowed(profile):
                         continue
                     unit, digest = pending.popleft()
-                    self.store.add_event(self.job_id, f"{profile.label} · nhận đoạn {unit.request.inference_unit_id}.")
+                    self.store.add_event(self.job_id, f"{profile.label} · cấp đoạn {unit.request.inference_unit_id}.", "dispatch")
                     future = executor.submit(self._run_unit, context, profile, unit, digest, rate)
                     active[future] = profile, unit, digest
                 if not active:
@@ -200,30 +254,38 @@ class CpuPoolLifecycle:
                         context.status("Đang chờ máy CPU kết nối lại")
                         time.sleep(0.5)
                         continue
+                    if sync_future is not None or tick < wait_until:
+                        context.status(f"Nhóm CPU · {completed}/{total} đoạn đã xác minh · chờ đồng bộ Piper", log_message=False)
+                        time.sleep(0.5)
+                        continue
                     raise GenerationError("Nhóm CPU chưa có máy cùng phiên bản model để nhận đoạn còn lại. Bấm Tiếp tục khi máy sẵn sàng.")
 
-                message = f"Nhóm CPU · {completed}/{total} đoạn đã xác minh · {len(active)} máy"
+                machines = ", ".join(profile.label for profile, _, _ in active.values())
+                message = f"Nhóm CPU · {completed}/{total} đoạn đã xác minh · {machines}"
                 if self.store.get(self.job_id)["kind"] == "text":
                     self.store.update(self.job_id, progress=round(completed / total * 95, 2))
-                context.status(message)
+                context.status(message, log_message=False)
                 done, _ = wait(active, timeout=1, return_when=FIRST_COMPLETED)
                 for future in done:
                     profile, unit, digest = active.pop(future)
                     try:
-                        future.result()
+                        used_worker = future.result()
                     except PcWorkerUnavailable:
-                        self.store.add_event(self.job_id, f"{profile.label} · đoạn {unit.request.inference_unit_id} chưa hoàn tất, chuyển sang lượt thử lại.")
+                        self.store.add_event(self.job_id, f"{profile.label} · đoạn {unit.request.inference_unit_id} chưa hoàn tất, sẽ thử lại.", "warning")
                         pending.appendleft((unit, digest))
                         retries[profile.profile_id] += 1
                         if retries[profile.profile_id] < 3:
                             cooldowns[profile.profile_id] = (time.monotonic() + 10 * retries[profile.profile_id], profile)
                     except (GenerationError, OSError, ValueError) as error:
-                        self.store.add_event(self.job_id, f"{profile.label} · lỗi ở đoạn {unit.request.inference_unit_id}; giữ các đoạn đã xác minh.")
+                        self.store.add_event(self.job_id, f"{profile.label} · lỗi ở đoạn {unit.request.inference_unit_id}. Đã giữ các đoạn xác minh.", "error")
                         failure = failure or error
                     else:
                         completed += 1
-                        self.store.add_event(self.job_id, f"{profile.label} · hoàn tất đoạn {unit.request.inference_unit_id} · {completed}/{total} đoạn đã xác minh.")
+                        label = next((item.label for item in [self.local_profile, *self.profiles]
+                                      if item.worker_id == used_worker), used_worker or profile.label)
+                        self.store.add_event(self.job_id, f"{label} · hoàn tất đoạn {unit.request.inference_unit_id} · {completed}/{total} đoạn đã xác minh.", "success")
                         retries[profile.profile_id] = 0
-                        available.appendleft(profile)
+                        if not sync or profile.profile_id not in remote_profiles or profile.profile_id in ready_ids:
+                            available.appendleft(profile)
             if failure is not None:
                 raise failure

@@ -8,7 +8,7 @@ import socket
 import time
 from pathlib import Path
 from threading import Event
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
@@ -124,6 +124,23 @@ class BrokerClient:
     def revoke_pc_device(self, worker_id: str) -> dict[str, Any]:
         return self._pc_request("POST", f"/v1/pc/devices/{quote(worker_id, safe='')}/revoke")
 
+    def ensure_piper_package(self, manifest, files, check):
+        client = BrokerClient(self.options.model_copy(update={"max_retries": 0}), no_redirect=True)
+        for role in ("onnx", "config"):
+            check()
+            asset = manifest[role]
+            endpoint = f"/v1/pc/models/blobs/{asset['sha256']}"
+            if client._json_request("GET", endpoint).get("size") == asset["size"]:
+                continue
+            with files[role].open("rb") as stream:
+                client._request("PUT", endpoint, body=stream, timeout_seconds=25, extra_headers={
+                    "Content-Type": "application/octet-stream", "Content-Length": str(asset["size"]),
+                })
+
+    def assign_piper_model(self, manifest, worker_ids) -> list[str]:
+        return self._pc_request("POST", "/v1/pc/models/assign",
+                                {"package": manifest, "worker_ids": worker_ids})["assigned"]
+
     def _pc_request(self, method: str, path: str, body: dict | None = None) -> dict[str, Any]:
         client = BrokerClient(self.options.model_copy(update={"max_retries": 0}), no_redirect=True)
         payload = client._json_request(method, path, payload=body)
@@ -225,7 +242,7 @@ class BrokerClient:
         method: str,
         path: str,
         *,
-        body: bytes | None = None,
+        body: bytes | BinaryIO | None = None,
         extra_headers: dict[str, str] | None = None,
         authenticated: bool = True,
         timeout_seconds: float | None = None,

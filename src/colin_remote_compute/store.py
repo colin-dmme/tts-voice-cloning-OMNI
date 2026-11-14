@@ -42,12 +42,21 @@ class ColabStore:
                 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
-                    time TEXT NOT NULL, message TEXT NOT NULL
+                    time TEXT NOT NULL, message TEXT NOT NULL, level TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS job_events_idx ON events(job_id,id);
+                CREATE TABLE IF NOT EXISTS cpu_unit_results (
+                    job_id TEXT NOT NULL, digest TEXT NOT NULL, worker_id TEXT NOT NULL,
+                    segments INTEGER NOT NULL, PRIMARY KEY(job_id,digest)
                 );
                 CREATE TABLE IF NOT EXISTS file_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, payload TEXT NOT NULL
                 );
             """)
+            if "level" not in {row["name"] for row in db.execute("PRAGMA table_info(events)")}:
+                db.execute("BEGIN IMMEDIATE")
+                if "level" not in {row["name"] for row in db.execute("PRAGMA table_info(events)")}:
+                    db.execute("ALTER TABLE events ADD COLUMN level TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def connect(self):
@@ -124,7 +133,7 @@ class ColabStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def update(self, job_id: str, **changes) -> dict:
+    def update(self, job_id: str, *, log_message: bool = True, **changes) -> dict:
         allowed = {"status", "progress", "message", "error", "error_code", "result", "started_at", "finished_at"}
         if not changes.keys() <= allowed:
             raise ValueError("Trường Colab job không hợp lệ.")
@@ -134,7 +143,7 @@ class ColabStore:
         with self.connect() as db:
             columns = ",".join(f"{key}=?" for key in changes)
             db.execute(f"UPDATE jobs SET {columns} WHERE job_id=?", [*changes.values(), job_id])
-            if changes.get("message"):
+            if log_message and changes.get("message"):
                 db.execute("INSERT INTO events(job_id,time,message) VALUES(?,?,?)", (job_id, now(), changes["message"]))
         return self.get(job_id)
 
@@ -154,7 +163,7 @@ class ColabStore:
                                (action == "pause", now(), job_id))
         return self.get(job_id)
 
-    def complete(self, job_id: str, result: dict) -> dict:
+    def complete(self, job_id: str, result: dict, *, summary: str = "") -> dict:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT cancel_requested FROM jobs WHERE job_id=?", (job_id,)).fetchone()
@@ -164,6 +173,9 @@ class ColabStore:
             stamp = now()
             db.execute("UPDATE jobs SET status=?,paused=0,progress=100,result=?,message=?,error=NULL,error_code=NULL,finished_at=?,updated_at=? WHERE job_id=?",
                        (status, encode(result), "Đã hủy, giữ kết quả đã xác minh" if row["cancel_requested"] else "Audio đã hoàn tất", stamp, stamp, job_id))
+            if summary and status == "succeeded":
+                db.execute("INSERT INTO events(job_id,time,message,level) VALUES(?,?,?,'summary')",
+                           (job_id, stamp, summary))
         return self.get(job_id)
 
     def wait_or_retry(self, job_id: str, error: str, code: str, *, retry: bool = False) -> dict:
@@ -202,18 +214,33 @@ class ColabStore:
         with self.connect() as db:
             return self._pending_pc_units(db, job_id)
 
+    def record_cpu_result(self, job_id, digest, worker_id, segments):
+        with self.connect() as db:
+            db.execute("""
+                INSERT INTO cpu_unit_results VALUES(?,?,?,?)
+                ON CONFLICT(job_id,digest) DO UPDATE SET worker_id=excluded.worker_id,segments=excluded.segments
+                WHERE excluded.worker_id!=''
+            """, (job_id, digest, worker_id, segments))
+
+    def cpu_contributions(self, job_id):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("""
+                SELECT worker_id,SUM(segments) AS segments FROM cpu_unit_results WHERE job_id=?
+                GROUP BY worker_id ORDER BY segments DESC,worker_id
+            """, (job_id,))]
+
     def events(self, job_id: str, limit: int = 100) -> list[dict]:
         with self.connect() as db:
-            rows = db.execute("SELECT time,message FROM events WHERE job_id=? ORDER BY id DESC LIMIT ?", (job_id, min(200, max(1, limit)))).fetchall()
+            rows = db.execute("SELECT id,time,message,level FROM events WHERE job_id=? ORDER BY id DESC LIMIT ?", (job_id, min(200, max(1, limit)))).fetchall()
         return [dict(row) for row in reversed(rows)]
 
-    def add_event(self, job_id: str, message: str) -> None:
+    def add_event(self, job_id: str, message: str, level: str = "") -> None:
         with self.connect() as db:
-            db.execute("INSERT INTO events(job_id,time,message) VALUES(?,?,?)", (job_id, now(), message))
+            db.execute("INSERT INTO events(job_id,time,message,level) VALUES(?,?,?,?)", (job_id, now(), message, level))
 
     def read_events(self, job_id: str, after: int = 0) -> list[dict]:
         with self.connect() as db:
-            rows = db.execute("SELECT id,time,message FROM events WHERE job_id=? AND id>? ORDER BY id LIMIT 200",
+            rows = db.execute("SELECT id,time,message,level FROM events WHERE job_id=? AND id>? ORDER BY id LIMIT 200",
                               (job_id, after)).fetchall()
         return [dict(row) for row in rows]
 

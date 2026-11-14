@@ -49,10 +49,10 @@ class ManagedExecution:
         if self.lifecycle.expired():
             raise GenerationError("Đã đến trần thời gian runtime. Tiến độ đã lưu.")
 
-    def status(self, message: str):
+    def status(self, message: str, *, log_message=True):
         previous = self.store.get(self.job_id)
         if previous["message"] != message:
-            self.store.update(self.job_id, message=message)
+            self.store.update(self.job_id, message=message, log_message=log_message)
 
     def freeze(self, key, produce):
         state_key = f"{self.job_id}:prepared:{key}"
@@ -92,6 +92,8 @@ class ManagedExecution:
             request = self.lifecycle.bind(request, lambda: self.check(cancel_event), self.status)
         digest, cache, proof = self.cache_paths(request, destination, is_pc=is_pc)
         if self.copy_verified(cache, proof, destination):
+            if is_pc:
+                self.store.record_cpu_result(self.job_id, digest, "", len(request.batch_texts) or 1)
             return
         if not is_pc:
             self.lifecycle.ensure(request.model_id, lambda: self.check(cancel_event), self.status)
@@ -167,11 +169,14 @@ class ManagedExecution:
             client.download_result(job, cache)
             proof.write_text(hashlib.sha256(cache.read_bytes()).hexdigest())
             shutil.copyfile(cache, destination)
+            if is_pc:
+                self.store.record_cpu_result(self.job_id, digest, job.worker_id, len(request.batch_texts) or 1)
             with self.verified_lock:
                 verified = len(list(self.units.glob("*.sha256")))
                 self.store.set_state(self.job_id + ":verified_units", verified)
             if is_pc:
                 self.lifecycle.clear()
+            return job.worker_id
         finally:
             self._active_broker_job = None
 

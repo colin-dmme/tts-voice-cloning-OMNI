@@ -17,9 +17,9 @@ CPU máy này dùng lại worker và model đã cài trong Studio, không cần 
 
 Model trên các máy phải cùng revision và sample rate. Chưa cài đủ hoặc chưa xác minh được revision thì CPU máy này được bỏ qua kèm lý do. Các đoạn đã xác minh được lưu với checksum, tiếp tục dùng lại khi chạy tiếp. Bỏ chọn máy ngừng cấp đoạn mới, không bỏ đoạn đang hoàn tất.
 
-Piper nhập từ package local (ví dụ Vbee Export) dùng dấu vân tay SHA-256 của các file ONNX/JSON đã cài để nhận diện phiên bản; kiểm tra checksum package nếu catalog có khai báo. Không cần tải lại hoặc có metadata từ Hugging Face. Nếu các máy phụ chưa cài đúng model này, nhóm vẫn dùng CPU máy hiện tại khi đã đánh dấu tham gia.
+Khi chia tải một model Piper ONNX/JSON đã nhập, Studio kiểm tra SHA-256 của hai tệp và gửi một bản lên broker qua kết nối riêng. Chỉ các máy được chọn mới nhận quyền tải. CPU Worker 1.1.0 trở lên tự tải, đối chiếu SHA-256 và thử WAV. Máy được cấp các đoạn còn lại ngay khi đăng ký đúng phiên bản. Máy offline nhận model khi kết nối lại. Thư mục model gốc trên Studio được dùng trực tiếp.
 
-Nhật ký ghi tên máy nhận/hoàn tất từng mã đoạn và các lượt thử lại, không ghi nội dung cần đọc. Sự kiện được lưu và đọc theo thứ tự để không mất log khi nhiều máy trả kết quả giữa hai lần làm mới.
+Mở **Nhật ký** ở thanh trên để theo dõi tên máy khi cấp đoạn, đồng bộ, trả WAV và thử lại. Nhật ký dùng màu theo trạng thái và chỉ ghi mã đoạn. Cuối lượt, tổng kết hiện số đoạn xác minh của từng máy cùng số tệp audio và SRT. Kết quả văn bản giữ số đoạn theo máy khi xem lại.
 
 MCP dùng `remote_compute={"kind":"cpu_pool","backend":"cpu","include_local":true}` trong `generation` cùng `runtime_target="remote"`. Bật/tắt nguồn local qua `cpu_worker_control(worker_profile_id="studio-local-cpu", action="include_pool" hoặc "exclude_pool")`; `cpu_worker_status` trả thêm `local_cpu`. Cần bộ điều phối có `hybrid_cpu_protocol=1`; client cũ không tự chạy lẫn local khi chưa bật tùy chọn.
 
@@ -33,7 +33,7 @@ Bật nhạc ngẫu nhiên theo chủ đề phải chọn chủ đề có bài t
 
 - **Máy CPU** hiển thị trạng thái, model đã cài và số lượt nhận, hoàn tất, WAV theo từng máy và toàn nhóm. Bỏ dấu **Chia tải** ngừng cấp đoạn mới cho máy đó. Dùng **Tạm ngừng**, **Dừng xử lý** hoặc **Ngắt quyền** để điều khiển trực tiếp máy. Bảng tự làm mới khi mở.
 - **Hàng đợi CPU** hiển thị tiến độ, lượt đã xác minh, thông báo và kết quả. Tạm dừng job để các đoạn đang chạy hoàn tất. Tiếp tục dùng lại các đầu ra đã xác minh. Hủy job đối soát mọi đoạn đã gửi với broker.
-- Trên máy phụ, **Thống kê nhận việc** hiện số lượt đã nhận, đã hoàn tất và số WAV broker đã nhận, cùng lịch sử 7 ngày. Bấm **X** để thu bảng xuống khay hệ thống. **Chạy cùng Windows** được bật mặc định để worker đã ghép tự chạy sau khi đăng nhập. Có thể bỏ dấu chọn trong bảng.
+- Trên máy phụ, bảng điều khiển hiển thị trạng thái và model đã kiểm thử. Bấm **X** để thu bảng xuống khay hệ thống. **Chạy cùng Windows** được bật mặc định để worker đã ghép tự chạy sau khi đăng nhập. Có thể bỏ dấu chọn trong bảng.
 - Với agent, dùng `cpu_worker_status`, `start_text_generation` hoặc `start_file_generation`, `get_job` và `cpu_job_control`. [Hợp đồng Studio MCP](C:/Coder/tts-voice-cloning-OMNI/docs/mcp-server.md)
 
 ## Mã nguồn và dữ liệu

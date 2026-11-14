@@ -77,7 +77,8 @@ class ExistingWorkerLifecycle:
         if (request.model_revision and request.model_revision != model.revision
                 or self.sample_rate is not None and self.sample_rate != model.sample_rate):
             raise PcWorkerUnavailable(f"Phiên bản model trên {name} đã thay đổi. Tạo job mới để dùng bản mới.")
-        status(f"Đang gửi tới {name} · CPU")
+        if not self.pool_slot:
+            status(f"Đang gửi tới {name} · CPU")
         return model
 
     @staticmethod

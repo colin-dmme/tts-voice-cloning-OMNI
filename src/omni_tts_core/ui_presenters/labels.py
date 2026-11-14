@@ -234,6 +234,9 @@ def short_text(value: str, limit: int) -> str:
 
 def format_result(result: GenerateSpeechResult) -> str:
     pronunciation_line = _format_pronunciation_result(result)
+    cpu_line = ""
+    if result.cpu_contributions:
+        cpu_line = "\nChia tải CPU · " + " · ".join(f"{row.name} {row.segments} đoạn" for row in result.cpu_contributions)
     if result.item_audio_paths:
         joined = "\n".join(str(path) for path in result.item_audio_paths)
         merged_line = ""
@@ -248,12 +251,12 @@ def format_result(result: GenerateSpeechResult) -> str:
         return (
             f"{result.message}\n"
             f"Số đoạn nhỏ: {result.segment_count}, tổng {result.duration_seconds:.1f} giây\n"
-            f"Audio:\n{joined}{merged_line}{srt_line}{pronunciation_line}"
+            f"Audio:\n{joined}{merged_line}{srt_line}{pronunciation_line}{cpu_line}"
         )
     srt_line = f"\nSRT: {result.srt_path}" if result.srt_path else ""
     return (
         f"Hoàn tất {result.segment_count} đoạn, {result.duration_seconds:.1f} giây\n"
-        f"Audio: {result.audio_path}{srt_line}{pronunciation_line}"
+        f"Audio: {result.audio_path}{srt_line}{pronunciation_line}{cpu_line}"
     )
 
 

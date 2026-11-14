@@ -32,7 +32,7 @@ class AppContext:
     probe: HardwareProbe
     safety_gate: SafetyGate
     preferences: QtPreferences
-    log: Callable[[str], None]
+    log: Callable[..., None]
     set_worker_status: Callable[[str, str], None]
     show_page: Callable[[str], None]
     # A page (the studio) registers a getter for the live generation settings so

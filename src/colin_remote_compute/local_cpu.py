@@ -128,6 +128,7 @@ class LocalCpuExecutor:
         context.check(unit.cancel_event)
         cache, proof = context.cache_paths(request, unit.destination, is_pc=True)[1:]
         if context.copy_verified(cache, proof, unit.destination):
+            context.store.record_cpu_result(context.job_id, digest, "", len(request.batch_texts) or 1)
             return
         if self.worker is None:
             self.worker = _JsonLineWorker(self.worker_name, LOCAL_CPU_LABEL, environment={
@@ -155,8 +156,10 @@ class LocalCpuExecutor:
             shutil.copyfile(temporary, cache)
             proof.write_text(hashlib.sha256(cache.read_bytes()).hexdigest())
             shutil.copyfile(cache, unit.destination)
+            context.store.record_cpu_result(context.job_id, digest, LOCAL_CPU_ID, len(request.batch_texts) or 1)
             with context.verified_lock:
                 context.store.set_state(context.job_id + ":verified_units", len(list(context.units.glob("*.sha256"))))
+        return LOCAL_CPU_ID
 
     def _payload(self, request, texts, paths, root, reference_audio):
         options = dict(request.provider_options)

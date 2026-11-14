@@ -17,10 +17,11 @@ from colin_colab_remote.google_mcp import GoogleColabProvider, ProviderError
 from colin_colab_remote.lifecycle import ColabLifecycle
 from colin_colab_remote.settings import SettingsStore, data_root
 
-from .client import CPU_POOL_PROTOCOL, HYBRID_CPU_PROTOCOL, POSTPROCESSING_PROTOCOL, jsonable
+from .client import CPU_POOL_PROTOCOL, HYBRID_CPU_PROTOCOL, PIPER_SYNC_PROTOCOL, POSTPROCESSING_PROTOCOL, jsonable
 from .broker.client import BrokerConnectionError
 from .broker.models import WorkerProfile
 from .context import ManagedExecution
+from .cpu_report import add_cpu_summary, cpu_contributions
 from .pc_lifecycle import ExistingWorkerLifecycle, PcCancellationPending
 from .pc_pool import CpuPoolLifecycle
 from .store import ColabStore, now
@@ -67,6 +68,7 @@ class ColabSupervisor:
         while not self._stop.is_set():
             self.store.set_state("supervisor", {"pid": os.getpid(), "heartbeat": time.time(),
                                                 "cpu_pool_protocol": CPU_POOL_PROTOCOL,
+                                                "piper_sync_protocol": PIPER_SYNC_PROTOCOL,
                                                 "hybrid_cpu_protocol": HYBRID_CPU_PROTOCOL,
                                                 "postprocessing_protocol": POSTPROCESSING_PROTOCOL})
             if self._active and not self._active.is_alive():
@@ -174,7 +176,8 @@ class ColabSupervisor:
                     if any(item["error"] for item in outcomes):
                         self.store.update(job_id, result=result)
                         raise GenerationError("Một số file chưa tạo xong. Các đoạn đã xác minh được giữ để tiếp tục.")
-                self.store.complete(job_id, result)
+                summary = add_cpu_summary(result, cpu_contributions(self.store, job_id, target)) if is_pc else ""
+                self.store.complete(job_id, result, summary=summary)
         except PcCancellationPending as error:
             self.store.update(job["job_id"], status="cancelling", message=str(error))
             self._stop.wait(3)

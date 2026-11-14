@@ -458,6 +458,12 @@ class GenerateSpeechRequest(BaseModel):
         return self
 
 
+class CpuContribution(BaseModel):
+    worker_id: str
+    name: str
+    segments: int = Field(gt=0)
+
+
 class GenerateSpeechResult(BaseModel):
     music_plan_path: Path | None = None
     pacing_report_path: Path | None = None
@@ -479,6 +485,7 @@ class GenerateSpeechResult(BaseModel):
     pronunciation_term_count: int = 0
     pronunciation_match_count: int = 0
     pronunciation_conflict_count: int = 0
+    cpu_contributions: list[CpuContribution] = Field(default_factory=list)
 
 
 class SegmentTiming(BaseModel):

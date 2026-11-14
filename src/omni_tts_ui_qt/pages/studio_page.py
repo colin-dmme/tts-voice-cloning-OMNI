@@ -167,6 +167,7 @@ class StudioPage(QWidget):
         self._text_cancelling = False
         self._text_status_message = ""
         self._managed_text_job_id = ""
+        self._managed_log_event_id = 0
         self._managed_text_state = ""
         self._text_work_dir: Path | None = None
         self._text_verified_units = 0
@@ -570,6 +571,10 @@ class StudioPage(QWidget):
             if record is None:
                 return
             self._managed_text_job_id = record["job_id"]
+            follow = record["status"] in {"running", "waiting", "cancelling"}
+            recent = client.store.events(record["job_id"], 30 if follow else 1)
+            if recent:
+                self._managed_log_event_id = recent[0]["id"] - 1 if follow else recent[-1]["id"]
             if not self.text_input.toPlainText().strip():
                 settings = restore_settings(record["payload"]["settings"])
                 override = client.store.state(record["job_id"] + ":postprocessing", {})
@@ -594,6 +599,13 @@ class StudioPage(QWidget):
         except (OSError, ValueError, KeyError):
             return
         self._update_text_job_controls()
+        if not self._text_active:
+            for row in client.store.read_events(record["job_id"], self._managed_log_event_id):
+                self._managed_log_event_id = row["id"]
+                if row["level"]:
+                    self.context.log(row["message"], row["level"])
+                elif row["message"].strip():
+                    self.context.log(row["message"])
         if not self._text_active and record["status"] == "waiting":
             self.text_job_label.setText(f"Đã lưu {self._text_verified_units} đoạn · có thể tiếp tục")
             details = (
@@ -891,6 +903,7 @@ class StudioPage(QWidget):
         self.settings_panel.settings_changed.connect(self._on_settings_changed)
         self.queue.items_changed.connect(self._refresh_queue)
         self.queue.log.connect(self.context.log)
+        self.queue.progress_log.connect(self.context.log)
         self.queue.worker_status.connect(self._on_queue_worker_status)
         self.queue.progress.connect(self._on_queue_progress)
         self.queue.run_state_changed.connect(self._on_run_state)
@@ -1754,7 +1767,13 @@ class StudioPage(QWidget):
             self._text_worker.request_cancel()
 
     def _on_text_progress(self, event) -> None:
+        replayed = False
         if event.managed_job_id:
+            if event.managed_job_id != self._managed_text_job_id:
+                self._managed_log_event_id = 0
+            if event.event_id:
+                replayed = event.event_id <= self._managed_log_event_id
+                self._managed_log_event_id = max(self._managed_log_event_id, event.event_id)
             self._managed_text_job_id = event.managed_job_id
             self._managed_text_state = event.status
             self._text_verified_units = event.verified_units
@@ -1766,8 +1785,12 @@ class StudioPage(QWidget):
             int(max(0.0, min(1.0, percent)) * 100)
         )
         if event.message.strip():
-            self.context.log(event.message)
-            if not self._text_cancelling:
+            if not (event.status_only or replayed):
+                if event.log_level:
+                    self.context.log(event.message, event.log_level)
+                else:
+                    self.context.log(event.message)
+            if not (self._text_cancelling or event.log_only):
                 self._text_status_message = event.message
                 self.text_job_label.setText(event.message)
                 self._sync_global_worker_status()

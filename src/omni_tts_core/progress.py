@@ -16,6 +16,13 @@ class ProgressEvent:
     work_dir: str = ""
     status: str = ""
     verified_units: int = 0
+    log_level: str = ""
+    status_only: bool = False
+    event_id: int = 0
+
+    @property
+    def log_only(self) -> bool:
+        return bool(self.log_level)
 
     @property
     def percent(self) -> float:

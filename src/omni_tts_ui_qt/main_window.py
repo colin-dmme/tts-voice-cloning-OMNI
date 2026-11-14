@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QDockWidget,
     QHBoxLayout,
@@ -36,6 +36,10 @@ from omni_tts_ui_qt.widgets.hardware import HardwareBar, SafetyChip, Temperature
 
 # (key, title, rail label) — a factory(context) -> QWidget is supplied per page.
 PageFactory = Callable[[AppContext], QWidget]
+LOG_COLORS = {
+    "dispatch": "#93c5fd", "sync": "#c4b5fd", "success": "#86efac",
+    "warning": "#fcd34d", "error": "#fda4af", "summary": "#6ee7db",
+}
 
 
 class MainWindow(QMainWindow):
@@ -68,8 +72,8 @@ class MainWindow(QMainWindow):
         )
 
         self._build_rail(page_factories)
-        self._build_central(page_factories)
         self._build_log_dock()
+        self._build_central(page_factories)
         self._start_telemetry()
         self._restore_layout()
 
@@ -113,12 +117,16 @@ class MainWindow(QMainWindow):
         self.chart_toggle.setCheckable(True)
         self.chart_toggle.setChecked(bool(self._prefs_data.get("chart_visible", True)))
         self.chart_toggle.toggled.connect(self._toggle_chart)
+        log_button = QPushButton("Nhật ký")
+        log_button.setToolTip("Mở hoặc thu gọn nhật ký hệ thống")
+        log_button.clicked.connect(lambda: self._log_dock.setVisible(self._log_dock.isHidden()))
         header.addWidget(self.page_title)
         header.addStretch()
         header.addWidget(self.safety_chip)
         header.addWidget(self.hardware_bar, 1)
         header.addWidget(self.release_vram_button)
         header.addWidget(self.chart_toggle)
+        header.addWidget(log_button)
         outer.addLayout(header)
 
         self.temperature_chart = TemperatureChart()
@@ -217,11 +225,31 @@ class MainWindow(QMainWindow):
         else:
             self.log("Không có model nào đang chiếm VRAM để giải phóng.")
 
-    def log(self, message: str) -> None:
+    def log(self, message: str, level: str = "") -> None:
         if not message.strip():
             return
-        stamp = datetime.now().strftime("%H:%M:%S")
-        self.log_view.appendPlainText(f"[{stamp}] {message}")
+        if not level and message.startswith(("Lỗi", "Tạo giọng thất bại")):
+            level = "error"
+        scroll = self.log_view.verticalScrollBar()
+        follow = scroll.value() == scroll.maximum()
+        cursor = QTextCursor(self.log_view.document())
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.beginEditBlock()
+        default = QTextCharFormat()
+        if not self.log_view.document().isEmpty():
+            cursor.insertBlock()
+        timestamp = QTextCharFormat()
+        timestamp.setForeground(QColor("#a1a1ba"))
+        cursor.insertText(f"[{datetime.now():%H:%M:%S}] ", timestamp)
+        style = QTextCharFormat(default)
+        if level in LOG_COLORS:
+            style.setForeground(QColor(LOG_COLORS[level]))
+        if level == "summary":
+            style.setFontWeight(QFont.Weight.Bold)
+        cursor.insertText(message, style)
+        cursor.endEditBlock()
+        if follow:
+            scroll.setValue(scroll.maximum())
 
     # --- Persistence / lifecycle -------------------------------------------
 

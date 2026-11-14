@@ -106,6 +106,26 @@ def test_system_log_skips_empty_events(page):
     assert "Đang xếp hàng" in window.log_view.toPlainText()
 
 
+def test_cpu_log_styles_keep_live_status_separate(page):
+    from omni_tts_ui_qt.main_window import LOG_COLORS
+
+    page._text_active = True
+    message = "Nhóm CPU · 12/20 đoạn đã xác minh · ColinPC, MiniPC"
+    page._on_text_progress(ProgressEvent(message, 12, 20, status_only=True))
+    assert page.text_job_label.text() == message
+    page.context.log.assert_not_called()
+    detail = "MiniPC · hoàn tất đoạn 12"
+    page._on_text_progress(ProgressEvent(detail, 12, 20, log_level="success"))
+    page.context.log.assert_called_once_with(detail, "success")
+    assert page.text_job_label.text() == message
+    window = SimpleNamespace(log_view=QPlainTextEdit())
+    MainWindow.log(window, detail, "success")
+    MainWindow.log(window, "Tổng kết CPU · MiniPC 12 đoạn", "summary")
+    document = window.log_view.document()
+    assert document.blockCount() == 2
+    assert document.find(detail).charFormat().foreground().color().name() == LOG_COLORS["success"]
+
+
 def test_partial_job_opens_work_folder_and_offers_resume_after_failure(page, tmp_path):
     page._text_active = True
     page._on_text_progress(ProgressEvent("Cần kiểm tra", 100, 100, managed_job_id="cpu-job-test",
@@ -176,10 +196,13 @@ def test_background_resume_and_completion_replace_stale_waiting_status(page, tmp
     client = ColabClient(tmp_path)
     job = client.store.create("text", {})
     page._managed_text_job_id = job["job_id"]
+    page._managed_log_event_id = 0
     monkeypatch.setattr(client_module, "ColabClient", lambda: client)
     client.store.next_job()
     client.store.update(job["job_id"], progress=33, message="CPU máy này đang xử lý")
+    client.store.add_event(job["job_id"], "MiniPC · hoàn tất đoạn 1", "success")
     StudioPage._refresh_managed_text_state(page)
+    page.context.log.assert_any_call("MiniPC · hoàn tất đoạn 1", "success")
     assert page.context.set_worker_status.call_args.args == ("processing", "CPU máy này đang xử lý")
     assert not page.text_resume_button.isEnabled()
     assert page.text_progress_bar.value() == 33

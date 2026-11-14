@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from .client import ColabClient, public_job
+from .cpu_report import cpu_contributions
 from .pc_lifecycle import broker_for as _client
 from .targets import profile_store, resolve_pc_profile
 from .local_cpu import LOCAL_CPU_ID, LOCAL_CPU_LABEL
@@ -23,7 +24,8 @@ def register_tools(mcp):
         """Đọc máy CPU, model đã cài và job đang theo dõi. Dùng profile ID khi có nhiều broker."""
         profile = resolve_pc_profile(worker_profile_id) if worker_profile_id else admin_profile()
         local = ColabClient()
-        jobs = [public_job(row) | {"verified_units": local.store.state(row["job_id"] + ":verified_units", 0)}
+        jobs = [public_job(row) | {"verified_units": local.store.state(row["job_id"] + ":verified_units", 0),
+                                   "cpu_contributions": cpu_contributions(local.store, row["job_id"], row["payload"]["remote_target"])}
                 for row in local.store.list(50) if row["job_id"].startswith("cpu-job-")]
         local_cpu = {"worker_profile_id": LOCAL_CPU_ID, "display_name": LOCAL_CPU_LABEL,
                      "pool_enabled": profile_store().load().cpu_pool_local}

@@ -21,6 +21,7 @@ from .targets import pc_target, resolve_pc_pool, resolve_pc_profile
 
 
 CPU_POOL_PROTOCOL = 1
+PIPER_SYNC_PROTOCOL = 1
 HYBRID_CPU_PROTOCOL = 1
 POSTPROCESSING_PROTOCOL = 1
 
@@ -247,10 +248,11 @@ class ColabClient:
         work_dir = str(self.work_dir(job_id))
         while True:
             record = self.store.get(job_id)
-            def event_for(message):
+            def event_for(message, *, level="", status_only=False, event_id=0):
                 return ProgressEvent(message, record["progress"], 100, managed_job_id=job_id,
                                      work_dir=work_dir, status=record["status"],
-                                     verified_units=self.store.state(job_id + ":verified_units", 0))
+                                     verified_units=self.store.state(job_id + ":verified_units", 0),
+                                     log_level=level, status_only=status_only, event_id=event_id)
             delivered = set()
             if progress_callback:
                 while True:
@@ -258,8 +260,9 @@ class ColabClient:
                     for event in events:
                         last_event = event["id"]
                         if event["message"].strip():
-                            delivered.add(event["message"])
-                            progress_callback(event_for(event["message"]))
+                            if not event["level"]:
+                                delivered.add(event["message"])
+                            progress_callback(event_for(event["message"], level=event["level"], event_id=last_event))
                     if len(events) < 200:
                         break
             if file_event_callback:
@@ -286,7 +289,8 @@ class ColabClient:
                 if progress_callback and (message not in delivered or waiting_notice):
                     if waiting_notice:
                         message = f"Vẫn đang chờ sau {int(tick - started)} giây · {message}"
-                    progress_callback(event_for(message))
+                    status_only = message.startswith("Nhóm CPU · ") and " đoạn đã xác minh · " in message
+                    progress_callback(event_for(message, status_only=status_only))
             if cancel_event is not None and cancel_event.is_set() and record["status"] not in TERMINAL:
                 self.store.control(job_id, "cancel")
             if record["status"] == "succeeded":

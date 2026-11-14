@@ -17,12 +17,18 @@ from colin_colab_remote.broker.profiles import WorkerProfileStore
 from colin_colab_remote.ui.colab_pairing_dialog import pairing_client
 from omni_tts_ui_qt.background import FunctionTask
 from omni_tts_shared.errors import GenerationError
+from ..piper_model_sync import SYNC_STAGES
 
 
 _DESIRED = {"running": "Nhận việc", "paused": "Tạm ngừng", "stopped": "Dừng xử lý"}
 _OBSERVED = {
     "starting": "Đang khởi động", "idle": "Sẵn sàng", "busy": "Đang xử lý",
-    "paused": "Đã tạm ngừng", "stopped": "Đã dừng", "error": "Gặp lỗi",
+    "paused": "Đã tạm ngừng", "stopped": "Đã dừng", "error": "Gặp lỗi", "syncing": "Đang đồng bộ",
+}
+_STATUS_COLORS = {
+    "Sẵn sàng": "#86efac", "Đang xử lý": "#93c5fd", "Đang đồng bộ": "#c4b5fd",
+    "Gặp lỗi": "#fda4af", "Mất liên lạc": "#a1a1ba", "Chưa liên lạc": "#a1a1ba",
+    "Đã tạm ngừng": "#fcd34d", "Chờ tạm ngừng": "#fcd34d", "Chờ dừng": "#fcd34d",
 }
 _CONTROL = {"resume": "running", "pause": "paused", "stop": "stopped"}
 
@@ -106,8 +112,9 @@ class PcDevicesDialog(QDialog):
         self.totals.setWordWrap(True)
         layout.addWidget(self.totals)
 
-        self.table = QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels(["Chia tải", "Máy", "Trạng thái", "Model đã cài", "Lượt nhận", "Hoàn tất", "WAV", "Liên lạc cuối"])
+        self.table = QTableWidget(0, 9)
+        self.table.setHorizontalHeaderLabels(["Chia tải", "Máy", "Trạng thái", "Model đã cài", "Đồng bộ Piper",
+                                              "Lượt nhận", "Hoàn tất", "WAV", "Liên lạc cuối"])
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -311,10 +318,28 @@ class PcDevicesDialog(QDialog):
                     check.setToolTip("Đưa máy này vào lựa chọn Tự chia tải.")
                 self.table.setItem(row, 0, check)
                 counts = device.get("totals") or {}
+                sync_rows = device.get("model_sync") or []
+                labels = {item["model_id"]: item["label"] for item in sync_rows}
+                installed_models = device.get("installed_models") or []
+                sync_notes = []
+                for item in sync_rows:
+                    stage = item["stage"]
+                    if stage == "ready" and item["model_id"] in installed_models:
+                        sync_notes.append((SYNC_STAGES["ready"], "#86efac"))
+                    elif observed in {"Mất liên lạc", "Chưa liên lạc"}:
+                        sync_notes.append(("Chờ máy kết nối", "#a1a1ba"))
+                    elif not device.get("worker_version"):
+                        sync_notes.append(("Chờ worker cập nhật", "#fcd34d"))
+                    elif stage == "error":
+                        sync_notes.append((SYNC_STAGES["error"], "#fda4af"))
+                    else:
+                        sync_notes.append((SYNC_STAGES["queued" if stage == "ready" else stage], "#c4b5fd"))
+                sync_text = ", ".join(dict.fromkeys(text for text, _ in sync_notes)) or "—"
                 values = (
                     device.get("display_name") or worker_id,
                     observed,
-                    ", ".join(device.get("installed_models") or []) or "—",
+                    ", ".join(labels.get(model, model) for model in installed_models) or "—",
+                    sync_text,
                     *(str(counts.get(key, "—")) for key in ("received", "completed", "wav_files")),
                     stamp.astimezone().strftime("%d/%m %H:%M:%S") if stamp else "—",
                 )
@@ -323,10 +348,13 @@ class PcDevicesDialog(QDialog):
                     tip = worker_id if column == 1 else value
                     if column == 2:
                         tip += " · " + _DESIRED.get(desired, "Chưa rõ")
-                        if observed == "Sẵn sàng":
-                            item.setForeground(QColor("#8adfae"))
-                        elif observed == "Đang xử lý":
-                            item.setForeground(QColor("#c4b5fd"))
+                        if device.get("worker_version"):
+                            tip += f" · CPU Worker {device['worker_version']}"
+                        if observed in _STATUS_COLORS:
+                            item.setForeground(QColor(_STATUS_COLORS[observed]))
+                    elif column == 4 and sync_rows:
+                        tip = "\n".join(f"{model['label']} · {note}" for model, (note, _) in zip(sync_rows, sync_notes))
+                        item.setForeground(QColor(sync_notes[0][1]))
                     item.setToolTip(tip)
                     self.table.setItem(row, column, item)
                 if worker_id == selected:

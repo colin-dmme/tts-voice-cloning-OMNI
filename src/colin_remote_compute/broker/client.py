@@ -10,8 +10,8 @@ from pathlib import Path
 from threading import Event
 from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+from urllib.parse import quote, urlsplit
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener, urlopen
 
 from omni_tts_shared.errors import ConfigError, GenerationError
 
@@ -40,7 +40,10 @@ class BrokerClient:
 
     def __init__(self, options: BrokerConnectionOptions, *, no_redirect: bool = False) -> None:
         self.options = options
-        self._opener = build_opener(_NoRedirect()) if no_redirect else None
+        handlers = [_NoRedirect()] if no_redirect else []
+        if urlsplit(options.base_url).hostname in {"127.0.0.1", "::1", "localhost"}:
+            handlers.append(ProxyHandler({}))
+        self._opener = build_opener(*handlers) if handlers else None
         self._reference_assets: set[str] = set()
 
     def ensure_reference_audio(self, audio: bytes) -> str:
@@ -125,7 +128,13 @@ class BrokerClient:
         return self._pc_request("POST", f"/v1/pc/devices/{quote(worker_id, safe='')}/revoke")
 
     def ensure_piper_package(self, manifest, files, check):
-        client = BrokerClient(self.options.model_copy(update={"max_retries": 0}), no_redirect=True)
+        from .local_broker import LocalBrokerManager
+
+        token = self._auth_headers()["Authorization"].removeprefix("Bearer ")
+        origin = LocalBrokerManager().model_upload_origin(self.options.base_url, token)
+        client = BrokerClient(self.options.model_copy(update={
+            "base_url": origin or self.options.base_url, "max_retries": 0,
+        }), no_redirect=True)
         for role in ("onnx", "config"):
             check()
             asset = manifest[role]

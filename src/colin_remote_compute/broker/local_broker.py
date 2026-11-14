@@ -118,11 +118,7 @@ class LocalBrokerManager:
         port = runtime.get("local_port")
         valid_port = type(port) is int and 18787 <= port <= 18849
         healthy = self._health(f"http://127.0.0.1:{port}") if valid_port else False
-        public_url = ""
-        # Only accept the configured hostname, never an arbitrary URL from a status file.
-        configured = self._read(self.data_dir / "background-config.json").get("hostname")
-        if configured and configured == runtime.get("hostname") and all(c.isalnum() or c in ".-" for c in configured):
-            public_url = "https://" + configured
+        public_url = self._public_url(runtime)
         counts = {}
         if healthy:
             try:
@@ -141,6 +137,29 @@ class LocalBrokerManager:
             running_jobs=counts.get("running_jobs"), queued_jobs=counts.get("queued_jobs"),
             hidden_launcher=bool(task.get("hidden_launcher")),
         )
+
+    def _public_url(self, runtime: dict) -> str:
+        configured = self._read(self.data_dir / "background-config.json").get("hostname")
+        if configured and configured == runtime.get("hostname") and all(c.isalnum() or c in ".-" for c in configured):
+            return "https://" + configured
+        return ""
+
+    def model_upload_origin(self, public_url: str, token: str) -> str:
+        """Route large admin uploads over loopback when this PC owns the broker."""
+        import secrets
+
+        runtime = self._read(self.data_dir / "runtime.json")
+        port = runtime.get("local_port")
+        if not public_url or public_url != self._public_url(runtime) or type(port) is not int or not 18787 <= port <= 18849:
+            return ""
+        try:
+            configured_token = (self.data_dir / "secrets" / "broker-token.txt").read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+        if not secrets.compare_digest(token.encode("utf-8"), configured_token.encode("utf-8")):
+            return ""
+        origin = f"http://127.0.0.1:{port}"
+        return origin if self._health(origin) else ""
 
     def _wait(self, running: bool, timeout: float) -> LocalBrokerStatus:
         deadline = time.monotonic() + timeout

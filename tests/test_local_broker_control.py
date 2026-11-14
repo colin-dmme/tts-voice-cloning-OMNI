@@ -37,6 +37,26 @@ def test_local_control_rejects_untrusted_port_and_does_not_read_secrets(tmp_path
     health.assert_not_called()
 
 
+def test_model_upload_uses_loopback_only_for_matching_broker_and_token(tmp_path):
+    from colin_remote_compute.broker.local_broker import LocalBrokerManager
+
+    (tmp_path / "runtime.json").write_text('{"local_port":18787,"hostname":"broker.test"}')
+    (tmp_path / "background-config.json").write_text('{"hostname":"broker.test"}')
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    (secrets_dir / "broker-token.txt").write_text("test-broker-token")
+    manager = LocalBrokerManager(tmp_path)
+    with patch.object(manager, "_health", return_value=True) as health:
+        assert manager.model_upload_origin("https://broker.test", "test-broker-token") == "http://127.0.0.1:18787"
+        health.assert_called_once_with("http://127.0.0.1:18787")
+    with patch.object(manager, "_health") as health:
+        assert not manager.model_upload_origin("https://other.test", "test-broker-token")
+        assert not manager.model_upload_origin("https://broker.test", "wrong-token")
+        (tmp_path / "runtime.json").write_text('{"local_port":80,"hostname":"broker.test"}')
+        assert not manager.model_upload_origin("https://broker.test", "test-broker-token")
+        health.assert_not_called()
+
+
 def test_controller_process_uses_no_console_and_fixed_commands(tmp_path):
     manager = LocalBrokerManager(tmp_path)
     with patch("omni_tts_core.remote_compute.local_broker.subprocess.run") as run:
